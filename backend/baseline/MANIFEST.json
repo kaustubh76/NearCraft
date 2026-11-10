@@ -1,0 +1,51 @@
+{
+  "note": "Vendored unchanged from EthCraft/AgentCity. Baseline per NEAR HACKATHON Q-005; not judged work. See BASELINE.md.",
+  "origin": "EthCraft / AgentCity (Unichain Sepolia, Uniswap v4). No NEAR code existed in that project.",
+  "files": {
+    "playable/survival-objectives.mjs": {
+      "lines": 277,
+      "sha256": "bfaf2c9fd7867fbd61055c71b946611ee7ae6c2ee8bc24843a956d1bf5cd5fb2"
+    },
+    "playable/survival-tools.mjs": {
+      "lines": 262,
+      "sha256": "7ab517991163d4418c220be7dc43aca0e39ad207c36a83cf2433546be1e680ee"
+    },
+    "playable/adaptive-planner.mjs": {
+      "lines": 78,
+      "sha256": "73ad6632a65bcec99989a8d675da934ba409c12849dcf76484516650286ce8f4"
+    },
+    "playable/intent-planner.mjs": {
+      "lines": 304,
+      "sha256": "dcc3a5b47616c352458953528c9f0bb5a90112c4203200a3727a45b420424434"
+    },
+    "playable/task-tools.mjs": {
+      "lines": 726,
+      "sha256": "b7efc2f93f4436a833b685e6e70b5abce3a888f8ce20fadec07b8fef68997a3a"
+    },
+    "bot/checkpoint-store.cjs": {
+      "lines": 56,
+      "sha256": "bd857c0b57ca4533c5bde3eb643b99500c35c98fd107b6ce865014c4702654e4"
+    },
+    "inference/anthropic.mjs": {
+      "lines": 86,
+      "sha256": "013a8c507fb3be76944e7daff372155c23ba857a6f80d4247ce503a8ef07c3d2"
+    },
+    "inference/anthropic-budget.mjs": {
+      "lines": 125,
+      "sha256": "3ea6d54f681cc8023594cf017e0d02e6b2be505f269a9b99f1399e592b0ce998"
+    },
+    "inference/zero-g.mjs": {
+      "lines": 83,
+      "sha256": "1c5e268f748a6ca282cadeae2838584e3fc4273df2902aa1a941c56bb7415732"
+    },
+    "inference/zero-g-budget.mjs": {
+      "lines": 157,
+      "sha256": "442fddea8a612d07357d85e04146d9a47adb1a85444caf917b26bf52be625609"
+    },
+    "inference/providers.mjs": {
+      "lines": 54,
+      "sha256": "f220fca5300b1befa41819dd843089d6370ecb232e5896304f0c616a42b29df4"
+    }
+  },
+  "layout": "Mirrors the origin project's backend/src/ subtree (playable/, inference/, bot/) so every relative import resolves with the files byte-identical. Nothing here is edited; that is the point."
+}
