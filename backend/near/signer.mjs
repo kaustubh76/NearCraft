@@ -24,6 +24,11 @@ export class HumanApprovalRequired extends Error {
   }
 }
 
+/// The transaction hash out of a raw outcome, whichever shape the RPC used.
+export function transactionHash(outcome) {
+  return outcome?.transaction?.hash ?? outcome?.transaction_outcome?.id ?? null
+}
+
 /// Gas for one `buy_with_credit`, which makes one cross-contract call and one
 /// callback. Drawn from the key's allowance, which is gas-only.
 const GAS = 60_000_000_000_000n
@@ -121,7 +126,7 @@ export function createAgentSigner({ policy, secretKey, rpcUrl = 'https://test.rp
     pending = id
     log({ event: 'authorized', agent: policy.agentId, intent: id })
     try {
-      const outcome = await account.callFunction({
+      const outcome = await account.callFunctionRaw({
         contractId: intent.contractId,
         methodName: intent.methodName,
         args: intent.args,
@@ -167,7 +172,7 @@ export function createAgentSigner({ policy, secretKey, rpcUrl = 'https://test.rp
     pending = id
     log({ event: 'human_approved', agent: policy.agentId, intent: id })
     try {
-      const outcome = await account.callFunction({
+      const outcome = await account.callFunctionRaw({
         contractId: held.intent.contractId, methodName: held.intent.methodName,
         args: held.intent.args, gas: GAS, deposit: 0n,
       })

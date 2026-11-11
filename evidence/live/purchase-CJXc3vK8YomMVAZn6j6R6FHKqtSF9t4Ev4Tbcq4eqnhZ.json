@@ -1,0 +1,20 @@
+{
+  "note": "A real agent purchase on public NEAR testnet, signed with a function-call access key scoped to buy_with_credit.",
+  "recorded_at": "2026-11-11T17:07:52.495Z",
+  "network": "testnet",
+  "rpc": "https://test.rpc.fastnear.com",
+  "economy_scale": 0.01,
+  "agent": "worker-1.nearcraftmc.testnet",
+  "market": "market.nearcraftmc.testnet",
+  "merchant": "ironmonger.nearcraftmc.testnet",
+  "item": "iron_ingot",
+  "count": 2,
+  "transaction_hash": "CJXc3vK8YomMVAZn6j6R6FHKqtSF9t4Ev4Tbcq4eqnhZ",
+  "explorer": "https://testnet.nearblocks.io/txns/CJXc3vK8YomMVAZn6j6R6FHKqtSF9t4Ev4Tbcq4eqnhZ",
+  "balances": {
+    "iron_before": "0",
+    "iron_after": "2",
+    "credit_before": "50000000000000000000000",
+    "credit_after": "42000000000000000000000"
+  }
+}

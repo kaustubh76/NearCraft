@@ -10,7 +10,7 @@
 //
 // Nothing here edits a previous record. Each run gets its own directory.
 
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 
@@ -111,6 +111,27 @@ for (const check of CHECKS) {
   records.push(record)
 }
 
+/// The retained live-write records, summarised into the index so a reader does
+/// not have to go looking for the transaction hashes.
+async function liveTransactions() {
+  try {
+    const dir = new URL('evidence/live/', ROOT)
+    const files = (await readdir(dir)).filter((f) => f.endsWith('.json')).sort()
+    return Promise.all(files.map(async (f) => {
+      const r = JSON.parse(await readFile(new URL(f, dir), 'utf8'))
+      return {
+        transaction_hash: r.transaction_hash,
+        what: `${r.agent} bought ${r.count}x ${r.item} from ${r.merchant}`,
+        explorer: r.explorer,
+        path: `evidence/live/${f}`,
+      }
+    }))
+  } catch {
+    // Absent is a legitimate state: a fresh clone has sent no transactions.
+    return []
+  }
+}
+
 const summary = {
   note: 'Written by npm run evidence. Each run keeps its own directory; failures are retained alongside passes and are never edited out.',
   recorded_at: started.toISOString(),
@@ -125,11 +146,13 @@ const summary = {
   // to infer it.
   boundaries: [
     'Most of these run locally, against a nearcore sandbox. The two topics named live-testnet-* are real, credential-free reads of the deployed contracts on public NEAR testnet.',
-    'Those live reads are VIEW calls only. No public-chain transaction is sent by any check here, so nothing below is evidence of live write behaviour.',
+    'Those live reads are VIEW calls only. No check in this script sends a transaction, so no record below is evidence of live write behaviour.',
+    'Live write behaviour is evidenced separately, by the retained records in evidence/live/ — each names a real transaction hash on public testnet that anyone can open on an explorer. Those were produced by npm run live:agent, which is deliberately not part of this script because it spends real testnet balance.',
     'The live deployment runs at a reduced economy scale (see economy_scale in deployment.json); its figures are not the full-size economy the sandbox runs.',
     'No Minecraft gameplay is recorded; the plugin is not exercised by any check here.',
     'A passing check establishes what its own output shows and nothing wider.',
   ],
+  live_transactions: await liveTransactions(),
   runs: records.map((r) => ({ topic: r.topic, status: r.status, path: `evidence/runs/${r.topic}/${stamp}/` })),
 }
 await writeFile(new URL(`evidence/SUMMARY.json`, ROOT), JSON.stringify(summary, null, 2) + '\n')

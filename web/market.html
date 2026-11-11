@@ -77,6 +77,17 @@
   </footer>
 </div>
 <script>
+// Live-first, snapshot as fallback.
+//
+// This page reads the DEPLOYED market contract over plain JSON-RPC. It imports
+// the same reader the backend uses (backend/near/market.mjs) rather than
+// carrying its own copy of the read logic, so the prices a judge sees here and
+// the prices the Minecraft plugin sees cannot diverge.
+//
+// A classic script with a dynamic import, not <script type="module">: if the
+// import fails (opened over file://, or served without the repo root) a module
+// script would fail silently and leave the page saying "Loading…" forever.
+// This way every failure path still renders an explanation.
 const $ = (s) => document.querySelector(s);
 const near = (y) => {
   // Amounts arrive as yoctoNEAR strings. BigInt, because 10^24 does not fit a double.
@@ -86,21 +97,88 @@ const near = (y) => {
 };
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-function render(d) {
+const stats = (pairs) => '<div class="stats">' + pairs.map(([n, k]) =>
+  '<div class="stat"><div class="n">' + esc(n) + '</div><div class="k">' + esc(k) + '</div></div>').join('') + '</div>';
+
+/// One material's quote table. Shared by the live and snapshot paths so the two
+/// render identically and neither can quietly present a nicer view than the other.
+function quoteTable(item, rows) {
+  let html = '<div class="material"><h3>' + esc(item) + '</h3><table><thead><tr>' +
+    '<th>Merchant</th><th class="n">Ask</th><th class="n">Bid</th>' +
+    '<th class="n">Stock</th><th>Band</th><th class="n">Demand</th></tr></thead><tbody>';
+  for (const q of rows) {
+    html += '<tr><td>' + esc(q.merchantName) + '</td>' +
+      '<td class="n">' + near(q.unitPrice) + '</td>' +
+      '<td class="n">' + (q.bid ? near(q.bid) : '&mdash;') + '</td>' +
+      '<td class="n">' + esc(q.stock) + '</td><td>' + esc(q.band) + '</td>' +
+      '<td class="n">' + (q.demandBps == null ? '&mdash;' : (Number(q.demandBps) / 10000).toFixed(2) + '&times;') +
+      '</td></tr>' +
+      '<tr><td colspan="6" class="reason">' + esc(q.reason) + '</td></tr>';
+  }
+  return html + '</tbody></table></div>';
+}
+
+// ------------------------------------------------------------------ live
+
+async function renderLive(deployment, reader) {
+  // Materials come from the items contract itself rather than a hardcoded list,
+  // so a material added on-chain shows up here without editing this page.
+  const mats = await reader.materials();
+  const merchants = await reader.merchants();
+  const quotesFor = {};
+  for (const item of mats) quotesFor[item] = await reader.quotes(item, 1);
+
+  // A merchant is closed when it posts no bid on anything it stocks — the
+  // contract's own definition, recomputed here from the quotes rather than
+  // guessed from the treasury.
+  const bidding = new Set();
+  let units = 0;
+  for (const rows of Object.values(quotesFor)) {
+    for (const q of rows) { if (q.buying) bidding.add(q.merchantId); units += q.stock; }
+  }
+
+  const link = 'https://testnet.nearblocks.io/address/' + encodeURIComponent(deployment.contracts.market);
+  $('#banner').innerHTML =
+    '<strong>Live from NEAR testnet.</strong> Every number below was read from ' +
+    '<code>' + esc(deployment.contracts.market) + '</code> just now, over public RPC with no API key. ' +
+    '<a href="' + link + '" target="_blank" rel="noopener">Open the contract on NEAR Blocks</a> to check it. ' +
+    'Figures are scaled by <code>economy_scale ' + esc(String(deployment.economy_scale)) + '</code> &mdash; see the README.';
+
+  let html = '<h2>The deployment</h2>' + stats([
+    [merchants.length, 'merchants'], [mats.length, 'materials'],
+    [units, 'units in stock'], [bidding.size + '/' + merchants.length, 'merchants buying'],
+  ]);
+
+  html += '<h2>Merchants</h2><table><thead><tr><th>Merchant</th><th>Account</th>' +
+    '<th class="n">Treasury</th><th class="n">Floor</th><th>Buying?</th></tr></thead><tbody>' +
+    merchants.map(([id, m]) =>
+      '<tr><td>' + esc(m.name) + '</td><td class="acct">' + esc(id) + '</td>' +
+      '<td class="n">' + near(m.treasury) + '</td><td class="n">' + near(m.floor) + '</td>' +
+      '<td><span class="pill ' + (bidding.has(id) ? 'open">open' : 'shut">closed') +
+      '</span></td></tr>').join('') + '</tbody></table>';
+
+  html += '<h2>Quotes, cheapest first</h2>';
+  for (const item of mats) {
+    if (!quotesFor[item].length) continue;
+    html += quoteTable(item, quotesFor[item]);
+  }
+  $('#main').innerHTML = html;
+}
+
+// -------------------------------------------------------------- snapshot
+
+function renderSnapshot(d, why) {
   const when = new Date((d.generated_at_unix || 0) * 1000);
   $('#banner').innerHTML =
-    '<strong>This is a simulation snapshot, not live chain data.</strong> ' +
-    esc(d.note || '') + ' Generated ' + esc(when.toISOString().replace('T', ' ').slice(0, 16)) +
-    ' UTC on ' + esc(d.network || 'unknown') + '. Nothing is deployed to NEAR testnet yet, so there is no live market to read.';
+    '<strong>This is a retained simulation snapshot, not live chain data.</strong> ' +
+    esc(why) + ' ' + esc(d.note || '') + ' Generated ' +
+    esc(when.toISOString().replace('T', ' ').slice(0, 16)) + ' UTC on ' + esc(d.network || 'unknown') + '.';
 
-  const stats = [
+  let html = '<h2>The run</h2>' + stats([
     [d.purchases, 'purchases'], [d.sell_backs, 'sell-backs'],
     [near(d.volume_yocto || '0'), 'NEAR volume'], [d.rounds, 'rounds'],
     [d.buyers, 'buyers'], [d.wall_clock_seconds + 's', 'wall clock'],
-  ];
-  let html = '<h2>The run</h2><div class="stats">' +
-    stats.map(([n, k]) => '<div class="stat"><div class="n">' + esc(n) + '</div><div class="k">' + esc(k) + '</div></div>').join('') +
-    '</div>';
+  ]);
 
   html += '<h2>Merchants</h2><table><thead><tr><th>Merchant</th><th>Account</th>' +
           '<th class="n">Treasury</th><th>Buying?</th></tr></thead><tbody>' +
@@ -111,20 +189,15 @@ function render(d) {
 
   html += '<h2>Quotes, cheapest first</h2>';
   for (const mat of d.materials || []) {
-    const rows = [...(mat.quotes || [])].sort((a, b) =>
-      BigInt(a.unit_price) < BigInt(b.unit_price) ? -1 : 1);
-    html += '<div class="material"><h3>' + esc(mat.item) + '</h3><table><thead><tr>' +
-      '<th>Merchant</th><th class="n">Ask</th><th class="n">Bid</th>' +
-      '<th class="n">Stock</th><th>Band</th><th class="n">Demand</th></tr></thead><tbody>';
-    for (const q of rows) {
-      html += '<tr><td>' + esc(q.merchant_name) + '</td>' +
-        '<td class="n">' + near(q.unit_price) + '</td>' +
-        '<td class="n">' + (q.merchant_bid ? near(q.merchant_bid) : '—') + '</td>' +
-        '<td class="n">' + esc(q.stock) + '</td><td>' + esc(q.band) + '</td>' +
-        '<td class="n">' + (Number(q.demand_bps) / 10000).toFixed(2) + '×</td></tr>' +
-        '<tr><td colspan="6" class="reason">' + esc(q.reason) + '</td></tr>';
-    }
-    html += '</tbody></table></div>';
+    // Normalise the snapshot's snake_case into the same shape the live reader
+    // returns, so quoteTable renders both.
+    const rows = [...(mat.quotes || [])]
+      .sort((a, b) => (BigInt(a.unit_price) < BigInt(b.unit_price) ? -1 : 1))
+      .map((q) => ({
+        merchantName: q.merchant_name, unitPrice: q.unit_price, bid: q.merchant_bid ?? null,
+        stock: q.stock, band: q.band, demandBps: q.demand_bps, reason: q.reason,
+      }));
+    html += quoteTable(mat.item, rows);
   }
 
   if ((d.strategies || []).length) {
@@ -138,19 +211,43 @@ function render(d) {
   $('#main').innerHTML = html;
 }
 
-fetch('market-snapshot.json')
-  .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() })
-  .then(render)
-  .catch((e) => {
+// ------------------------------------------------------------------ boot
+
+(async () => {
+  let liveError = 'The live read failed.';
+  try {
+    const deployment = await fetch('../deployment.json').then((r) => {
+      if (!r.ok) throw new Error('deployment.json: HTTP ' + r.status);
+      return r.json();
+    });
+    const { createMarketReader } = await import('../backend/near/market.mjs');
+    await renderLive(deployment, createMarketReader({
+      marketContract: deployment.contracts.market,
+      itemsContract: deployment.contracts.items,
+      rpcUrl: deployment.rpc,
+    }));
+    return;
+  } catch (e) {
+    liveError = 'The live read failed (' + e.message + ').';
+  }
+
+  try {
+    renderSnapshot(await fetch('market-snapshot.json').then((r) => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }), liveError);
+  } catch (e) {
     // Say what is wrong and how to fix it, rather than showing an empty page.
-    $('#banner').textContent = 'No snapshot found.';
-    $('#main').innerHTML = '<div class="err"><p><strong>market-snapshot.json could not be read (' +
-      esc(e.message) + ').</strong></p><p>Generate it by running the economy simulation:</p>' +
-      '<p><code>npm run build:contracts &amp;&amp; npm run sim</code></p>' +
-      '<p>Opening this file directly with <code>file://</code> may also be blocked by the browser\'s ' +
-      'same-origin policy. Serve the folder instead: <code>npx serve web</code>, or ' +
-      '<code>python3 -m http.server -d web</code>.</p></div>';
-  });
+    $('#banner').textContent = 'Neither live chain data nor a snapshot could be read.';
+    $('#main').innerHTML = '<div class="err"><p><strong>' + esc(liveError) + '</strong></p>' +
+      '<p><strong>And market-snapshot.json could not be read either (' + esc(e.message) + ').</strong></p>' +
+      '<p>This page imports a module and reads sibling files, so the browser\'s same-origin policy ' +
+      'blocks it over <code>file://</code>. Serve the repository root instead:</p>' +
+      '<p><code>npm run web</code></p>' +
+      '<p>For the offline snapshot, generate it first with ' +
+      '<code>npm run build:contracts &amp;&amp; npm run sim</code>.</p></div>';
+  }
+})();
 </script>
 </body>
 </html>

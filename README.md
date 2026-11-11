@@ -30,7 +30,8 @@ column before the description.
 | **Sandbox integration tests** | **Built and passing.** A real local NEAR node via `near-workspaces`. 12 tests: 4 prove a restricted key's limits *at the protocol level*, 6 cover the cross-contract buy/sell/rollback paths, 1 runs the economy, 1 proves the node starts. |
 | **Deployed to NEAR testnet** | **Yes.** `items.nearcraftmc.testnet`, `market.nearcraftmc.testnet`, `guard.nearcraftmc.testnet` — 5 merchants, 2 agents, 1 player. `npm run reads` and `npm run keys` query it with no credentials. |
 | The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls. `npm run sim` |
-| `web/market.html` | **Built.** Every merchant's ask, bid, stock band and the contract's own reason string. No external dependencies. |
+| `web/market.html` | **Built, and reads the live chain.** Every merchant's ask, bid, stock band and the contract's own reason string, read from the deployed contract over public RPC with no API key. Falls back to the retained simulation snapshot when offline, and says which it is showing. 8 tests. `npm run web` |
+| **A real agent transaction on public testnet** | **Done.** [`CJXc3vK8Yom…`](https://testnet.nearblocks.io/txns/CJXc3vK8YomMVAZn6j6R6FHKqtSF9t4Ev4Tbcq4eqnhZ) — an agent signing with a `buy_with_credit`-scoped key, after being parked for human approval. `npm run live:agent`, retained in `evidence/live/`. |
 | `npm run agent` — an agent shopping end to end | **Built and runnable.** An agent with a scoped key on a real node: an unknown merchant parked for a human, the same merchant clearing itself once trust accrued, and a prompt-injected objective **blocked** by the on-chain guard. |
 | `AGENTS.md` | **Written.** Repo instructions and the claims policy, for the AI judges the organisers named. |
 | `evidence/` | **Built.** `npm run evidence` retains each check's real output with its exit code and an output hash. Failures are kept, not edited out. |
@@ -51,7 +52,22 @@ guard    guard.nearcraftmc.testnet
 ```sh
 npm run reads     # every merchant's ask, bid, stock band and the contract's own reason
 npm run keys      # each agent key's receiver, method list and allowance, from the chain
+npm run web       # the market page, reading those same contracts live in a browser
 ```
+
+**And a real transaction to open.** An agent bought 2 iron from Ironmonger on
+public testnet, signing with a key scoped to `buy_with_credit`:
+
+```
+CJXc3vK8YomMVAZn6j6R6FHKqtSF9t4Ev4Tbcq4eqnhZ
+https://testnet.nearblocks.io/txns/CJXc3vK8YomMVAZn6j6R6FHKqtSF9t4Ev4Tbcq4eqnhZ
+```
+
+That run is reproducible with `npm run live:agent` and is retained in
+`evidence/live/`. Before sending it, the same agent tried `withdraw` and the
+protocol refused it with `MethodNameMismatch` — no transaction, no gas. The
+counterparty check then returned **warn** for a merchant it had never dealt
+with, parked the purchase for a human, and only signed once approved.
 
 **One thing to know about the figures.** A testnet faucet account holds 10 NEAR
 and the three contracts stake about 5.7 of it in storage, so the full-size
@@ -287,14 +303,28 @@ assumption we had started from:
 ### Look at the market
 
 ```sh
-npm run build:contracts && npm run sim    # writes web/market-snapshot.json
-python3 -m http.server -d web             # then open localhost:8000/market.html
+npm run web      # then open localhost:8080
 ```
 
 Every merchant's ask, bid, stock band and — under each row — the contract's own
-explanation of the price. The page states plainly that it is a simulation
-snapshot rather than live chain data, because until something is deployed that
-is what it is.
+explanation of the price. **The page reads the deployed contracts**: it imports
+the same `backend/near/market.mjs` reader the Minecraft plugin uses, over plain
+JSON-RPC with no API key, so the prices a judge sees here and the prices a
+player sees in-game cannot diverge.
+
+With no network it falls back to the retained simulation snapshot and **says so
+in the banner, naming the error** — a silent fallback would be the page lying by
+omission. To regenerate that snapshot:
+
+```sh
+npm run build:contracts && npm run sim    # writes web/market-snapshot.json
+```
+
+The server exists because the page imports a module, which a browser will not
+resolve over `file://`. It serves only `web/`, `backend/` and `deployment.json`
+— deliberately not the repository root, because `.local/` is in the root and
+holds the deploying account's private key. A test asserts it cannot be talked
+into serving that.
 
 ### Keep the evidence
 

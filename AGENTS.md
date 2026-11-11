@@ -18,10 +18,10 @@ key or a Minecraft server.
 
 ```sh
 npm install
-npm test                     # 158 offline checks, ~2s
+npm test                     # 183 offline checks, ~5s
 ```
 
-That is 90 Rust unit tests (`contracts/`), 68 Node tests (`tests/near/`) and the
+That is 90 Rust unit tests (`contracts/`), 82 Node tests (`tests/near/`) and the
 11 baseline hash checks. Then, after building the wasm:
 
 ```sh
@@ -37,6 +37,20 @@ npm run evidence                   # re-record every check's real output
 ```
 
 `npm run agent` is the single best summary of what this project does.
+
+Against the live deployment on public testnet (no credentials needed for the
+reads):
+
+```sh
+npm run reads                # every merchant's ask, bid, band and reason, from the chain
+npm run keys                 # each agent key's receiver, methods and allowance
+npm run web                  # the market page, reading those contracts live in a browser
+npm run live:agent           # ← SPENDS real testnet balance. Needs .local/ keys.
+```
+
+`npm run live:agent` is the only command here that sends a transaction. It is
+kept out of `npm run evidence` for that reason; its retained records live in
+`evidence/live/`, each naming a transaction hash anyone can open on an explorer.
 
 ## Layout
 
@@ -99,6 +113,12 @@ baseline project, where it was the thing that made the evidence worth reading.
 - **An empty `method_names` means *any method on that contract*.** near-api-js
   defaults it to `[]`. Always pass it explicitly. `npm run keys` exits non-zero
   if it ever finds an unrestricted key.
+- **An agent has three separate pots and conflating them wastes an afternoon.**
+  (1) its *spend budget*, credited inside the market contract; (2) its *key
+  allowance*, capping gas the key may authorise; (3) its *account balance*,
+  which must actually cover each call's prepaid gas. A live agent with ample
+  budget and allowance still failed to send, because 0.05 NEAR of account
+  balance could not prepay a 60 TGas call (~0.061 NEAR).
 - **The key allowance is a per-call ceiling against *prepaid* gas**, drawn down
   by gas actually burned. `max_gas()` demands ~1 NEAR of headroom and kills a
   modest allowance immediately. Agent calls use 60 TGas.

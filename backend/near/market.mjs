@@ -8,8 +8,6 @@
 // shapes being exactly right and a wrong one is invisible until a player loses
 // an item.
 
-import { JsonRpcProvider } from 'near-api-js'
-
 /// Gas for a player purchase: one cross-contract mt_transfer plus the rollback
 /// callback. Players sign with a full-access key so there is no allowance
 /// ceiling to respect, unlike an agent (see policy.mjs).
@@ -140,6 +138,10 @@ export function menuRows(quotes) {
       buying: q.merchant_bid != null,
       stock: Number(q.stock),
       band: q.band,
+      // The multiplier the price rule applied for recent demand. The web page
+      // shows it beside the ask so a reader can check the reason string against
+      // the number it was built from.
+      demandBps: q.demand_bps ?? null,
       closed: Boolean(q.closed),
       reason: q.reason,
     }))
@@ -156,20 +158,77 @@ export function displayNear(yocto) {
 
 // ------------------------------------------------------------------ runtime
 
-/// Read-only market client. Needs no key and no credentials.
+/// A NEAR view call over plain JSON-RPC.
+///
+/// Deliberately written with `fetch` rather than near-api-js so this module has
+/// no imports at all and the same code runs in Node and in the browser. The
+/// alternative — a second copy of the read logic inside web/market.html — is the
+/// duplication that bit us once already with the onboarding bootstrap.
+async function viewCall(rpcUrl, { contractId, method, args }) {
+  const bytes = new TextEncoder().encode(JSON.stringify(args))
+  let binary = ''
+  for (const b of bytes) binary += String.fromCharCode(b)
+
+  const res = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'nearcraft',
+      method: 'query',
+      params: {
+        request_type: 'call_function',
+        finality: 'final',
+        account_id: contractId,
+        method_name: method,
+        args_base64: btoa(binary),
+      },
+    }),
+  })
+  if (!res.ok) throw new MarketRequestError('RPC_HTTP_ERROR', `${res.status} ${res.statusText}`)
+
+  const body = await res.json()
+  // Two distinct failure shapes: a transport/node-level error at the top level,
+  // and a contract panic nested under result.error. Both must surface, because
+  // a silently-empty read would render an empty market that looks deployed.
+  if (body.error) {
+    throw new MarketRequestError('RPC_ERROR', body.error.data?.toString?.() ?? JSON.stringify(body.error))
+  }
+  if (body.result?.error) throw new MarketRequestError('CONTRACT_ERROR', body.result.error)
+  if (!Array.isArray(body.result?.result)) throw new MarketRequestError('RPC_RESULT_MALFORMED')
+
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(body.result.result)))
+}
+
+/// Read-only market client. Needs no key and no credentials, and runs in both
+/// Node and the browser.
 export function createMarketReader({ marketContract, itemsContract, rpcUrl = 'https://test.rpc.fastnear.com' }) {
-  const provider = new JsonRpcProvider({ url: rpcUrl })
   return Object.freeze({
+    rpcUrl,
     async quotes(item, count) {
-      const { contractId, method, args } = quotesRequest({ marketContract, item, count })
-      return menuRows(await provider.callFunction({ contractId, method, args }))
+      return menuRows(await viewCall(rpcUrl, quotesRequest({ marketContract, item, count })))
     },
     async merchants() {
-      return provider.callFunction({ contractId: marketContract, method: 'merchants', args: {} })
+      return viewCall(rpcUrl, {
+        contractId: requireAccount(marketContract, 'MARKET_CONTRACT_MALFORMED'),
+        method: 'merchants',
+        args: {},
+      })
+    },
+    /// Every material the items contract knows about. Read from the chain rather
+    /// than a hardcoded list, so a material minted later needs no code change.
+    async materials() {
+      const tokens = await viewCall(rpcUrl, {
+        contractId: requireAccount(itemsContract, 'ITEMS_CONTRACT_MALFORMED'),
+        method: 'mt_tokens',
+        args: { from_index: '0', limit: 64 },
+      })
+      if (!Array.isArray(tokens)) throw new MarketRequestError('TOKENS_NOT_AN_ARRAY')
+      return tokens.map((t) => t.token_id)
     },
     async heldBy(accountId, tokenIds) {
-      return provider.callFunction({
-        contractId: itemsContract,
+      return viewCall(rpcUrl, {
+        contractId: requireAccount(itemsContract, 'ITEMS_CONTRACT_MALFORMED'),
         method: 'mt_batch_balance_of',
         args: { account_id: requireAccount(accountId, 'ACCOUNT_MALFORMED'), token_ids: tokenIds.map(requireItem) },
       })

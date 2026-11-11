@@ -125,7 +125,7 @@
     "fund_near": "3"
   },
   "players": {
-    "note": "Players get a scoped key and a one-time NEP-245 approval so they can sell without ever holding a full-access key. See docs/GASLESS.md.",
+    "note": "Players are onboarded through backend/near/onboarding.mjs: an account derived from a verified identity, a one-time NEP-245 approval granted while a bootstrap full-access key exists, then that key deleted in the same transaction that installs the scoped one. Seeded demo players use a `seed:` provider so their ids derive exactly as a real login's would. See docs/GASLESS.md.",
     "methods": [
       "buy_with_credit",
       "sell"
@@ -141,6 +141,9 @@
       "redstone"
     ],
     "budget_near": "2",
-    "gas_allowance_near": "2"
+    "gas_allowance_near": "2",
+    "seed_subjects": [
+      "player-1"
+    ]
   }
 }

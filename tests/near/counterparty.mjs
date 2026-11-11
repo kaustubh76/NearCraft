@@ -28,24 +28,48 @@ test('a known, well-used counterparty with history is allowed', () => {
   assert.match(r.reasons[0], /9 prior successful interactions/)
 })
 
-// The single most important property. A permissionless list is sybil-reportable,
-// so three colluding accounts must not be able to cut someone off.
-test('reports alone can never reach block, however many there are', () => {
+// A permissionless list is sybil-reportable, so colluding accounts must not be
+// able to cut off someone we have actually dealt with successfully.
+test('reports do not block an account our own dealings vouch for', () => {
   for (const distinctReporters of [3, 10, 500]) {
     const r = score(trusted({
+      // trusted() carries 9 prior successful interactions.
       guard: { distinctReporters, atOrOverThreshold: true, threshold: 3, reasons: ['scam'] },
     }))
-    assert.equal(r.verdict, WARN, `${distinctReporters} reporters must warn, not block`)
+    assert.equal(r.verdict, WARN, `${distinctReporters} reporters must warn, not block, against a history`)
     assert.ok(
-      r.reasons.some((x) => /no independent signal corroborates/.test(x)),
+      r.reasons.some((x) => /prior successful interactions with it, which contradicts the reports/.test(x)),
       'the verdict must say why it stopped short of blocking',
     )
   }
 })
 
-test('reports plus an independent adverse signal do block', () => {
+// The converse, and the property that running the agent twice exposed:
+// familiarity must not launder a reported account.
+test('reports block an account with no history, seen before or not', () => {
+  for (const firstSeenBlockHeight of [null, 10]) {
+    const r = score(trusted({
+      guard: { distinctReporters: 3, atOrOverThreshold: true, threshold: 3, reasons: ['drained an agent'] },
+      priorInteractions: null,
+      firstSeenBlockHeight,
+    }))
+    assert.equal(r.verdict, BLOCK,
+      `a reported account with no dealings must block (firstSeen=${firstSeenBlockHeight})`)
+  }
+})
+
+test('a thin history is not enough to soften reports', () => {
+  const r = score(trusted({
+    guard: { distinctReporters: 3, atOrOverThreshold: true, threshold: 3, reasons: ['scam'] },
+    priorInteractions: { count: 1, lastBlockHeight: 5 },
+  }))
+  assert.equal(r.verdict, BLOCK, 'one dealing does not outweigh three reporters')
+})
+
+test('reports plus an independent adverse signal still block, with both named', () => {
   const r = score(trusted({
     guard: { distinctReporters: 3, atOrOverThreshold: true, threshold: 3, reasons: ['drained an agent'] },
+    priorInteractions: null,
     codeChangedSinceFirstSeen: true,
   }))
   assert.equal(r.verdict, BLOCK)
@@ -207,9 +231,10 @@ test('the guard contract\'s snake_case answer is understood', () => {
   assert.equal(g.atOrOverThreshold, true)
   assert.equal(g.threshold, 3)
 
-  // And the whole point: it must now actually reach a verdict.
-  const r = score(trusted({ guard: g, codeChangedSinceFirstSeen: true }))
-  assert.equal(r.verdict, BLOCK, 'a reported, corroborated account must block')
+  // And the whole point: it must now actually reach a verdict. No prior
+  // dealings, so nothing vouches for the account and the reports stand.
+  const r = score(trusted({ guard: g, priorInteractions: null, codeChangedSinceFirstSeen: true }))
+  assert.equal(r.verdict, BLOCK, 'a reported account with no history must block')
 })
 
 test('an unreported account from the chain scores clean', () => {

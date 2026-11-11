@@ -29,7 +29,7 @@ import { planningRoute } from '../backend/baseline/playable/adaptive-planner.mjs
 import { validateSurvivalTool } from '../backend/baseline/playable/survival-tools.mjs'
 import { agentPolicy } from '../backend/near/policy.mjs'
 import { createAgentSigner, HumanApprovalRequired, PolicyRefusal } from '../backend/near/signer.mjs'
-import { createCounterpartyService, createMemoryLedger } from '../backend/near/counterparty.mjs'
+import { createCounterpartyService, createFileLedger } from '../backend/near/counterparty.mjs'
 
 const near = (n) => BigInt(n) * 10n ** 24n
 const yocto = (y) => (Number(BigInt(y) / 10n ** 20n) / 10_000).toFixed(4)
@@ -102,7 +102,15 @@ try {
   })
   await root.callFunction({ contractId: market.id, methodName: 'fund_credit', args: { account_id: agent.id }, deposit: near(3), gas: teraToGas('30') })
 
-  const ledger = createMemoryLedger()
+  // Persisted, not in-memory. Signals 1 and 3 — first-seen and prior
+  // interactions — are the only ones that can *earn* trust, and they are
+  // worthless if they evaporate when the process exits. Run this script twice:
+  // the merchant that needed a human the first time clears on its own the
+  // second. The sandbox reuses the same account ids each run, so the history
+  // genuinely carries over.
+  const ledgerPath = new URL('../.local/counterparty-ledger.json', import.meta.url)
+  const ledger = createFileLedger(ledgerPath)
+  const priorRun = await ledger.interactions(agent.id, ironmonger.id)
   const counterparty = createCounterpartyService({
     provider, guardContract: guard.id, ledger, denylist: [],
   })
@@ -123,6 +131,7 @@ try {
   say(`  key        function-call only → ${market.id}, methods [buy_with_credit]`)
   say(`  budget     ${yocto(await view(market.id, 'credit_of', { account_id: agent.id }))} NEAR of credit`)
   say(`  guard      ${guard.id} (public blocklist, 3 reports on ${rogue.id})`)
+  say(`  ledger     ${priorRun ? `${priorRun.count} prior interaction(s) remembered from an earlier run` : 'empty — first run'}`)
   say('')
 
   /// Run one objective through every layer, printing each decision.

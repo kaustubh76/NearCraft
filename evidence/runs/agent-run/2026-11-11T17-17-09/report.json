@@ -1,0 +1,12 @@
+{
+  "topic": "agent-run",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 11041,
+  "command": "npm run --silent agent",
+  "cwd": ".",
+  "proves": "An agent with a scoped key shopping on a real nearcore node, end to end: an unknown counterparty parked for a human and approved, the same counterparty clearing on its own once trust accrued, and a prompt-injected objective BLOCKED because the public guard contract has corroborated reports against the account it names. Every layer is the real one, including two vendored baseline modules.",
+  "output_sha256": "74193ac4d0af5f3ded07c28bba08e88a82ef0f6db45f3fbd465e212967467b07",
+  "output_bytes": 3403,
+  "recorded_at": "2026-11-11T17:17:27.432Z"
+}

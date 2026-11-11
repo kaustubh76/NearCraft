@@ -87,20 +87,32 @@ export function score(signals) {
   const fresh = s.exists !== false && typeof s.storageUsage === 'number' && s.storageUsage < FRESH_STORAGE_BYTES
   if (fresh && unseen) adverse.push(`barely-used account, never seen before (${s.storageUsage} bytes of storage)`)
 
+  // Established trust means *our own* successful dealings, not familiarity.
+  const trusted = prior && prior.count >= INTERACTIONS_FOR_TRUST
+
   if (guard.atOrOverThreshold) {
     const why = `${guard.distinctReporters} distinct accounts reported this one (threshold ${guard.threshold})`
-    if (adverse.length) {
+    // Block when reports stand and nothing vouches for the account. Earlier
+    // this required an *independent adverse* signal, which running the agent
+    // twice showed to be wrong: once the service had merely *seen* the account,
+    // the "never seen before" signal stopped firing and a reported account
+    // degraded from block to warn. Familiarity is not evidence of good faith.
+    // What should hold reports off is a record of dealings that contradicts
+    // them — so that, and only that, softens this to a warning.
+    if (!trusted) {
       return verdict(BLOCK, [why, ...adverse], s)
     }
-    // Reported, but nothing independent agrees. Deliberately not a block.
-    reasons.push(`${why} — but no independent signal corroborates it, so this is a warning rather than a block`)
+    reasons.push(
+      `${why} — but this agent has ${prior.count} prior successful interactions with it, ` +
+      'which contradicts the reports, so a human should decide rather than this being an outright block',
+    )
   } else if (guard.distinctReporters > 0) {
     reasons.push(`${guard.distinctReporters} account(s) reported this one, below the threshold of ${guard.threshold}`)
   }
 
   reasons.push(...adverse)
 
-  if (prior && prior.count >= INTERACTIONS_FOR_TRUST && reasons.length === 0) {
+  if (trusted && reasons.length === 0) {
     return verdict(ALLOW, [`${prior.count} prior successful interactions and nothing adverse`], s)
   }
   if (!prior || prior.count === 0) {

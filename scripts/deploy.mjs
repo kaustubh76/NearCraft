@@ -13,6 +13,7 @@
 import { writeFile, mkdir, readFile, chmod } from 'node:fs/promises'
 import { Account, KeyPair, actions, teraToGas } from 'near-api-js'
 import { catalog, fromYocto, names, provider, rootAccount, rootAccountId, toYocto, RPC_URL } from './near-env.mjs'
+import { createOnboarding } from '../backend/near/onboarding.mjs'
 
 const KEYS_PATH = new URL('../.local/nearcraft-keys.json', import.meta.url)
 const MANIFEST_PATH = new URL('../deployment.json', import.meta.url)
@@ -234,7 +235,9 @@ log('\nagents — function-call keys scoped to the market, nothing else')
 const agentKeys = {}
 for (const agent of cat.agents) {
   const id = n.sub(agent.prefix)
-  await ensureAccount(id, toYocto('0.05'))
+  // 0.3 NEAR of gas headroom: enough to prepay several 60 TGas calls. Separate
+  // from the spend budget below and from the key allowance — see AGENTS.md.
+  await ensureAccount(id, toYocto('0.3'))
 
   // Skip if this account already carries a function-call key scoped to the
   // market — otherwise every run adds one more.
@@ -274,53 +277,48 @@ await saveKeys(keys)
 
 // ---------------------------------------------------------------- players
 
-log('\nplayers — a scoped key and a one-time approval, so they can sell')
+log('\nplayers — onboarded through backend/near/onboarding.mjs')
+
+// The three-transaction bootstrap (create, approve while a full-access key
+// still exists, then install the scoped key and delete the bootstrap key in one
+// transaction) lives in onboarding.mjs and is called from here rather than
+// reimplemented. It used to exist in both places, which meant the delicate copy
+// the README points at was the one nothing exercised. Now `npm run test:deploy`
+// runs it for real.
+//
+// Seeded demo players use a `seed:` identity provider, so their account ids are
+// derived exactly as a real login's would be. The verifier below is local and
+// trivial on purpose: a real deployment swaps in OIDC/OAuth behind the same
+// interface, which is the only part of onboarding that is stubbed.
+const onboarding = createOnboarding({
+  rootAccountId: rootAccountId(),
+  rootKey: process.env.NEAR_ROOT_KEY,
+  marketContract: n.market,
+  itemsContract: n.items,
+  sellableItems: cat.players?.sellable_items ?? [],
+  playerMethods: cat.players?.methods ?? ['buy_with_credit', 'sell'],
+  gasAllowance: toYocto(cat.players?.gas_allowance_near ?? '2'),
+  verifyIdentity: async (token) => ({ provider: 'seed', subject: String(token) }),
+  rpcUrl: RPC_URL,
+  log: () => {},
+})
+
 const players = []
-for (const prefix of cat.players?.accounts ?? ['player-1']) {
-  const id = n.sub(prefix)
-  const existed = await exists(id)
-  await ensureAccount(id, toYocto('0.1'))
-
-  if (!existed) {
-    // The approval has to be granted while a full-access key still exists: a
-    // function-call key cannot attach the deposit mt_approve needs. The
-    // bootstrap key is then destroyed in the same transaction that installs the
-    // scoped one, so the player never holds a key that can do anything else.
-    // See docs/GASLESS.md.
-    const sellable = cat.players?.sellable_items ?? []
-    if (sellable.length) {
-      await call(id, n.items, 'mt_approve', {
-        token_ids: sellable,
-        amounts: sellable.map(() => '1000000000'),
-        account_id: n.market,
-        msg: null,
-      }, { deposit: toYocto('0.01') })
-      log(`  approved ${id} -> ${n.market} for ${sellable.length} material(s)`)
-    }
-
-    const scoped = KeyPair.fromRandom('ed25519')
-    const methods = cat.players?.methods ?? ['buy_with_credit', 'sell']
-    await as(id).signAndSendTransaction({
-      receiverId: id,
-      actions: [
-        actions.addFunctionCallAccessKey(
-          scoped.getPublicKey(), n.market, methods,
-          toYocto(cat.players?.gas_allowance_near ?? '2'),
-        ),
-        // Add before delete, in one transaction, or a failure between them
-        // leaves an account nobody can use.
-        actions.deleteKey(KeyPair.fromString(keys[id]).getPublicKey()),
-      ],
-    })
-    keys[`${id}#scoped`] = scoped.toString()
-    delete keys[id] // the bootstrap key no longer exists on chain
-    log(`  keyed    ${id}  methods=[${methods}] — no full-access key remains`)
-  } else {
-    log(`  exists   ${id}`)
+for (const subject of cat.players?.seed_subjects ?? ['player-1']) {
+  const result = await onboarding.signIn(subject)
+  log(`  ${result.created ? 'onboarded' : 'exists   '} ${result.accountId}  seed:${subject}`)
+  if (result.created) {
+    keys[`${result.accountId}#scoped`] = result.serverKey
+    log(`           methods=[${result.permittedMethods}] approved for ${result.approvedForSale?.length ?? 0} material(s)`)
   }
+  // Prove it, rather than trusting the module: no full-access key may remain.
+  const limits = await onboarding.keyLimits(result.accountId)
+  const full = limits.filter((k) => k.fullAccess)
+  if (full.length) throw new Error(`${result.accountId} still holds ${full.length} full-access key(s)`)
+  log(`           ${limits.length} key(s), none full-access`)
 
-  await topUpCredit(id, econ(cat.players?.budget_near ?? '2'))
-  players.push({ account_id: id, permitted_methods: cat.players?.methods ?? [] })
+  await topUpCredit(result.accountId, econ(cat.players?.budget_near ?? '2'))
+  players.push({ account_id: result.accountId, permitted_methods: result.permittedMethods ?? [] })
 }
 await saveKeys(keys)
 
