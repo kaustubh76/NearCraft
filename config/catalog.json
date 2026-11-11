@@ -119,5 +119,28 @@
   "agent_permitted_methods": [
     "buy_with_credit"
   ],
-  "agent_gas_allowance_note": "Measured in the sandbox: a function-call key's allowance is checked as a per-call ceiling against PREPAID gas and drawn down by gas actually burned. A 60 TGas call needs ~0.2 NEAR of headroom and burns ~0.007 NEAR, so 2 NEAR permits many calls. The earlier 0.25 would have left almost no margin. Never use max_gas() from an agent key: 300 TGas demands ~1 NEAR."
+  "agent_gas_allowance_note": "Measured in the sandbox: a function-call key's allowance is checked as a per-call ceiling against PREPAID gas and drawn down by gas actually burned. A 60 TGas call needs ~0.2 NEAR of headroom and burns ~0.007 NEAR, so 2 NEAR permits many calls. The earlier 0.25 would have left almost no margin. Never use max_gas() from an agent key: 300 TGas demands ~1 NEAR.",
+  "guard": {
+    "note": "The public blocklist agents report to. Without it deployed, counterparty.mjs falls into its `unavailable` branch and screening silently degrades \u2014 so deploy must create it.",
+    "fund_near": "3"
+  },
+  "players": {
+    "note": "Players get a scoped key and a one-time NEP-245 approval so they can sell without ever holding a full-access key. See docs/GASLESS.md.",
+    "methods": [
+      "buy_with_credit",
+      "sell"
+    ],
+    "sellable_items": [
+      "iron_ingot",
+      "oak_log",
+      "stone",
+      "glass",
+      "coal",
+      "copper_ingot",
+      "oak_planks",
+      "redstone"
+    ],
+    "budget_near": "2",
+    "gas_allowance_near": "2"
+  }
 }

@@ -21,7 +21,8 @@
     "test:sandbox": "cargo test -p nearcraft-integration --test smoke --test keys --test economy",
     "evidence": "node scripts/capture-evidence.mjs",
     "test:gasless": "node --test tests/near/gasless.mjs",
-    "agent": "node scripts/agent-run.mjs"
+    "agent": "node scripts/agent-run.mjs",
+    "test:deploy": "node scripts/deploy-dryrun.mjs"
   },
   "license": "MIT",
   "dependencies": {

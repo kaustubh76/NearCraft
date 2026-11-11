@@ -20,6 +20,7 @@ export function names(root = rootAccountId()) {
     root,
     items: `items.${root}`,
     market: `market.${root}`,
+    guard: `guard.${root}`,
     sub: (prefix) => `${prefix}.${root}`,
   }
 }

@@ -11,7 +11,7 @@
 // the market deployed before a key can be scoped to it.
 
 import { writeFile, mkdir, readFile, chmod } from 'node:fs/promises'
-import { Account, KeyPair, teraToGas } from 'near-api-js'
+import { Account, KeyPair, actions, teraToGas } from 'near-api-js'
 import { catalog, fromYocto, names, provider, rootAccount, rootAccountId, toYocto } from './near-env.mjs'
 
 const KEYS_PATH = new URL('../.local/nearcraft-keys.json', import.meta.url)
@@ -19,6 +19,7 @@ const MANIFEST_PATH = new URL('../deployment.json', import.meta.url)
 const WASM = {
   items: new URL('../contracts/target/near/nearcraft_items/nearcraft_items.wasm', import.meta.url),
   market: new URL('../contracts/target/near/nearcraft_market/nearcraft_market.wasm', import.meta.url),
+  guard: new URL('../contracts/target/near/nearcraft_guard/nearcraft_guard.wasm', import.meta.url),
 }
 
 const p = provider()
@@ -74,7 +75,14 @@ async function ensureAccount(accountId, fundYocto) {
 }
 
 function as(accountId) {
-  return new Account(accountId, p, keys[accountId])
+  // The root's key comes from the environment, not the generated keystore, so
+  // looking it up there yields undefined and near-api-js fails with the
+  // unhelpful "Please set a signer". Caught by the sandbox rehearsal rather
+  // than by the first live run.
+  if (accountId === rootAccountId()) return root
+  const key = keys[accountId]
+  if (!key) throw new Error(`no key on record for ${accountId}; delete .local/nearcraft-keys.json to start over`)
+  return new Account(accountId, p, key)
 }
 
 async function deployed(accountId) {
@@ -118,17 +126,21 @@ if (!(await exists(rootAccountId()))) {
 log('contracts')
 await ensureAccount(n.items, toYocto('4'))
 await ensureAccount(n.market, toYocto('8'))
+await ensureAccount(n.guard, toYocto(cat.guard?.fund_near ?? '3'))
 await saveKeys(keys)
 
-if (!(await deployed(n.items))) await deploy(n.items, WASM.items)
-else log(`  has code ${n.items}`)
-if (!(await deployed(n.market))) await deploy(n.market, WASM.market)
-else log(`  has code ${n.market}`)
+for (const [accountId, wasm] of [[n.items, WASM.items], [n.market, WASM.market], [n.guard, WASM.guard]]) {
+  if (!(await deployed(accountId))) await deploy(accountId, wasm)
+  else log(`  has code ${accountId}`)
+}
 
 log('\ninitialise')
 for (const [accountId, args] of [
   [n.items, { owner_id: n.market }],
   [n.market, { owner_id: rootAccountId(), items_contract: n.items }],
+  // Without the guard initialised, the counterparty check cannot read it and
+  // degrades silently rather than loudly. Deploying it is not optional.
+  [n.guard, {}],
 ]) {
   try {
     await call(rootAccountId(), accountId, 'new', args)
@@ -211,6 +223,59 @@ for (const agent of cat.agents) {
 }
 await saveKeys(keys)
 
+// ---------------------------------------------------------------- players
+
+log('\nplayers — a scoped key and a one-time approval, so they can sell')
+const players = []
+for (const prefix of cat.players?.accounts ?? ['player-1']) {
+  const id = n.sub(prefix)
+  const existed = await exists(id)
+  await ensureAccount(id, toYocto('0.3'))
+
+  if (!existed) {
+    // The approval has to be granted while a full-access key still exists: a
+    // function-call key cannot attach the deposit mt_approve needs. The
+    // bootstrap key is then destroyed in the same transaction that installs the
+    // scoped one, so the player never holds a key that can do anything else.
+    // See docs/GASLESS.md.
+    const sellable = cat.players?.sellable_items ?? []
+    if (sellable.length) {
+      await call(id, n.items, 'mt_approve', {
+        token_ids: sellable,
+        amounts: sellable.map(() => '1000000000'),
+        account_id: n.market,
+        msg: null,
+      }, { deposit: toYocto('0.01') })
+      log(`  approved ${id} -> ${n.market} for ${sellable.length} material(s)`)
+    }
+
+    const scoped = KeyPair.fromRandom('ed25519')
+    const methods = cat.players?.methods ?? ['buy_with_credit', 'sell']
+    await as(id).signAndSendTransaction({
+      receiverId: id,
+      actions: [
+        actions.addFunctionCallAccessKey(
+          scoped.getPublicKey(), n.market, methods,
+          toYocto(cat.players?.gas_allowance_near ?? '2'),
+        ),
+        // Add before delete, in one transaction, or a failure between them
+        // leaves an account nobody can use.
+        actions.deleteKey(KeyPair.fromString(keys[id]).getPublicKey()),
+      ],
+    })
+    keys[`${id}#scoped`] = scoped.toString()
+    delete keys[id] // the bootstrap key no longer exists on chain
+    log(`  keyed    ${id}  methods=[${methods}] — no full-access key remains`)
+  } else {
+    log(`  exists   ${id}`)
+  }
+
+  await call(rootAccountId(), n.market, 'fund_credit', { account_id: id },
+    { deposit: toYocto(cat.players?.budget_near ?? '2') })
+  players.push({ account_id: id, permitted_methods: cat.players?.methods ?? [] })
+}
+await saveKeys(keys)
+
 // ------------------------------------------------------------------ manifest
 
 const manifest = {
@@ -219,9 +284,10 @@ const manifest = {
   rpc: process.env.NEAR_RPC || 'https://rpc.testnet.near.org',
   deployed_at: new Date().toISOString(),
   root: rootAccountId(),
-  contracts: { items: n.items, market: n.market },
+  contracts: { items: n.items, market: n.market, guard: n.guard },
   merchants: cat.merchants.map((m) => ({ account_id: n.sub(m.prefix), name: m.name })),
   materials: cat.materials.map((m) => m.token_id),
+  players,
   agents: Object.entries(agentKeys).map(([account_id, k]) => ({
     account_id,
     function_call_key: k.publicKey,
