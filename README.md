@@ -32,6 +32,7 @@ column before the description.
 | The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls. `npm run sim` |
 | `web/market.html` | **Built.** Every merchant's ask, bid, stock band and the contract's own reason string. No external dependencies. |
 | `evidence/` | **Built.** `npm run evidence` retains each check's real output with its exit code and an output hash. Failures are kept, not edited out. |
+| Gasless play — no seed phrase, no popup, no gas prompt | **Built and measured.** `npm run test:gasless`: a player holding only a scoped key buys on a real nearcore node with a balance delta of **exactly 0**; the relayer pays. 15 more offline tests. **Selling does not work with a scoped key** — see [docs/GASLESS.md](docs/GASLESS.md). |
 | Minecraft plugin settlement path | **Not built.** See the note below. |
 | Sealed-bid rounds (`swarms`) | **Not built, and that track is not entered.** See below. |
 
@@ -48,6 +49,20 @@ whenever an account exists.
 [RULES.md](RULES.md) is designed and not implemented, so its requirements are
 unmet and selecting the track would be a false claim. `RULES.md` stays in the
 repo as the design it is. Tracks entered: **`games`** and **`security`**.
+
+**On `games` requirement 2 (social login, no seed phrase, no popup, no gas
+prompt):** the mechanism is built and measured; the OAuth front door is not.
+Accounts are derived deterministically from a verified identity, the server holds
+a function-call key so the player never sees one, and gas is paid by a relayer
+through NEP-366 — a player's balance moves by **exactly zero yoctoNEAR** on a
+purchase, asserted in `tests/near/gasless.mjs`. What is **stubbed** is the
+identity-token verification itself, behind a pluggable `verifyIdentity`
+interface. And one half of the loop genuinely does not work: **a scoped key
+cannot sell**, because NEP-245 requires 1 yoctoNEAR on `mt_transfer_call` and a
+function-call key cannot attach a deposit — measured, with the options we
+rejected, in [docs/GASLESS.md](docs/GASLESS.md). So: buying is gasless and
+proven, selling is not, and we do not call this "social login" when only the
+mechanism behind it is built.
 
 **On the Minecraft integration:** the game world, its menus and its item
 delivery are baseline — they exist and they work, on Unichain. What is *not*

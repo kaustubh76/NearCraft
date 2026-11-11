@@ -1,0 +1,17 @@
+
+--- gasless purchase ---
+  player  delta 0 yoctoNEAR
+  relayer delta -28155034056694000000000 yoctoNEAR
+  player received 3 iron_ingot
+
+  deposit on a delegate's inner action: REFUSED — Deposit is not allowed with function call
+
+✔ a player buys with no key of their own and pays no gas (7020.9245ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7171.617375

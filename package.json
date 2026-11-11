@@ -16,13 +16,17 @@
     "sim": "cargo test -p nearcraft-integration --test simulation -- --nocapture",
     "verify:baseline": "node scripts/verify-baseline.mjs",
     "test": "npm run test:contracts && npm run test:near && npm run verify:baseline",
-    "test:near": "node --test tests/near/*.mjs",
+    "test:near": "node --test tests/near/policy.mjs tests/near/injection.mjs tests/near/market.mjs tests/near/counterparty.mjs tests/near/human-approval.mjs tests/near/onboarding.mjs tests/near/relayer.mjs",
     "check:nep245": "node scripts/check-nep245.mjs",
     "test:sandbox": "cargo test -p nearcraft-integration --test smoke --test keys --test economy",
-    "evidence": "node scripts/capture-evidence.mjs"
+    "evidence": "node scripts/capture-evidence.mjs",
+    "test:gasless": "node --test tests/near/gasless.mjs"
   },
   "license": "MIT",
   "dependencies": {
     "near-api-js": "^7.4.0"
+  },
+  "devDependencies": {
+    "near-sandbox": "^0.3.5"
   }
 }
