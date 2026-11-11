@@ -22,20 +22,23 @@ column before the description.
 | `GAME_LOOP.md` — the game loop on paper | **Done.** Required by the `games` prompt before any code. |
 | `RULES.md` — round rules + sequence diagram | **Done.** Required by the `swarms` prompt before any code. |
 | `BASELINE.md` + hash-verified baseline import | **Done, machine-checked.** `npm run verify:baseline` |
-| `contracts/items` — NEP-245 materials | **Built and tested.** 19 tests. NEP-245 core 10/10 + Enumeration 2/2, verified against the compiled ABI. 204.7 KB wasm. |
-| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 39 tests. 186.8 KB wasm. |
+| `contracts/items` — NEP-245 materials | **Built and tested.** 19 unit tests. NEP-245 core 10/10 + Enumeration 2/2, verified against the compiled ABI. 204.7 KB wasm. |
+| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 42 unit tests. |
 | `backend/near` — function-call-key signer + policy | **Built and tested.** 15 tests, including the prompt-injection attack demo. |
-| **Deployed to NEAR testnet** | **No.** Blocked on creating the root account by hand — see below. |
-| `sim/fastforward.mjs` — scripted week-in-a-minute | **Not built.** |
+| **Sandbox integration tests** | **Built and passing.** A real local NEAR node via `near-workspaces`. 12 tests: 4 prove a restricted key's limits *at the protocol level*, 6 cover the cross-contract buy/sell/rollback paths, 1 runs the economy, 1 proves the node starts. |
+| **Deployed to NEAR testnet** | **No**, and no longer on the critical path — every check below runs against a local sandbox instead. See the note on the faucet. |
+| The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls. `npm run sim` |
 | Minecraft plugin settlement path | **Not built.** |
 | Sealed-bid rounds (`swarms`) | **Not built.** Entering that track depends on it; see the honest note below. |
 
 **Nothing is deployed to NEAR testnet yet**, so no account id in this README is
 live and `npm run reads` / `npm run keys` will tell you so rather than invent
-output. Deployment is blocked on one manual step: `helper.testnet.near.org` now
-returns 404, so a `*.testnet` account can no longer be created programmatically.
-`nearcraftmc.testnet` has to be made at [near-faucet.io](https://near-faucet.io)
-first. Everything after that is `npm run deploy`, which is idempotent.
+output. `helper.testnet.near.org` returns 404 and the web faucet was erroring, so
+a `*.testnet` account could not be created. **That stopped mattering:** the
+verification below runs against a real NEAR node in a local sandbox, so it needs
+no account, no faucet and no credentials at all. Testnet deployment is a bonus
+claim rather than the proof, and `npm run deploy` is idempotent and ready for
+whenever an account exists.
 
 **On the `swarms` track:** the sealed-bid coordinator in `RULES.md` is designed
 but not implemented. If it is not deployed and simulated before the deadline, we
@@ -104,7 +107,7 @@ Needs Rust and Node 22+, nothing else — not even the wasm target, because
 near-sdk unit tests build for the host. All three checks pass right now:
 
 ```sh
-npm run test:contracts    # 58 Rust unit tests across both contracts
+npm run test:contracts    # 61 Rust unit tests across both contracts
 npm run test:near         # 15 policy + prompt-injection tests
 npm run verify:baseline   # 11 vendored files, SHA-256 unchanged
 ```
@@ -137,20 +140,117 @@ documented, and that the modifiers carrying security meaning are right —
 including that `buy_with_credit` is **not** payable, since a function-call
 access key cannot attach NEAR and would otherwise be unable to call it.
 
-### Needs a deployment first (not yet true)
+### A real NEAR node, locally — no credentials, no faucet
+
+These need the wasm built first, because they deploy it into a sandbox:
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install cargo-near          # compiles from source; takes a few minutes
+npm run build:contracts
+npm run test:sandbox              # smoke + keys + economy
+```
+
+`near-workspaces` starts an actual NEAR node locally. It downloads a node binary
+once and caches it, so the first run needs network and later ones do not. No
+account, no faucet, no credentials, at any point.
+
+**The one worth reading the output of** is the key test, because it is the
+submission's central claim checked against the runtime rather than against our
+own code:
+
+```sh
+cargo test -p nearcraft-integration --test keys -- --nocapture
+```
+
+It issues a genuine function-call access key scoped to `["buy_with_credit"]`,
+signs with *that key*, and lets the protocol answer:
+
+```
+buy_with_credit         ALLOWED   (8 iron delivered, shelf 256 -> 248)
+withdraw                REFUSED   InvalidAccessKeyError(MethodNameMismatch { method_name: "withdraw" })
+withdraw_treasury       REFUSED   InvalidAccessKeyError(MethodNameMismatch { method_name: "withdraw_treasury" })
+register_merchant       REFUSED   InvalidAccessKeyError(MethodNameMismatch { method_name: "register_merchant" })
+fund_credit             REFUSED   InvalidAccessKeyError(MethodNameMismatch { method_name: "fund_credit" })
+transfer 1 NEAR         REFUSED   InvalidAccessKeyError(RequiresFullAccess)
+add full-access key     REFUSED   InvalidAccessKeyError(RequiresFullAccess)
+mt_transfer (items)     REFUSED   InvalidAccessKeyError(DepositWithFunctionCall)
+```
+
+Those error names are the runtime's, not ours.
+
+Three things we measured while building this, each of which contradicted an
+assumption we had started from:
+
+- **A function-call key cannot attach NEAR.** So an agent cannot call a payable
+  method at all. That is why agents spend a budget credited inside the market
+  contract instead of sending NEAR, and why their spending is bounded twice over.
+- **The key's `allowance` is a gas budget checked as a per-call ceiling against
+  *prepaid* gas, then drawn down by gas actually burned.** A 60 TGas call needs
+  about 0.2 NEAR of headroom and burns about 0.007. `max_gas()` demands about
+  1 NEAR of headroom per call, so an agent that uses it dies immediately on a
+  modest allowance.
+- **An empty `method_names` means *any method on that contract*.** near-api-js
+  defaults it to `[]`, which is a quiet way to issue an unrestricted key.
+  `npm run keys` exits non-zero if it ever finds one.
+
+### The economy, running
+
+```sh
+npm run sim
+```
+
+Twenty buyers across six scripted strategies, five merchants, four materials,
+eight rounds, **no model calls** — plain arithmetic, so what is being tested is
+the market and not a language model's taste. A representative run, in about 110
+seconds:
+
+```
+round   trades   sales     volume    closed  cheapest iron / oak
+    1       19       6     12.991         0  0.448 / 0.084
+    4       15       3     45.611         0  0.534 / 0.102
+    8       11       3     88.944         0  0.611 / 0.102
+118 purchases, 28 sell-backs, 88.944 NEAR of volume
+
+bargain   x4  spent    2.544  earned   0.000  holding   32 units
+dumper    x3  spent   20.362  earned  18.582  holding    0 units
+greedy    x4  spent   26.610  earned   0.000  holding  128 units
+```
+
+Iron rose from 0.448 to 0.611 NEAR because buyers drained the shelves, and
+trades fell from 19 to 11 as the bargain hunters priced themselves out. Nobody
+scripted that; it falls out of the price rule. The test asserts the things that
+are robustly true — volume, that iron rose above base, that sell-backs happened,
+and that a bargain hunter spends less than half what a hoarder does.
+
+Merchant closures are **reported, not asserted** here. Whether a short run
+drives one under depends on which materials its dumpers happen to cycle through,
+so requiring it would make this run flaky. The rule is proved deterministically
+instead by `a_merchant_can_be_flooded_until_it_stops_buying` in `economy.rs`,
+which floods an undercapitalised merchant until the contract reports it closed,
+then checks it still sells while posting no bid.
+
+One thing building this taught us, recorded in `GAME_LOOP.md`: **a merchant that
+sells briskly cannot go broke.** It earns on every sale and only spends when
+buying from you. The merchants that close are the ones that opened
+undercapitalised, or that you flooded on purpose.
+
+**On "fast-forward":** the `games` prompt asks for a week of trading in about a
+minute. What this compresses is *trading volume* — a few hundred real
+transactions that a populated server would take days to generate. It does **not**
+advance a week of block height: `fast_forward` in the sandbox produces blocks
+rather than jumping, and a week is 604,800 of them, which we measured as far too
+slow to put in a test. Demand decay is the only time-dependent mechanic and is
+exercised separately. Calling this "a week of wall-clock time" would be a claim
+we cannot support, so we don't.
+
+### Needs a live testnet deployment (the bonus, not the proof)
 
 ```sh
 npm run deploy    # idempotent; needs NEAR_ROOT_KEY
 npm run reads     # every merchant's price, bid, stock band and reason
-npm run keys      # reads each agent key's limits back from the protocol
-npm run sim       # 20 buyers, 5 sellers, a week of trading in ~60s
+npm run keys      # reads method_names + allowance back from the chain
 ```
-
-`npm run keys` is the check behind the security claim: it reads
-`method_names` and `allowance` back from the chain and **exits non-zero** if any
-agent key is ever unrestricted. `npm run sim` is the one to care about for the
-economy — scripted strategies, no model calls, run against the deployed
-contracts, needing no credentials and no Minecraft server.
 
 ---
 

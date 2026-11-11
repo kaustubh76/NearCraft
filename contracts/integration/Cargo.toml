@@ -1,0 +1,19 @@
+[package]
+name = "nearcraft-integration"
+description = "Sandbox integration tests: a real local NEAR node, real access keys, real cross-contract calls."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# No library and no binary — this crate exists only to hold tests/.
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]
+near-workspaces = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }

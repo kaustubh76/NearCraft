@@ -95,8 +95,25 @@ quote = base_price
   window. Selling into a merchant pushes the other way.
 - Both terms are clamped. No merchant ever quotes zero and none quotes
   infinity.
-- A merchant whose treasury is below its floor stops quoting a **buy** price
-  entirely. It is closed. It will still sell you what it has.
+- A merchant stops quoting a **buy** price for a material as soon as it cannot
+  fund a single unit of it. It will still sell you what it has.
+
+  This is a correction to what this document first said. The original rule was
+  "closed when its treasury drops below its floor", and building it showed that
+  rule can never fire: a merchant only ever spends what sits *above* its floor,
+  so the treasury approaches the floor without reaching it. Worse, a merchant
+  that refused any lot it could not fully afford left its spare cash stranded.
+  So a merchant now buys as much of your lot as it can pay for and hands the
+  rest back — NEP-245's transfer-and-call returns an unused amount for exactly
+  this — and it is closed when it can afford nothing. One consequence worth
+  knowing as a player: a rich merchant can be closed to an expensive material
+  while still bidding on a cheap one.
+
+  A second thing building it taught us, which is not a correction but is
+  counter-intuitive: **a merchant that sells briskly cannot go broke.** It earns
+  on every sale and only spends when buying from you. The merchants that close
+  are the ones that opened undercapitalised, or that you have deliberately
+  flooded. Draining a thriving merchant is not a strategy.
 
 The prompt's example works: flood a merchant with iron, its stock band rises,
 `scarcity` falls, iron gets cheap there. Walk to the merchant nobody has

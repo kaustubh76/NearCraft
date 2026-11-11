@@ -9,15 +9,16 @@
   },
   "scripts": {
     "build:contracts": "cargo near build non-reproducible-wasm --manifest-path contracts/items/Cargo.toml && cargo near build non-reproducible-wasm --manifest-path contracts/market/Cargo.toml",
-    "test:contracts": "cargo test --manifest-path contracts/Cargo.toml",
+    "test:contracts": "cargo test --manifest-path contracts/Cargo.toml -p nearcraft-items -p nearcraft-market --lib",
     "deploy": "node scripts/deploy.mjs",
     "reads": "node scripts/reads.mjs",
     "keys": "node scripts/keys.mjs",
-    "sim": "node sim/fastforward.mjs",
+    "sim": "cargo test -p nearcraft-integration --test simulation -- --nocapture",
     "verify:baseline": "node scripts/verify-baseline.mjs",
     "test": "npm run test:contracts && npm run test:near && npm run verify:baseline",
     "test:near": "node --test tests/near/*.mjs",
-    "check:nep245": "node scripts/check-nep245.mjs"
+    "check:nep245": "node scripts/check-nep245.mjs",
+    "test:sandbox": "cargo test -p nearcraft-integration --test smoke --test keys --test economy"
   },
   "license": "MIT",
   "dependencies": {

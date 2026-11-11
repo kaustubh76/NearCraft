@@ -105,6 +105,18 @@ pub struct Quote {
     pub reason: String,
 }
 
+/// Render yoctoNEAR as a human-readable NEAR amount, to three decimals.
+///
+/// The quote `reason` is shown to a player in an in-game tooltip, so it must not
+/// contain raw 24-digit integers. Done with integer arithmetic — a contract has
+/// no business doing floating point, and `f64` would lose precision above 2^53
+/// anyway.
+fn near_str(yocto: u128) -> String {
+    let whole = yocto / 1_000_000_000_000_000_000_000_000;
+    let milli = (yocto % 1_000_000_000_000_000_000_000_000) / 1_000_000_000_000_000_000_000;
+    format!("{whole}.{milli:03}")
+}
+
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct Market {
@@ -200,11 +212,34 @@ impl Market {
         self.merchants.get(&merchant_id).cloned()
     }
 
-    /// True when the merchant's treasury has fallen to its floor: it keeps
-    /// selling what it has, but it stops buying. This is the "broke merchant
-    /// closes" rule from GAME_LOOP.md.
+    /// True when the merchant posts no buy price on anything it stocks: it keeps
+    /// selling what it has, but it can no longer afford to buy. This is the
+    /// "broke merchant closes" rule from GAME_LOOP.md.
+    ///
+    /// Note this is *not* simply `treasury <= floor`. A merchant only ever
+    /// spends what sits above its floor, so its treasury approaches the floor
+    /// without reaching it; the question that matters is whether it can still
+    /// fund a single unit of anything. A rich merchant can also be closed for
+    /// one expensive material while still bidding on a cheap one, which is why
+    /// each `Quote` carries its own `closed` flag.
     pub fn is_closed(&self, merchant_id: AccountId) -> bool {
-        self.merchants.get(&merchant_id).map(Self::closed).unwrap_or(true)
+        let Some(merchant) = self.merchants.get(&merchant_id) else { return true };
+        if Self::closed(merchant) {
+            return true;
+        }
+        let spare = merchant.treasury.0.saturating_sub(merchant.floor.0);
+        let mut stocks_anything = false;
+        for (key, listing) in self.listings.iter() {
+            if key.merchant_id != merchant_id {
+                continue;
+            }
+            stocks_anything = true;
+            let demand = self.current_demand(listing);
+            if spare >= buy_price(listing.base_price.0, listing.stock.0, demand) {
+                return false; // it can still fund a unit of this one
+            }
+        }
+        stocks_anything
     }
 
     pub fn credit_of(&self, account_id: AccountId) -> U128 {
@@ -376,17 +411,26 @@ impl Market {
         let Some(listing) = self.listings.get(&key).cloned() else { return units };
 
         let demand = self.current_demand(&listing);
-        let proceeds = buy_price(listing.base_price.0, listing.stock.0, demand).saturating_mul(units);
-        // A merchant can only buy what it can pay for without breaching its floor.
-        if merchant.treasury.0.saturating_sub(proceeds) < merchant.floor.0 {
-            return units;
+        let unit_bid = buy_price(listing.base_price.0, listing.stock.0, demand);
+
+        // Spend only what sits above the floor, and take only as many units as
+        // that will actually pay for. NEP-245 lets us return the remainder, so a
+        // merchant that can afford three of your four buys three — rather than
+        // refusing the lot and leaving its treasury stranded just above the
+        // floor, which is what made "a broke merchant closes" unreachable.
+        let spare = merchant.treasury.0.saturating_sub(merchant.floor.0);
+        let affordable = spare.checked_div(unit_bid).unwrap_or(0);
+        let take = units.min(affordable);
+        if take == 0 {
+            return units; // closed for this material: it cannot afford one unit
         }
+        let proceeds = unit_bid.saturating_mul(take);
 
         self.listings.insert(
             key,
             Listing {
-                stock: U128(listing.stock.0 + units),
-                demand_bps: U128(pricing::ease_demand(demand, units)),
+                stock: U128(listing.stock.0 + take),
+                demand_bps: U128(pricing::ease_demand(demand, take)),
                 demand_at: env::block_timestamp(),
                 ..listing
             },
@@ -395,7 +439,7 @@ impl Market {
         merchant.treasury = U128(merchant.treasury.0 - proceeds);
         self.merchants.insert(merchant_id.clone(), merchant);
         self.credit(seller_id, proceeds);
-        0
+        units - take
     }
 
     // ------------------------------------------------------------- withdraw
@@ -485,12 +529,22 @@ impl Market {
     ) -> Quote {
         let demand = self.current_demand(listing);
         let unit = unit_price(listing.base_price.0, listing.stock.0, demand);
-        let closed = Self::closed(merchant);
+        let unit_bid = buy_price(listing.base_price.0, listing.stock.0, demand);
+        let spare = merchant.treasury.0.saturating_sub(merchant.floor.0);
+        // Closed for *this* material when it cannot fund even one unit of it.
+        // Treasury alone is not the whole story: a rich merchant can still be
+        // priced out of an expensive material.
+        let closed = Self::closed(merchant) || spare < unit_bid;
         let band = scarcity_band(listing.stock.0);
-        let reason = if closed {
+        let reason = if Self::closed(merchant) {
             format!(
-                "{} holds {} ({}) and is closed to buying: its treasury is at its floor.",
+                "{} holds {} ({}) and is closed to buying: its treasury is down to its floor.",
                 merchant.name, listing.stock.0, band
+            )
+        } else if closed {
+            format!(
+                "{} holds {} ({}) but will not buy more: it has {} NEAR left to spend and one costs {}.",
+                merchant.name, listing.stock.0, band, near_str(spare), near_str(unit_bid)
             )
         } else if demand > BPS {
             format!(
@@ -510,11 +564,7 @@ impl Market {
             count,
             unit_price: U128(unit),
             total: U128(unit.saturating_mul(count as u128)),
-            merchant_bid: if closed {
-                None
-            } else {
-                Some(U128(buy_price(listing.base_price.0, listing.stock.0, demand)))
-            },
+            merchant_bid: if closed { None } else { Some(U128(unit_bid)) },
             stock: listing.stock,
             band: band.to_string(),
             demand_bps: U128(demand),
@@ -744,22 +794,57 @@ mod tests {
         assert_eq!(m.credit_of(player()), U128(0));
     }
 
+    /// A merchant buys as much as its spare treasury covers and hands the rest
+    /// back. NEP-245's unused-amount return exists for exactly this, and it is
+    /// what lets a treasury actually reach its floor instead of stalling just
+    /// above it.
     #[test]
-    fn a_merchant_refuses_a_sale_it_cannot_fund_without_breaching_its_floor() {
+    fn a_merchant_buys_what_it_can_afford_and_refuses_the_rest() {
         ctx(owner(), 0);
         let mut m = Market::new(owner(), items());
         m.register_merchant(ironmonger(), "Ironmonger".into(), U128(BASE));
         m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(256));
-        ctx(owner(), BASE * 3); // floor BASE, so ~2 NEAR of headroom
+        ctx(owner(), BASE * 3); // floor BASE, so 2 BASE of spare
         m.fund_merchant(ironmonger());
 
+        let bid = m.quote(ironmonger(), IRON.to_string(), 1).merchant_bid.unwrap().0;
+        let affordable = (BASE * 2) / bid;
+        assert!(affordable > 0 && affordable < 100, "the test needs a partial fill, got {affordable}");
+
         ctx(items(), 0);
-        // 100 units at ~0.8 NEAR each would blow straight through the floor.
         let unused = m.mt_on_transfer(
             player(), vec![player()], vec![IRON.to_string()], vec![U128(100)], ironmonger().to_string(),
         );
-        assert_eq!(unused, vec![U128(100)], "refused rather than overdrawn");
+
+        assert_eq!(unused, vec![U128(100 - affordable)], "the unaffordable remainder comes back");
+        assert_eq!(m.credit_of(player()), U128(bid * affordable), "paid for what it took");
         assert!(m.merchant(ironmonger()).unwrap().treasury.0 >= BASE, "floor intact");
+        assert_eq!(m.quote(ironmonger(), IRON.to_string(), 1).stock.0, 256 + affordable);
+    }
+
+    /// Spent down far enough, it stops posting a bid at all — the "broke
+    /// merchant closes" rule, reached by trading rather than by withdrawal.
+    #[test]
+    fn a_merchant_spent_below_one_unit_posts_no_bid() {
+        ctx(owner(), 0);
+        let mut m = Market::new(owner(), items());
+        m.register_merchant(ironmonger(), "Ironmonger".into(), U128(0));
+        m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(256));
+        // Spare is a fraction of one unit's bid from the outset.
+        ctx(owner(), BASE / 10);
+        m.fund_merchant(ironmonger());
+
+        let q = m.quote(ironmonger(), IRON.to_string(), 1);
+        assert_eq!(q.merchant_bid, None, "it cannot fund a single unit, so it posts no bid");
+        assert!(q.closed);
+        assert!(q.unit_price.0 > 0, "but it still sells the stock it has");
+
+        ctx(items(), 0);
+        assert_eq!(
+            m.mt_on_transfer(player(), vec![player()], vec![IRON.to_string()], vec![U128(5)], ironmonger().to_string()),
+            vec![U128(5)],
+            "and it refuses the whole lot"
+        );
     }
 
     #[test]
@@ -967,6 +1052,70 @@ mod tests {
         ctx(items(), 0);
         m.mt_on_transfer(worker(), vec![worker()], vec![IRON.to_string()], vec![U128(3)], ironmonger().to_string());
         assert!(m.credit_of(worker()).0 > 0, "selling credits the agent's budget");
+    }
+
+    /// `is_closed` asks a real question now — "can it fund a unit of anything?" —
+    /// so it needs its own coverage. A merchant can be priced out of one
+    /// material while still bidding on a cheaper one, and that is not closed.
+    #[test]
+    fn closed_means_it_can_fund_nothing_not_merely_that_one_thing_is_dear() {
+        ctx(owner(), 0);
+        let mut m = Market::new(owner(), items());
+        m.register_merchant(ironmonger(), "Ironmonger".into(), U128(0));
+        // One dear material and one cheap one.
+        m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(256));
+        m.list_item(ironmonger(), "stone".into(), U128(BASE / 100), U128(256));
+
+        // Enough for a unit of stone, nowhere near a unit of iron.
+        ctx(owner(), BASE / 50);
+        m.fund_merchant(ironmonger());
+
+        assert!(!m.is_closed(ironmonger()), "it can still fund stone, so it is open");
+        assert_eq!(m.quote(ironmonger(), IRON.to_string(), 1).merchant_bid, None, "priced out of iron");
+        assert!(m.quote(ironmonger(), "stone".into(), 1).merchant_bid.is_some(), "still bidding on stone");
+        // The tooltip must say which of the two reasons applies.
+        let dear = m.quote(ironmonger(), IRON.to_string(), 1);
+        assert!(dear.reason.contains("will not buy more"), "got: {}", dear.reason);
+        assert!(!dear.reason.contains("down to its floor"), "that would be untrue here");
+
+        // Drop it below a unit of even the cheap material and it is closed.
+        ctx(owner(), 0);
+        let mut broke = Market::new(owner(), items());
+        broke.register_merchant(ironmonger(), "Ironmonger".into(), U128(0));
+        broke.list_item(ironmonger(), "stone".into(), U128(BASE), U128(256));
+        assert!(broke.is_closed(ironmonger()), "an unfunded merchant funds nothing");
+
+        // A merchant stocking nothing at all is not "closed", it is just empty.
+        ctx(owner(), 0);
+        let mut empty = Market::new(owner(), items());
+        empty.register_merchant(ironmonger(), "Ironmonger".into(), U128(0));
+        ctx(owner(), BASE);
+        empty.fund_merchant(ironmonger());
+        assert!(!empty.is_closed(ironmonger()), "no shelves is not the same as broke");
+    }
+
+    /// The reason string reaches a player's screen, so it must not leak raw
+    /// yoctoNEAR integers.
+    #[test]
+    fn tooltip_amounts_are_human_readable() {
+        assert_eq!(near_str(0), "0.000");
+        assert_eq!(near_str(BASE), "1.000");
+        assert_eq!(near_str(BASE / 2), "0.500");
+        assert_eq!(near_str(220_000_000_000_000_000_000_000), "0.220");
+        assert_eq!(near_str(BASE * 1234 + BASE / 4), "1234.250");
+
+        ctx(owner(), 0);
+        let mut m = Market::new(owner(), items());
+        m.register_merchant(ironmonger(), "Ironmonger".into(), U128(0));
+        m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(256));
+        ctx(owner(), BASE / 5);
+        m.fund_merchant(ironmonger());
+
+        let reason = m.quote(ironmonger(), IRON.to_string(), 1).reason;
+        assert!(reason.contains("0.200 NEAR left to spend"), "got: {reason}");
+        // No 24-digit integer anywhere in player-visible text.
+        assert!(!reason.chars().collect::<Vec<_>>().windows(18).any(|w| w.iter().all(|c| c.is_ascii_digit())),
+            "a long raw integer leaked into the tooltip: {reason}");
     }
 
 }
