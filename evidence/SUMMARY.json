@@ -1,0 +1,53 @@
+{
+  "note": "Written by npm run evidence. Each run keeps its own directory; failures are retained alongside passes and are never edited out.",
+  "recorded_at": "2026-11-11T10:35:03.105Z",
+  "host": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v26.4.0"
+  },
+  "wasm_built": true,
+  "totals": {
+    "pass": 6,
+    "fail": 0,
+    "skipped": 0
+  },
+  "boundaries": [
+    "All of this runs locally. Nothing here is a public-chain result.",
+    "No NEAR testnet deployment exists, so no live-network behaviour is recorded.",
+    "No Minecraft gameplay is recorded; the plugin is not exercised by any check here.",
+    "A passing check establishes what its own output shows and nothing wider."
+  ],
+  "runs": [
+    {
+      "topic": "unit-tests",
+      "status": "pass",
+      "path": "evidence/runs/unit-tests/2026-11-11T10-35-03/"
+    },
+    {
+      "topic": "policy-and-injection",
+      "status": "pass",
+      "path": "evidence/runs/policy-and-injection/2026-11-11T10-35-03/"
+    },
+    {
+      "topic": "baseline-integrity",
+      "status": "pass",
+      "path": "evidence/runs/baseline-integrity/2026-11-11T10-35-03/"
+    },
+    {
+      "topic": "nep245-conformance",
+      "status": "pass",
+      "path": "evidence/runs/nep245-conformance/2026-11-11T10-35-03/"
+    },
+    {
+      "topic": "access-key-limits",
+      "status": "pass",
+      "path": "evidence/runs/access-key-limits/2026-11-11T10-35-03/"
+    },
+    {
+      "topic": "cross-contract-economy",
+      "status": "pass",
+      "path": "evidence/runs/cross-contract-economy/2026-11-11T10-35-03/"
+    }
+  ]
+}

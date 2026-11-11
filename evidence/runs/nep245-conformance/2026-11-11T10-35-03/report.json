@@ -1,0 +1,12 @@
+{
+  "topic": "nep245-conformance",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 201,
+  "command": "npm run --silent check:nep245",
+  "cwd": ".",
+  "proves": "NEP-245 core 10/10 and Enumeration 2/2 present, Approval/Metadata absent as documented, and security-relevant modifiers correct — read off the ABI cargo-near emitted, not off our source comments.",
+  "output_sha256": "85ee012feefa3f48dcdf1dfeefa42451a5fa1d989837270b27377d75910c7824",
+  "output_bytes": 267,
+  "recorded_at": "2026-11-11T10:35:05.347Z"
+}

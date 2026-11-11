@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NearCraft Market</title>
+<style>
+  :root {
+    --bg: #faf9f7; --panel: #fff; --ink: #1a1816; --muted: #6b6560;
+    --line: #e6e2dd; --accent: #8a5a2b; --warn: #a3421f; --ok: #2f6b3a;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16140f; --panel: #1e1b16; --ink: #ece7df; --muted: #9b938a;
+      --line: #322c24; --accent: #d49a5e; --warn: #e07a4f; --ok: #6cc080;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16140f; --panel: #1e1b16; --ink: #ece7df; --muted: #9b938a;
+    --line: #322c24; --accent: #d49a5e; --warn: #e07a4f; --ok: #6cc080;
+  }
+  * { box-sizing: border-box }
+  body {
+    margin: 0; padding: 0 16px 64px; background: var(--bg); color: var(--ink);
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 920px; margin: 0 auto }
+  header { padding: 40px 0 8px }
+  h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em }
+  .sub { color: var(--muted); margin: 0 0 20px }
+  .banner {
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    padding: 12px 14px; border-radius: 6px; margin: 0 0 28px; font-size: 14px; color: var(--muted);
+  }
+  .banner strong { color: var(--ink) }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
+       color: var(--muted); margin: 32px 0 12px; font-weight: 600 }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px }
+  .stat .n { font: 600 20px/1.2 var(--mono); letter-spacing: -0.02em }
+  .stat .k { font-size: 12px; color: var(--muted); margin-top: 2px }
+  table { width: 100%; border-collapse: collapse; background: var(--panel);
+          border: 1px solid var(--line); border-radius: 6px; overflow: hidden }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 14px }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600 }
+  tr:last-child td { border-bottom: 0 }
+  td.n, th.n { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums }
+  .acct { font-family: var(--mono); font-size: 12px; color: var(--muted) }
+  .pill { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 99px;
+          border: 1px solid currentColor; font-weight: 600 }
+  .pill.open { color: var(--ok) } .pill.shut { color: var(--warn) }
+  .reason { color: var(--muted); font-size: 13px; padding: 0 12px 10px; border-bottom: 1px solid var(--line) }
+  .material { margin-bottom: 22px }
+  .material h3 { font: 600 15px/1 var(--mono); margin: 0 0 8px; color: var(--accent) }
+  footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line);
+           color: var(--muted); font-size: 13px }
+  a { color: var(--accent) }
+  .err { background: var(--panel); border: 1px solid var(--warn); border-radius: 6px; padding: 16px; color: var(--warn) }
+  code { font-family: var(--mono); font-size: 13px; background: var(--panel);
+         border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>NearCraft Market</h1>
+    <p class="sub">Merchants are AI agents with their own NEAR accounts, their own stock and their own money. Every price below came from the contract, and so did every explanation.</p>
+  </header>
+  <div class="banner" id="banner">Loading…</div>
+  <main id="main"></main>
+  <footer>
+    Prices come from <code>contracts/market/src/pricing.rs</code> — one readable rule:
+    <code>base × scarcity(stock band) × demand(recent volume)</code>. The
+    <em>reason</em> under each row is the contract's own string, built from the
+    same numbers the price was, so it cannot drift from the price.
+  </footer>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const near = (y) => {
+  // Amounts arrive as yoctoNEAR strings. BigInt, because 10^24 does not fit a double.
+  const s = BigInt(y).toString().padStart(25, '0');
+  const whole = s.slice(0, -24).replace(/^0+(?=\d)/, '');
+  return whole + '.' + s.slice(-24).slice(0, 3);
+};
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function render(d) {
+  const when = new Date((d.generated_at_unix || 0) * 1000);
+  $('#banner').innerHTML =
+    '<strong>This is a simulation snapshot, not live chain data.</strong> ' +
+    esc(d.note || '') + ' Generated ' + esc(when.toISOString().replace('T', ' ').slice(0, 16)) +
+    ' UTC on ' + esc(d.network || 'unknown') + '. Nothing is deployed to NEAR testnet yet, so there is no live market to read.';
+
+  const stats = [
+    [d.purchases, 'purchases'], [d.sell_backs, 'sell-backs'],
+    [near(d.volume_yocto || '0'), 'NEAR volume'], [d.rounds, 'rounds'],
+    [d.buyers, 'buyers'], [d.wall_clock_seconds + 's', 'wall clock'],
+  ];
+  let html = '<h2>The run</h2><div class="stats">' +
+    stats.map(([n, k]) => '<div class="stat"><div class="n">' + esc(n) + '</div><div class="k">' + esc(k) + '</div></div>').join('') +
+    '</div>';
+
+  html += '<h2>Merchants</h2><table><thead><tr><th>Merchant</th><th>Account</th>' +
+          '<th class="n">Treasury</th><th>Buying?</th></tr></thead><tbody>' +
+    (d.merchants || []).map((m) =>
+      '<tr><td>' + esc(m.name) + '</td><td class="acct">' + esc(m.account_id) + '</td>' +
+      '<td class="n">' + near(m.treasury) + '</td><td><span class="pill ' + (m.closed ? 'shut">closed' : 'open">open') +
+      '</span></td></tr>').join('') + '</tbody></table>';
+
+  html += '<h2>Quotes, cheapest first</h2>';
+  for (const mat of d.materials || []) {
+    const rows = [...(mat.quotes || [])].sort((a, b) =>
+      BigInt(a.unit_price) < BigInt(b.unit_price) ? -1 : 1);
+    html += '<div class="material"><h3>' + esc(mat.item) + '</h3><table><thead><tr>' +
+      '<th>Merchant</th><th class="n">Ask</th><th class="n">Bid</th>' +
+      '<th class="n">Stock</th><th>Band</th><th class="n">Demand</th></tr></thead><tbody>';
+    for (const q of rows) {
+      html += '<tr><td>' + esc(q.merchant_name) + '</td>' +
+        '<td class="n">' + near(q.unit_price) + '</td>' +
+        '<td class="n">' + (q.merchant_bid ? near(q.merchant_bid) : '—') + '</td>' +
+        '<td class="n">' + esc(q.stock) + '</td><td>' + esc(q.band) + '</td>' +
+        '<td class="n">' + (Number(q.demand_bps) / 10000).toFixed(2) + '×</td></tr>' +
+        '<tr><td colspan="6" class="reason">' + esc(q.reason) + '</td></tr>';
+    }
+    html += '</tbody></table></div>';
+  }
+
+  if ((d.strategies || []).length) {
+    html += '<h2>Buyers by strategy</h2><table><thead><tr><th>Strategy</th><th class="n">Agents</th>' +
+      '<th class="n">Spent</th><th class="n">Earned</th><th class="n">Units held</th></tr></thead><tbody>' +
+      d.strategies.map((s) =>
+        '<tr><td>' + esc(s.strategy) + '</td><td class="n">' + esc(s.agents) + '</td>' +
+        '<td class="n">' + near(s.spent_yocto) + '</td><td class="n">' + near(s.earned_yocto) + '</td>' +
+        '<td class="n">' + esc(s.units_held) + '</td></tr>').join('') + '</tbody></table>';
+  }
+  $('#main').innerHTML = html;
+}
+
+fetch('market-snapshot.json')
+  .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() })
+  .then(render)
+  .catch((e) => {
+    // Say what is wrong and how to fix it, rather than showing an empty page.
+    $('#banner').textContent = 'No snapshot found.';
+    $('#main').innerHTML = '<div class="err"><p><strong>market-snapshot.json could not be read (' +
+      esc(e.message) + ').</strong></p><p>Generate it by running the economy simulation:</p>' +
+      '<p><code>npm run build:contracts &amp;&amp; npm run sim</code></p>' +
+      '<p>Opening this file directly with <code>file://</code> may also be blocked by the browser\'s ' +
+      'same-origin policy. Serve the folder instead: <code>npx serve web</code>, or ' +
+      '<code>python3 -m http.server -d web</code>.</p></div>';
+  });
+</script>
+</body>
+</html>

@@ -366,6 +366,49 @@ async fn a_scripted_economy_moves_without_a_single_model_call() -> anyhow::Resul
 
     // -------------------------------------------------------------- assertions
 
+    // ------------------------------------------------------------- snapshot
+    //
+    // web/market.html renders this. It is real output from this run, not a
+    // mock-up, and the page labels it as a simulation snapshot rather than
+    // live chain data — because until something is deployed, that is what it is.
+    {
+        let mut materials = Vec::new();
+        for (item, _) in MATERIALS {
+            let quotes = m.quotes(item, 1).await?;
+            materials.push(serde_json::json!({ "item": item, "quotes": quotes }));
+        }
+        let mut merchants = Vec::new();
+        for (name, acc) in &m.merchants {
+            let treasury = m.treasury_of(acc.id().as_str()).await?;
+            let shut: bool = m.market.view("is_closed")
+                .args_json(json!({ "merchant_id": acc.id() })).await?.json()?;
+            merchants.push(serde_json::json!({
+                "name": name, "account_id": acc.id(), "treasury": treasury.to_string(), "closed": shut,
+            }));
+        }
+        let snapshot = serde_json::json!({
+            "note": "Output of `npm run sim` against a local nearcore sandbox. Not live chain data.",
+            "generated_at_unix": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+            "network": "local sandbox (near-workspaces)",
+            "rounds": ROUNDS,
+            "buyers": BUYERS,
+            "purchases": total_trades,
+            "sell_backs": total_sales,
+            "volume_yocto": volume.to_string(),
+            "wall_clock_seconds": started.elapsed().as_secs(),
+            "merchants": merchants,
+            "materials": materials,
+            "strategies": by_strategy.iter().map(|(label, (n, spent, goods, earned))| serde_json::json!({
+                "strategy": label, "agents": n,
+                "spent_yocto": spent.to_string(), "earned_yocto": earned.to_string(), "units_held": goods,
+            })).collect::<Vec<_>>(),
+        });
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/market-snapshot.json");
+        std::fs::write(&path, serde_json::to_string_pretty(&snapshot)? + "\n")?;
+        println!("snapshot -> web/market-snapshot.json");
+    }
+
     assert!(total_trades > 40, "a {ROUNDS}-round run should produce real volume, got {total_trades}");
     assert!(volume > 0, "volume must be non-zero");
 

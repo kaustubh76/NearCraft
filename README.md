@@ -28,8 +28,10 @@ column before the description.
 | **Sandbox integration tests** | **Built and passing.** A real local NEAR node via `near-workspaces`. 12 tests: 4 prove a restricted key's limits *at the protocol level*, 6 cover the cross-contract buy/sell/rollback paths, 1 runs the economy, 1 proves the node starts. |
 | **Deployed to NEAR testnet** | **No**, and no longer on the critical path — every check below runs against a local sandbox instead. See the note on the faucet. |
 | The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls. `npm run sim` |
-| Minecraft plugin settlement path | **Not built.** |
-| Sealed-bid rounds (`swarms`) | **Not built.** Entering that track depends on it; see the honest note below. |
+| `web/market.html` | **Built.** Every merchant's ask, bid, stock band and the contract's own reason string. No external dependencies. |
+| `evidence/` | **Built.** `npm run evidence` retains each check's real output with its exit code and an output hash. Failures are kept, not edited out. |
+| Minecraft plugin settlement path | **Not built.** See the note below. |
+| Sealed-bid rounds (`swarms`) | **Not built, and that track is not entered.** See below. |
 
 **Nothing is deployed to NEAR testnet yet**, so no account id in this README is
 live and `npm run reads` / `npm run keys` will tell you so rather than invent
@@ -40,10 +42,21 @@ no account, no faucet and no credentials at all. Testnet deployment is a bonus
 claim rather than the proof, and `npm run deploy` is idempotent and ready for
 whenever an account exists.
 
-**On the `swarms` track:** the sealed-bid coordinator in `RULES.md` is designed
-but not implemented. If it is not deployed and simulated before the deadline, we
-will not select that track. Entering a track whose stated requirements are unmet
-is not something this project will do.
+**On the `swarms` track:** not entered. The sealed-bid coordinator described in
+[RULES.md](RULES.md) is designed and not implemented, so its requirements are
+unmet and selecting the track would be a false claim. `RULES.md` stays in the
+repo as the design it is. Tracks entered: **`games`** and **`security`**.
+
+**On the Minecraft integration:** the game world, its menus and its item
+delivery are baseline — they exist and they work, on Unichain. What is *not*
+done is repointing their settlement calls at NEAR. That turned out to be about
+six edit sites in one file, because the plugin holds no settlement logic at all;
+but building it needs a hash-pinned Paper jar and its bootstrapped library tree,
+which live only on the operator host. **No live NEAR gameplay has been recorded,
+and nothing here should be read as implying one.** The `games` track is entered
+on what is actually demonstrated: NEP-245 materials, one readable price rule,
+merchant reasoning the contract itself produces, and a full economy run anyone
+can reproduce.
 
 ---
 
@@ -193,6 +206,31 @@ assumption we had started from:
 - **An empty `method_names` means *any method on that contract*.** near-api-js
   defaults it to `[]`, which is a quiet way to issue an unrestricted key.
   `npm run keys` exits non-zero if it ever finds one.
+
+### Look at the market
+
+```sh
+npm run build:contracts && npm run sim    # writes web/market-snapshot.json
+python3 -m http.server -d web             # then open localhost:8000/market.html
+```
+
+Every merchant's ask, bid, stock band and — under each row — the contract's own
+explanation of the price. The page states plainly that it is a simulation
+snapshot rather than live chain data, because until something is deployed that
+is what it is.
+
+### Keep the evidence
+
+```sh
+npm run evidence
+```
+
+Runs each check and retains what it actually printed, under
+`evidence/runs/<topic>/<timestamp>/`, with the command, exit code, duration and
+a SHA-256 of the output. A failing run is written out exactly like a passing one.
+`evidence/SUMMARY.json` also records what these runs do **not** establish: they
+are all local, there is no public-chain result among them, and no Minecraft
+gameplay is exercised by any of them.
 
 ### The economy, running
 

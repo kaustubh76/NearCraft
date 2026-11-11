@@ -1,0 +1,221 @@
+{
+  "buyers": 20,
+  "generated_at_unix": 1794393279,
+  "materials": [
+    {
+      "item": "iron_ingot",
+      "quotes": [
+        {
+          "band": "normally stocked",
+          "closed": false,
+          "count": 1,
+          "demand_bps": "15280",
+          "item": "iron_ingot",
+          "merchant_bid": "488960000000000000000000",
+          "merchant_id": "ironmonger.test.near",
+          "merchant_name": "ironmonger",
+          "reason": "ironmonger holds 168 (normally stocked), and recent buying has pushed demand to 1.53x.",
+          "stock": "168",
+          "total": "611200000000000000000000",
+          "unit_price": "611200000000000000000000"
+        },
+        {
+          "band": "thin",
+          "closed": false,
+          "count": 1,
+          "demand_bps": "10240",
+          "item": "iron_ingot",
+          "merchant_bid": "491520000000000000000000",
+          "merchant_id": "stonecutter.test.near",
+          "merchant_name": "stonecutter",
+          "reason": "stonecutter holds 84 (thin), and recent buying has pushed demand to 1.02x.",
+          "stock": "84",
+          "total": "614400000000000000000000",
+          "unit_price": "614400000000000000000000"
+        }
+      ]
+    },
+    {
+      "item": "oak_log",
+      "quotes": [
+        {
+          "band": "well stocked",
+          "closed": false,
+          "count": 1,
+          "demand_bps": "16480",
+          "item": "oak_log",
+          "merchant_bid": "98880000000000000000000",
+          "merchant_id": "timberwright.test.near",
+          "merchant_name": "timberwright",
+          "reason": "timberwright holds 916 (well stocked), and recent buying has pushed demand to 1.65x.",
+          "stock": "916",
+          "total": "123600000000000000000000",
+          "unit_price": "123600000000000000000000"
+        },
+        {
+          "band": "normally stocked",
+          "closed": false,
+          "count": 1,
+          "demand_bps": "10240",
+          "item": "oak_log",
+          "merchant_bid": "81920000000000000000000",
+          "merchant_id": "chandler.test.near",
+          "merchant_name": "chandler",
+          "reason": "chandler holds 128 (normally stocked), and recent buying has pushed demand to 1.02x.",
+          "stock": "128",
+          "total": "102400000000000000000000",
+          "unit_price": "102400000000000000000000"
+        }
+      ]
+    },
+    {
+      "item": "stone",
+      "quotes": [
+        {
+          "band": "normally stocked",
+          "closed": false,
+          "count": 1,
+          "demand_bps": "11680",
+          "item": "stone",
+          "merchant_bid": "46720000000000000000000",
+          "merchant_id": "timberwright.test.near",
+          "merchant_name": "timberwright",
+          "reason": "timberwright holds 244 (normally stocked), and recent buying has pushed demand to 1.17x.",
+          "stock": "244",
+          "total": "58400000000000000000000",
+          "unit_price": "58400000000000000000000"
+        },
+        {
+          "band": "well stocked",
+          "closed": false,
+          "count": 1,
+          "demand_bps": "15280",
+          "item": "stone",
+          "merchant_bid": "45840000000000000000000",
+          "merchant_id": "stonecutter.test.near",
+          "merchant_name": "stonecutter",
+          "reason": "stonecutter holds 1960 (well stocked), and recent buying has pushed demand to 1.53x.",
+          "stock": "1960",
+          "total": "57300000000000000000000",
+          "unit_price": "57300000000000000000000"
+        }
+      ]
+    },
+    {
+      "item": "coal",
+      "quotes": [
+        {
+          "band": "normally stocked",
+          "closed": false,
+          "count": 1,
+          "demand_bps": "12640",
+          "item": "coal",
+          "merchant_bid": "151680000000000000000000",
+          "merchant_id": "ironmonger.test.near",
+          "merchant_name": "ironmonger",
+          "reason": "ironmonger holds 468 (normally stocked), and recent buying has pushed demand to 1.26x.",
+          "stock": "468",
+          "total": "189600000000000000000000",
+          "unit_price": "189600000000000000000000"
+        },
+        {
+          "band": "normally stocked",
+          "closed": false,
+          "count": 1,
+          "demand_bps": "12400",
+          "item": "coal",
+          "merchant_bid": "148800000000000000000000",
+          "merchant_id": "collier.test.near",
+          "merchant_name": "collier",
+          "reason": "collier holds 216 (normally stocked), and recent buying has pushed demand to 1.24x.",
+          "stock": "216",
+          "total": "186000000000000000000000",
+          "unit_price": "186000000000000000000000"
+        }
+      ]
+    }
+  ],
+  "merchants": [
+    {
+      "account_id": "ironmonger.test.near",
+      "closed": false,
+      "name": "ironmonger",
+      "treasury": "82506960000000000000000000"
+    },
+    {
+      "account_id": "timberwright.test.near",
+      "closed": false,
+      "name": "timberwright",
+      "treasury": "41603200000000000000000000"
+    },
+    {
+      "account_id": "stonecutter.test.near",
+      "closed": false,
+      "name": "stonecutter",
+      "treasury": "20415520000000000000000000"
+    },
+    {
+      "account_id": "collier.test.near",
+      "closed": false,
+      "name": "collier",
+      "treasury": "9648000000000000000000000"
+    },
+    {
+      "account_id": "chandler.test.near",
+      "closed": false,
+      "name": "chandler",
+      "treasury": "1185120000000000000000000"
+    }
+  ],
+  "network": "local sandbox (near-workspaces)",
+  "note": "Output of `npm run sim` against a local nearcore sandbox. Not live chain data.",
+  "purchases": 118,
+  "rounds": 8,
+  "sell_backs": 28,
+  "strategies": [
+    {
+      "agents": 4,
+      "earned_yocto": "0",
+      "spent_yocto": "2544000000000000000000000",
+      "strategy": "bargain",
+      "units_held": 32
+    },
+    {
+      "agents": 3,
+      "earned_yocto": "18581760000000000000000000",
+      "spent_yocto": "20362400000000000000000000",
+      "strategy": "dumper",
+      "units_held": 0
+    },
+    {
+      "agents": 3,
+      "earned_yocto": "4503040000000000000000000",
+      "spent_yocto": "7447200000000000000000000",
+      "strategy": "flipper",
+      "units_held": 44
+    },
+    {
+      "agents": 4,
+      "earned_yocto": "0",
+      "spent_yocto": "26610000000000000000000000",
+      "strategy": "greedy",
+      "units_held": 128
+    },
+    {
+      "agents": 3,
+      "earned_yocto": "0",
+      "spent_yocto": "20108800000000000000000000",
+      "strategy": "hoarder",
+      "units_held": 96
+    },
+    {
+      "agents": 3,
+      "earned_yocto": "0",
+      "spent_yocto": "11871200000000000000000000",
+      "strategy": "noise",
+      "units_held": 60
+    }
+  ],
+  "volume_yocto": "88943600000000000000000000",
+  "wall_clock_seconds": 111
+}
