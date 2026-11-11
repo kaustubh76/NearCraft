@@ -17,7 +17,7 @@
 //! than pushed, because a failed push would cost someone their goods.
 
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
-use near_sdk::json_types::U128;
+use near_sdk::json_types::{U128, U64};
 use near_sdk::store::IterableMap;
 use near_sdk::{
     env, ext_contract, near, require, AccountId, Gas, NearToken, PanicOnDefault, Promise,
@@ -54,6 +54,14 @@ trait MarketCallbacks {
         item: String,
         count: U128,
         paid: U128,
+    );
+    fn on_materials_pulled(
+        &mut self,
+        seller_id: AccountId,
+        merchant_id: AccountId,
+        item: String,
+        count: U128,
+        proceeds: U128,
     );
 }
 
@@ -362,6 +370,106 @@ impl Market {
         self.settle_purchase(buyer_id, merchant_id, item, count, total)
     }
 
+    /// Sell materials to a merchant using an approval granted at account setup.
+    ///
+    /// **Not payable, on purpose.** A player whose account holds only a
+    /// function-call access key cannot attach a deposit, so they cannot call
+    /// NEP-245's `mt_transfer_call` — it requires 1 yoctoNEAR. Here the market
+    /// *pulls* the materials instead, attaching that yoctoNEAR from its own
+    /// balance, which makes selling reachable by a scoped key and therefore
+    /// gasless when relayed. See docs/GASLESS.md.
+    ///
+    /// Only as much is pulled as the merchant can actually pay for, so the
+    /// seller keeps the remainder rather than having it pulled and refunded.
+    pub fn sell(&mut self, merchant_id: AccountId, item: String, count: u32, approval_id: U64) -> Promise {
+        require!(count > 0, "count must be positive");
+        let seller_id = env::predecessor_account_id();
+        let merchant = self.merchants.get(&merchant_id).cloned().expect("unknown merchant");
+        let key = ListingKey { merchant_id: merchant_id.clone(), item: item.clone() };
+        let listing = self.listings.get(&key).cloned().expect("this merchant does not deal in that material");
+
+        let demand = self.current_demand(&listing);
+        let unit_bid = buy_price(listing.base_price.0, listing.stock.0, demand);
+        let spare = merchant.treasury.0.saturating_sub(merchant.floor.0);
+        let affordable = spare.checked_div(unit_bid).unwrap_or(0);
+        let take = (count as u128).min(affordable);
+        require!(take > 0, "this merchant cannot afford a single unit right now");
+        let proceeds = unit_bid.saturating_mul(take);
+
+        // Bookkeeping first, then the pull; `on_materials_pulled` unwinds it if
+        // the pull fails, the same shape as `buy`.
+        self.listings.insert(
+            key,
+            Listing {
+                stock: U128(listing.stock.0 + take),
+                demand_bps: U128(pricing::ease_demand(demand, take)),
+                demand_at: env::block_timestamp(),
+                ..listing
+            },
+        );
+        let mut merchant = merchant;
+        merchant.treasury = U128(merchant.treasury.0 - proceeds);
+        self.merchants.insert(merchant_id.clone(), merchant);
+        self.credit(&seller_id, proceeds);
+
+        ext_items::ext(self.items_contract.clone())
+            .with_attached_deposit(ONE_YOCTO)
+            .with_static_gas(GAS_FOR_MT_TRANSFER)
+            .mt_transfer(
+                env::current_account_id(),
+                item.clone(),
+                U128(take),
+                // The approval the player granted once, at account setup.
+                Some((seller_id.clone(), approval_id.0)),
+                Some("nearcraft sale".into()),
+            )
+            .then(
+                ext_self::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_DELIVERY_CALLBACK)
+                    .on_materials_pulled(seller_id, merchant_id, item, U128(take), U128(proceeds)),
+            )
+    }
+
+    /// Unwind the sale if the materials could not be pulled — a missing,
+    /// stale or exhausted approval, or a seller who no longer holds them.
+    #[private]
+    pub fn on_materials_pulled(
+        &mut self,
+        seller_id: AccountId,
+        merchant_id: AccountId,
+        item: String,
+        count: U128,
+        proceeds: U128,
+        #[callback_result] result: Result<(), PromiseError>,
+    ) -> bool {
+        if result.is_ok() {
+            return true;
+        }
+        let key = ListingKey { merchant_id: merchant_id.clone(), item };
+        if let Some(listing) = self.listings.get(&key).cloned() {
+            self.listings.insert(
+                key,
+                Listing {
+                    stock: U128(listing.stock.0.saturating_sub(count.0)),
+                    demand_bps: U128(pricing::bump_demand(listing.demand_bps.0, count.0)),
+                    demand_at: env::block_timestamp(),
+                    ..listing
+                },
+            );
+        }
+        if let Some(mut merchant) = self.merchants.get(&merchant_id).cloned() {
+            merchant.treasury = U128(merchant.treasury.0 + proceeds.0);
+            self.merchants.insert(merchant_id, merchant);
+        }
+        // Take the credit back: nothing was actually sold.
+        let held = self.credits.get(&seller_id).copied().unwrap_or(U128(0)).0;
+        self.credits.insert(seller_id.clone(), U128(held.saturating_sub(proceeds.0)));
+        env::log_str(&format!(
+            "could not pull materials from {seller_id}; sale unwound (approval missing, stale or exhausted?)"
+        ));
+        false
+    }
+
     // ----------------------------------------------------------------- sell
 
     /// NEP-245 receiver hook. A player sells by calling `mt_transfer_call` on
@@ -601,6 +709,13 @@ impl Market {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Test-only convenience: the merchant's treasury as a plain integer.
+    impl Market {
+        fn merchant_treasury_for(&self, id: AccountId) -> u128 {
+            self.merchant(id).unwrap().treasury.0
+        }
+    }
     use near_sdk::test_utils::{accounts, get_logs, VMContextBuilder};
     use near_sdk::testing_env;
 
@@ -1116,6 +1231,109 @@ mod tests {
         // No 24-digit integer anywhere in player-visible text.
         assert!(!reason.chars().collect::<Vec<_>>().windows(18).any(|w| w.iter().all(|c| c.is_ascii_digit())),
             "a long raw integer leaked into the tooltip: {reason}");
+    }
+
+    // ------------------------------------- selling via an approval (pull)
+    //
+    // The push path (mt_transfer_call -> mt_on_transfer) needs 1 yoctoNEAR,
+    // which a function-call access key cannot attach. These cover the pull
+    // path, which is what makes selling reachable for a key-less player.
+
+    fn seller() -> AccountId { accounts(3) }
+
+    #[test]
+    fn selling_via_an_approval_pays_the_seller_and_grows_the_shelf() {
+        let mut m = market();
+        let bid = m.quote(ironmonger(), IRON.to_string(), 1).merchant_bid.unwrap().0;
+        let treasury_before = m.merchant_treasury_for(ironmonger());
+
+        ctx(seller(), 0); // zero deposit: the whole point
+        let _ = m.sell(ironmonger(), IRON.to_string(), 8, U64(7));
+
+        assert_eq!(m.credit_of(seller()), U128(bid * 8), "paid at the posted bid");
+        assert_eq!(m.quote(ironmonger(), IRON.to_string(), 1).stock, U128(264));
+        assert_eq!(m.merchant_treasury_for(ironmonger()), treasury_before - bid * 8);
+    }
+
+    /// Only as much is pulled as the merchant can pay for, so the seller keeps
+    /// the rest instead of having it pulled and handed back.
+    #[test]
+    fn selling_takes_only_what_the_merchant_can_afford() {
+        ctx(owner(), 0);
+        let mut m = Market::new(owner(), items());
+        m.register_merchant(ironmonger(), "Ironmonger".into(), U128(BASE));
+        m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(256));
+        ctx(owner(), BASE * 3); // 2 BASE of spare
+        m.fund_merchant(ironmonger());
+
+        let bid = m.quote(ironmonger(), IRON.to_string(), 1).merchant_bid.unwrap().0;
+        let affordable = (BASE * 2) / bid;
+        assert!(affordable > 0 && affordable < 100, "need a partial case, got {affordable}");
+
+        ctx(seller(), 0);
+        let _ = m.sell(ironmonger(), IRON.to_string(), 100, U64(1));
+        assert_eq!(m.credit_of(seller()), U128(bid * affordable), "paid only for what it took");
+        assert!(m.merchant(ironmonger()).unwrap().treasury.0 >= BASE, "floor intact");
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot afford a single unit")]
+    fn a_merchant_that_cannot_afford_one_unit_refuses_the_sale() {
+        ctx(owner(), 0);
+        let mut m = Market::new(owner(), items());
+        m.register_merchant(ironmonger(), "Ironmonger".into(), U128(0));
+        m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(256));
+        ctx(owner(), BASE / 10);
+        m.fund_merchant(ironmonger());
+        ctx(seller(), 0);
+        m.sell(ironmonger(), IRON.to_string(), 1, U64(1));
+    }
+
+    /// A missing, stale or exhausted approval means the pull fails. The sale
+    /// must unwind completely — otherwise a seller would be credited for
+    /// materials that never moved.
+    #[test]
+    fn a_failed_pull_unwinds_the_sale_completely() {
+        let mut m = market();
+        let treasury_before = m.merchant_treasury_for(ironmonger());
+        let bid = m.quote(ironmonger(), IRON.to_string(), 1).merchant_bid.unwrap().0;
+
+        ctx(seller(), 0);
+        let _ = m.sell(ironmonger(), IRON.to_string(), 8, U64(7));
+        assert_eq!(m.credit_of(seller()), U128(bid * 8));
+        assert_eq!(m.quote(ironmonger(), IRON.to_string(), 1).stock, U128(264));
+
+        ctx("market.test.near".parse().unwrap(), 0);
+        let ok = m.on_materials_pulled(
+            seller(), ironmonger(), IRON.to_string(), U128(8), U128(bid * 8),
+            Err(PromiseError::Failed),
+        );
+
+        assert!(!ok);
+        assert_eq!(m.credit_of(seller()), U128(0), "the credit is taken back");
+        assert_eq!(m.quote(ironmonger(), IRON.to_string(), 1).stock, U128(256), "shelf restored");
+        assert_eq!(m.merchant_treasury_for(ironmonger()), treasury_before, "treasury restored");
+        assert!(get_logs().iter().any(|l| l.contains("sale unwound")));
+    }
+
+    #[test]
+    fn a_successful_pull_keeps_the_sale() {
+        let mut m = market();
+        let bid = m.quote(ironmonger(), IRON.to_string(), 1).merchant_bid.unwrap().0;
+        ctx(seller(), 0);
+        let _ = m.sell(ironmonger(), IRON.to_string(), 4, U64(7));
+        ctx("market.test.near".parse().unwrap(), 0);
+        assert!(m.on_materials_pulled(seller(), ironmonger(), IRON.to_string(), U128(4), U128(bid * 4), Ok(())));
+        assert_eq!(m.credit_of(seller()), U128(bid * 4));
+        assert_eq!(m.quote(ironmonger(), IRON.to_string(), 1).stock, U128(260));
+    }
+
+    #[test]
+    #[should_panic(expected = "count must be positive")]
+    fn selling_nothing_is_refused() {
+        let mut m = market();
+        ctx(seller(), 0);
+        m.sell(ironmonger(), IRON.to_string(), 0, U64(1));
     }
 
 }

@@ -51,7 +51,7 @@ Two things worth knowing, both found by measuring:
   `signedDelegate`. Passing the wrapper fails with an unhelpful *"cannot read
   properties of undefined (reading 'senderId')"*.
 
-## The limit: a scoped key cannot sell
+## Selling: the problem, and how it is actually solved
 
 nearcore refuses a deposit on the inner action of a delegate signed by a
 function-call key:
@@ -60,44 +60,94 @@ function-call key:
 Deposit is not allowed with function call
 ```
 
-The no-deposit rule on function-call keys applies to the delegate's inner action
-too — the relayer cannot supply it on the player's behalf. Two consequences:
+The no-deposit rule applies through the delegate, and the relayer cannot supply
+it either. **Buying is unaffected** — players spend from a credit balance via
+`buy_with_credit`, which attaches nothing. But NEP-245 requires *exactly 1
+yoctoNEAR* on `mt_transfer_call`, deliberately, so that anything moving tokens
+carries a real signature. A player holding only a scoped key cannot produce it.
 
-**Buying is fine.** Players spend from a credit balance inside the market
-contract via `buy_with_credit`, which attaches nothing. This is the same reason
-agents work that way, and it means a player's in-game money is contract-held —
-which is the right shape for a game where the chain is invisible anyway.
+So selling cannot go through the push path at all. It goes the other way: the
+market **pulls**, under an approval.
 
-**Selling does not work with a scoped key.** NEP-245 requires *exactly 1
-yoctoNEAR* on `mt_transfer_call`, as a deliberate safety property: it forces a
-real signature for anything that moves tokens. A function-call key cannot attach
-it, so a player holding only a scoped key cannot sell materials back to a
-merchant.
+### The mechanism
 
-This is **not implemented and not worked around.** The options we considered and
-why each was rejected:
+```
+player → market.sell(item, count, approval_id)     non-payable, relayed, free
+market → items.mt_transfer(market, item, count,
+            approval: Some((player, approval_id)))  1 yoctoNEAR from MARKET
+market → credits the player
+```
+
+`market.sell` carries no `#[payable]`, which is why a scoped key can call it —
+and `scripts/check-nep245.mjs` asserts it stays that way, because making it
+payable would silently break every player.
+
+### The chicken-and-egg, and the three-transaction answer
+
+`mt_approve` needs a deposit too, so a player who only ever holds a scoped key
+could never grant one. The approval therefore has to be made **while a
+full-access key still exists**, and that key must then be destroyed.
+`backend/near/onboarding.mjs` does exactly that:
+
+1. **root:** `CreateAccount` + `Transfer` + `AddKey(full access)`
+2. **player, with that key:** `mt_approve`, granting the market a standing
+   allowance over every sellable material. One call covers all of them, since
+   `mt_approve` takes arrays.
+3. **player:** `AddKey(function-call, scoped)` **then** `DeleteKey(full access)`
+   — in that order, in one transaction. Reversed or split, a failure between
+   them would leave an account nobody can use.
+
+The player never sees a key at any point, and when onboarding finishes **no
+full-access key exists for the account**. `tests/near/gasless.mjs` asserts that
+before it tries to sell:
+
+```js
+assert.equal(full.length, 0, 'the player must hold no full-access key after onboarding')
+assert.equal(keys.length, 1, 'exactly one key, and it is scoped')
+```
+
+### Measured
+
+```
+player  delta  274737763755900000000 yoctoNEAR     (gained)
+relayer delta -58153354371381300000000 yoctoNEAR
+player materials 50 -> 40, credited 600000000000000000000000
+```
+
+The player's balance goes **up**. That is not a typo and it is worth knowing:
+nearcore refunds unused gas to the delegate's **sender**, even though the
+relayer prepaid it, so a sender can finish a relayed call marginally ahead. The
+buy path happens to net to exactly zero; this one does not. The claim asserted
+is therefore *the player never pays* — `delta >= 0` — rather than *the balance
+never moves*, because asserting equality here would be asserting an accident.
+
+### One spec ambiguity we had to decide
+
+The Approval Management extension says transfers "must nullify approvals on
+success". For a non-fungible token that is unambiguous. For multi-token amounts
+it cannot mean "delete the whole allowance" — the owner still holds the
+remainder, and a standing operator approval would be impossible, which is the
+entire use case above. **We decrement by the amount transferred** and remove the
+entry at zero. The `Approval.amount` field exists precisely so there is
+something to decrement. Also: `approval_id` is typed `number` in the method
+signatures but `string` in the `Approval` struct; we use `U64`, a string over
+JSON, which is NEAR's normal convention for 64-bit values.
+
+### What we declined to do
 
 | Option | Why not |
 |---|---|
 | Have the relayer attach the 1 yoctoNEAR | Measured: refused. The restriction is on the inner action. |
 | Add a non-payable transfer method to the items contract | It would remove exactly the safety property NEP-245's 1-yoctoNEAR rule exists to provide. Not worth breaking a standard to pass a requirement. |
-| NEP-245 Approval Management, so the market moves tokens for the player | `mt_approve` also requires a deposit, so onboarding would still need one full-access signature. Honest and workable — and the design we would build next. |
 | Give the player a full-access key | Reintroduces the seed phrase the requirement exists to remove. |
-
-**The honest position:** the gather → buy half of the loop is gasless and
-proven. The sell half needs one signature the scoped key cannot produce. The
-cleanest fix is a single opt-in approval at account setup, after which selling is
-gasless too — designed, not built.
-
-We think this is a genuine finding rather than a shortfall to hide. NEP-245's
-1-yoctoNEAR requirement and NEAR's gasless-agent story are in tension, and
-anyone building agent-operated NEP-245 flows will meet it.
 
 ## What this does and does not establish
 
-- **Established:** a player account derived from an identity, holding only a
-  scoped key, buys goods on a real nearcore node while paying nothing. The
-  relayer's balance falls; the player's does not.
-- **Not established:** any real OAuth flow — token verification is stubbed. No
-  testnet deployment. No Minecraft client involved. Selling via a scoped key
-  does not work and is not claimed to.
+- **Established, on a real nearcore node:** a player account derived from an
+  identity, holding **no full-access key at all**, both buys and sells while
+  paying nothing. The relayer's balance falls in both cases. Approvals are
+  granted once during onboarding and the bootstrap key is destroyed in the same
+  transaction that installs the scoped one.
+- **Not established:** any real OAuth flow — token verification is stubbed
+  behind `verifyIdentity`, and that is the one genuinely external dependency
+  left. No testnet deployment. No Minecraft client is involved in any of it.

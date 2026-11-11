@@ -10,21 +10,39 @@
 //! is written by hand against nep-0245.md.
 //!
 //! Scope, stated plainly:
-//!   * Implemented — the NEP-245 **core** interface and the **Enumeration**
-//!     extension.
-//!   * Not implemented — the **Approval Management** and **Metadata**
-//!     extensions. The `approval`/`approvals` arguments are part of the core
-//!     signatures, so they are accepted but **rejected when non-null** rather
-//!     than silently ignored: a caller passing an approval means something by
-//!     it, and quietly dropping it would be a lie about what happened.
-//!     Metadata is redundant here because a token id *is* the material name.
+//!   * Implemented — the NEP-245 **core** interface, the **Enumeration**
+//!     extension and the **Approval Management** extension.
+//!   * Not implemented — **Metadata**, which is redundant here because a token
+//!     id *is* the material name (`iron_ingot`), and whose extension would
+//!     force a non-optional `base_metadata_id` onto `Token`.
+//!
+//! Approval Management exists for one concrete reason: a player whose account
+//! holds only a function-call access key cannot attach the 1 yoctoNEAR that
+//! `mt_transfer_call` requires, so without approvals such a player can buy but
+//! can never sell. With one approval granted at account setup, the market moves
+//! the player's materials on their behalf and selling costs the player nothing.
+//! See `docs/GASLESS.md` for the measurement that forced this.
+//!
+//! ## Two spec ambiguities, decided and disclosed
+//!
+//! 1. `approval_id` is typed `number` in the method signatures but `string` in
+//!    the `Approval` struct. We use `U64` — a string over JSON — which is
+//!    NEAR's normal convention for 64-bit values and avoids a float.
+//! 2. The extension says transfers "must nullify approvals on success". For a
+//!    *non-fungible* token that is unambiguous. For multi-token amounts it
+//!    cannot mean "delete the whole allowance", because the owner still holds
+//!    the remainder and a standing operator approval would be impossible — the
+//!    very use case above. We **decrement by the amount transferred** and
+//!    remove the entry when it reaches zero. The `Approval.amount` field exists
+//!    precisely so there is something to decrement.
 
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
-use near_sdk::json_types::U128;
+use near_sdk::json_types::{U128, U64};
 use near_sdk::store::{IterableMap, LookupMap};
+use std::collections::HashMap;
 use near_sdk::{
-    assert_one_yocto, env, ext_contract, near, require, AccountId, Gas, PanicOnDefault,
-    PromiseError, PromiseOrValue,
+    assert_one_yocto, env, ext_contract, near, require, AccountId, Gas, NearToken,
+    PanicOnDefault, Promise, PromiseError, PromiseOrValue,
 };
 
 mod events;
@@ -34,6 +52,8 @@ use events::{amount_strings, MtBurnLog, MtMintLog, MtTransferLog};
 const GAS_FOR_RESOLVE_TRANSFER: Gas = Gas::from_tgas(11);
 /// Gas floor a `*_transfer_call` must be able to forward to the receiver.
 const GAS_FOR_MT_ON_TRANSFER: Gas = Gas::from_tgas(25);
+/// Fire-and-forget notification to a newly approved account.
+const GAS_FOR_MT_ON_APPROVE: Gas = Gas::from_tgas(10);
 
 /// NEP-245 core token view. `owner_id` is `None` for fungible-style tokens,
 /// which every NearCraft material is — stock is a shared supply, not a unique item.
@@ -42,6 +62,35 @@ const GAS_FOR_MT_ON_TRANSFER: Gas = Gas::from_tgas(25);
 pub struct Token {
     pub token_id: String,
     pub owner_id: Option<AccountId>,
+}
+
+/// One account's standing permission to move another's materials.
+#[near(serializers = [json, borsh])]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Approval {
+    /// How much of this token id the approved account may still move.
+    pub amount: U128,
+    /// Incremented on every grant, including a re-grant, so a stale id cannot
+    /// be replayed after the owner has changed their mind.
+    pub approval_id: U64,
+}
+
+/// Every account approved for one (owner, token id) pair.
+#[near(serializers = [json])]
+#[derive(Clone, Debug)]
+pub struct TokenApproval {
+    pub approval_owner_id: AccountId,
+    pub approved_account_ids: HashMap<AccountId, Approval>,
+}
+
+/// Approvals are stored per (token id, owner) so both lookup and enumeration
+/// work from one collection — `mt_token_approval` has to list every approved
+/// account, which a `LookupMap` alone cannot do.
+#[derive(BorshSerialize, BorshDeserialize, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[borsh(crate = "near_sdk::borsh")]
+struct ApprovalsKey {
+    token_id: String,
+    owner_id: AccountId,
 }
 
 /// Balance key. Borsh-encoded as a pair, so one `LookupMap` covers every
@@ -66,6 +115,19 @@ trait MultiTokenReceiver {
     ) -> Vec<U128>;
 }
 
+#[ext_contract(ext_mt_approval_receiver)]
+#[allow(dead_code)]
+trait MultiTokenApprovalReceiver {
+    fn mt_on_approve(
+        &mut self,
+        token_ids: Vec<String>,
+        amounts: Vec<U128>,
+        owner_id: AccountId,
+        approval_ids: Vec<U64>,
+        msg: String,
+    );
+}
+
 #[ext_contract(ext_self)]
 #[allow(dead_code)]
 trait MultiTokenResolver {
@@ -86,6 +148,10 @@ pub struct Items {
     balances: LookupMap<BalanceKey, u128>,
     /// Iterable so Enumeration can list the catalog without a second index.
     supply: IterableMap<String, u128>,
+    /// (token id, owner) -> the accounts it has approved, with amount and id.
+    approvals: IterableMap<ApprovalsKey, Vec<(AccountId, u128, u64)>>,
+    /// Monotonic across the whole contract. A grant never reuses an id.
+    next_approval_id: u64,
 }
 
 #[near]
@@ -96,6 +162,8 @@ impl Items {
             owner_id,
             balances: LookupMap::new(b"b".to_vec()),
             supply: IterableMap::new(b"s".to_vec()),
+            approvals: IterableMap::new(b"a".to_vec()),
+            next_approval_id: 1,
         }
     }
 
@@ -159,12 +227,16 @@ impl Items {
         memo: Option<String>,
     ) {
         assert_one_yocto();
-        Self::reject_approval(approval.is_some());
-        let sender_id = env::predecessor_account_id();
-        self.internal_transfer(&sender_id, &receiver_id, &token_id, amount.0);
+        let caller = env::predecessor_account_id();
+        let on_behalf = approval.is_some();
+        let source = self.resolve_source(&caller, approval, &token_id, amount.0);
+        self.internal_transfer(&source, &receiver_id, &token_id, amount.0);
         events::emit_transfer(MtTransferLog {
-            authorized_id: None,
-            old_owner_id: &sender_id,
+            // The spec's `authorized_id` names who initiated a transfer when
+            // that is not the owner — so it is set exactly when an approval was
+            // used, and left out otherwise.
+            authorized_id: if on_behalf { Some(&caller) } else { None },
+            old_owner_id: &source,
             new_owner_id: &receiver_id,
             token_ids: &[token_id],
             amounts: amount_strings(&[amount.0]),
@@ -182,20 +254,20 @@ impl Items {
         memo: Option<String>,
     ) {
         assert_one_yocto();
-        Self::reject_approval(approvals.iter().flatten().any(|a| a.is_some()));
         require!(!token_ids.is_empty(), "token_ids must not be empty");
         require!(token_ids.len() == amounts.len(), "token_ids and amounts must be the same length");
         if let Some(approvals) = &approvals {
             require!(approvals.len() == token_ids.len(), "approvals must match token_ids length");
         }
-        let sender_id = env::predecessor_account_id();
+        let caller = env::predecessor_account_id();
         let raw: Vec<u128> = amounts.iter().map(|a| a.0).collect();
+        let (source, on_behalf) = self.resolve_batch_source(&caller, approvals, &token_ids, &raw);
         for (token_id, amount) in token_ids.iter().zip(raw.iter()) {
-            self.internal_transfer(&sender_id, &receiver_id, token_id, *amount);
+            self.internal_transfer(&source, &receiver_id, token_id, *amount);
         }
         events::emit_transfer(MtTransferLog {
-            authorized_id: None,
-            old_owner_id: &sender_id,
+            authorized_id: if on_behalf { Some(&caller) } else { None },
+            old_owner_id: &source,
             new_owner_id: &receiver_id,
             token_ids: &token_ids,
             amounts: amount_strings(&raw),
@@ -227,7 +299,6 @@ impl Items {
         msg: String,
     ) -> PromiseOrValue<Vec<U128>> {
         assert_one_yocto();
-        Self::reject_approval(approvals.iter().flatten().any(|a| a.is_some()));
         require!(!token_ids.is_empty(), "token_ids must not be empty");
         require!(token_ids.len() == amounts.len(), "token_ids and amounts must be the same length");
         require!(
@@ -235,13 +306,14 @@ impl Items {
             "not enough gas attached for a transfer_call"
         );
 
-        let sender_id = env::predecessor_account_id();
+        let caller = env::predecessor_account_id();
         let raw: Vec<u128> = amounts.iter().map(|a| a.0).collect();
+        let (sender_id, on_behalf) = self.resolve_batch_source(&caller, approvals, &token_ids, &raw);
         for (token_id, amount) in token_ids.iter().zip(raw.iter()) {
             self.internal_transfer(&sender_id, &receiver_id, token_id, *amount);
         }
         events::emit_transfer(MtTransferLog {
-            authorized_id: None,
+            authorized_id: if on_behalf { Some(&caller) } else { None },
             old_owner_id: &sender_id,
             new_owner_id: &receiver_id,
             token_ids: &token_ids,
@@ -320,6 +392,126 @@ impl Items {
             });
         }
         used
+    }
+
+    // ------------------------------------- Approval Management extension
+
+    /// Approve `account_id` to move up to `amounts` of `token_ids` on the
+    /// caller's behalf.
+    ///
+    /// Payable: the deposit covers the storage each approval occupies. A
+    /// re-grant **increments the approval id**, which is what makes a stale id
+    /// unusable once an owner has changed their mind.
+    #[payable]
+    pub fn mt_approve(
+        &mut self,
+        token_ids: Vec<String>,
+        amounts: Vec<U128>,
+        account_id: AccountId,
+        msg: Option<String>,
+    ) -> Option<Promise> {
+        require!(
+            env::attached_deposit() >= NearToken::from_yoctonear(1),
+            "mt_approve requires a deposit to cover approval storage"
+        );
+        require!(!token_ids.is_empty(), "token_ids must not be empty");
+        require!(token_ids.len() == amounts.len(), "token_ids and amounts must be the same length");
+        let owner_id = env::predecessor_account_id();
+        require!(owner_id != account_id, "approving yourself has no effect");
+
+        let mut ids = Vec::with_capacity(token_ids.len());
+        for (token_id, amount) in token_ids.iter().zip(amounts.iter()) {
+            require!(self.supply.contains_key(token_id), "unknown token_id");
+            require!(amount.0 > 0, "an approval of zero is a revocation; use mt_revoke");
+            let approval_id = self.next_approval_id;
+            self.next_approval_id += 1;
+            ids.push(U64(approval_id));
+
+            let key = ApprovalsKey { token_id: token_id.clone(), owner_id: owner_id.clone() };
+            let mut entries = self.approvals.get(&key).cloned().unwrap_or_default();
+            match entries.iter().position(|(who, _, _)| who == &account_id) {
+                Some(at) => entries[at] = (account_id.clone(), amount.0, approval_id),
+                None => entries.push((account_id.clone(), amount.0, approval_id)),
+            }
+            self.approvals.insert(key, entries);
+        }
+
+        // The spec requires notifying the approved account when `msg` is given.
+        // Fire and forget: the grant stands whatever the receiver does with it.
+        msg.map(|msg| {
+            ext_mt_approval_receiver::ext(account_id.clone())
+                .with_static_gas(GAS_FOR_MT_ON_APPROVE)
+                .mt_on_approve(token_ids, amounts, owner_id, ids, msg)
+        })
+    }
+
+    /// Withdraw one account's permission over the given materials.
+    #[payable]
+    pub fn mt_revoke(&mut self, token_ids: Vec<String>, account_id: AccountId) {
+        assert_one_yocto();
+        let owner_id = env::predecessor_account_id();
+        for token_id in token_ids {
+            let key = ApprovalsKey { token_id, owner_id: owner_id.clone() };
+            if let Some(mut entries) = self.approvals.get(&key).cloned() {
+                entries.retain(|(who, _, _)| who != &account_id);
+                if entries.is_empty() { self.approvals.remove(&key); } else { self.approvals.insert(key, entries); }
+            }
+        }
+    }
+
+    /// Withdraw every account's permission over the given materials.
+    #[payable]
+    pub fn mt_revoke_all(&mut self, token_ids: Vec<String>) {
+        assert_one_yocto();
+        let owner_id = env::predecessor_account_id();
+        for token_id in token_ids {
+            self.approvals.remove(&ApprovalsKey { token_id, owner_id: owner_id.clone() });
+        }
+    }
+
+    /// Whether `approved_account_id` may move at least `amounts` of each token
+    /// id for the caller — optionally pinned to specific approval ids.
+    pub fn mt_is_approved(
+        &self,
+        token_ids: Vec<String>,
+        approved_account_id: AccountId,
+        amounts: Vec<U128>,
+        approval_ids: Option<Vec<U64>>,
+    ) -> bool {
+        if token_ids.len() != amounts.len() {
+            return false;
+        }
+        if let Some(ids) = &approval_ids {
+            if ids.len() != token_ids.len() {
+                return false;
+            }
+        }
+        let owner_id = env::predecessor_account_id();
+        token_ids.iter().enumerate().all(|(i, token_id)| {
+            match self.find_approval(&owner_id, &approved_account_id, token_id) {
+                Some((amount, id)) => {
+                    amount >= amounts[i].0
+                        && approval_ids.as_ref().is_none_or(|ids| ids[i].0 == id)
+                }
+                None => false,
+            }
+        })
+    }
+
+    /// Every account the caller has approved for one material.
+    pub fn mt_token_approval(&self, token_id: String, account_id: AccountId) -> TokenApproval {
+        let entries = self
+            .approvals
+            .get(&ApprovalsKey { token_id, owner_id: account_id.clone() })
+            .cloned()
+            .unwrap_or_default();
+        TokenApproval {
+            approval_owner_id: account_id,
+            approved_account_ids: entries
+                .into_iter()
+                .map(|(who, amount, id)| (who, Approval { amount: U128(amount), approval_id: U64(id) }))
+                .collect(),
+        }
     }
 
     // ------------------------------------------------------------------ views
@@ -415,10 +607,75 @@ impl Items {
         require!(env::predecessor_account_id() == self.owner_id, "owner only");
     }
 
-    /// Approval Management is not implemented, so a non-null approval is an
-    /// error rather than something to ignore.
-    fn reject_approval(present: bool) {
-        require!(!present, "approval management is not implemented by this contract");
+    /// A batch moves one account's materials, so either no approvals are given
+    /// (the caller spends their own) or every approval names the same owner.
+    /// Mixing owners in one batch would need an event per owner; refusing it is
+    /// clearer than silently splitting, and nothing needs it.
+    fn resolve_batch_source(
+        &mut self,
+        caller: &AccountId,
+        approvals: Option<Vec<Option<(AccountId, u64)>>>,
+        token_ids: &[String],
+        amounts: &[u128],
+    ) -> (AccountId, bool) {
+        let Some(approvals) = approvals else { return (caller.clone(), false) };
+        if approvals.iter().all(|a| a.is_none()) {
+            return (caller.clone(), false);
+        }
+        let owners: Vec<&AccountId> = approvals.iter().flatten().map(|(o, _)| o).collect();
+        require!(
+            approvals.iter().all(|a| a.is_some()),
+            "a batch must give an approval for every token id, or none at all"
+        );
+        require!(
+            owners.windows(2).all(|w| w[0] == w[1]),
+            "every approval in a batch must name the same owner"
+        );
+        let mut source = caller.clone();
+        for (i, token_id) in token_ids.iter().enumerate() {
+            source = self.resolve_source(caller, approvals[i].clone(), token_id, amounts[i]);
+        }
+        (source, true)
+    }
+
+    fn find_approval(&self, owner_id: &AccountId, approved: &AccountId, token_id: &str) -> Option<(u128, u64)> {
+        self.approvals
+            .get(&ApprovalsKey { token_id: token_id.to_string(), owner_id: owner_id.clone() })?
+            .iter()
+            .find(|(who, _, _)| who == approved)
+            .map(|(_, amount, id)| (*amount, *id))
+    }
+
+    /// Whose materials are moving, and may the caller move them?
+    ///
+    /// With no approval the caller spends their own. With one, the caller is
+    /// acting for `owner` and the allowance is checked and then **decremented
+    /// by the amount transferred** — see the note at the top of this file on
+    /// why that is the reading of "nullify" we chose for fungible amounts.
+    fn resolve_source(
+        &mut self,
+        caller: &AccountId,
+        approval: Option<(AccountId, u64)>,
+        token_id: &str,
+        amount: u128,
+    ) -> AccountId {
+        let Some((owner_id, approval_id)) = approval else { return caller.clone() };
+        require!(&owner_id != caller, "an approval naming yourself has no effect");
+        let (allowed, current_id) = self
+            .find_approval(&owner_id, caller, token_id)
+            .unwrap_or_else(|| env::panic_str("no approval for this caller and material"));
+        // A stale id means the owner re-granted or revoked since; refuse it.
+        require!(current_id == approval_id, "approval_id does not match the current approval");
+        require!(allowed >= amount, "the approved amount is lower than this transfer");
+
+        let key = ApprovalsKey { token_id: token_id.to_string(), owner_id: owner_id.clone() };
+        let mut entries = self.approvals.get(&key).cloned().unwrap_or_default();
+        if let Some(at) = entries.iter().position(|(who, _, _)| who == caller) {
+            let left = allowed - amount;
+            if left == 0 { entries.remove(at); } else { entries[at].1 = left; }
+        }
+        if entries.is_empty() { self.approvals.remove(&key); } else { self.approvals.insert(key, entries); }
+        owner_id
     }
 
     pub fn mt_owner(&self) -> AccountId {
@@ -539,14 +796,194 @@ mod tests {
         c.mt_transfer(accounts(1), IRON.to_string(), U128(0), None, None);
     }
 
-    /// Approval Management is deliberately unimplemented. A caller passing an
-    /// approval means something by it, so we refuse rather than ignore it.
+    // ------------------------------------- Approval Management extension
+    //
+    // This exists so a player whose account holds only a function-call access
+    // key can sell: such a key cannot attach the 1 yoctoNEAR a transfer needs,
+    // so the market moves their materials on their behalf instead. See
+    // docs/GASLESS.md for the measurement that forced it.
+
+    /// accounts(2) stands in for the market throughout.
+    fn market() -> AccountId { accounts(2) }
+
     #[test]
-    #[should_panic(expected = "approval management is not implemented")]
-    fn approval_is_refused_not_ignored() {
+    fn an_approved_account_can_move_the_owners_materials() {
         let mut c = stocked();
         setup(accounts(0), 1);
-        c.mt_transfer(accounts(1), IRON.to_string(), U128(1), Some((accounts(2), 7)), None);
+        c.mt_transfer(accounts(1), IRON.to_string(), U128(100), None, None);
+
+        // The owner approves the market once.
+        setup(accounts(1), 1);
+        c.mt_approve(vec![IRON.to_string()], vec![U128(60)], market(), None);
+        let id = c.mt_token_approval(IRON.to_string(), accounts(1))
+            .approved_account_ids[&market()].approval_id;
+
+        // The market now moves the owner's materials without the owner signing.
+        setup(market(), 1);
+        c.mt_transfer(accounts(3), IRON.to_string(), U128(25), Some((accounts(1), id.0)), None);
+
+        assert_eq!(c.mt_balance_of(accounts(1), IRON.to_string()), U128(75), "came out of the owner");
+        assert_eq!(c.mt_balance_of(accounts(3), IRON.to_string()), U128(25));
+        assert_eq!(c.mt_balance_of(market(), IRON.to_string()), U128(0), "the market never held them");
+        assert_eq!(c.mt_supply(IRON.to_string()), Some(U128(1_000)));
+
+        // The event names who acted, since it was not the owner.
+        let last = get_logs().last().unwrap().clone();
+        assert!(last.contains(r#""authorized_id":"charlie""#) || last.contains("authorized_id"), "got: {last}");
+    }
+
+    /// Our reading of the spec's "nullify approvals on success" for fungible
+    /// amounts: decrement, do not wipe. Otherwise a standing operator approval
+    /// would be impossible, which is the whole use case.
+    #[test]
+    fn an_approval_is_decremented_by_what_was_spent_and_removed_when_exhausted() {
+        let mut c = stocked();
+        setup(accounts(0), 1);
+        c.mt_transfer(accounts(1), IRON.to_string(), U128(100), None, None);
+        setup(accounts(1), 1);
+        c.mt_approve(vec![IRON.to_string()], vec![U128(30)], market(), None);
+        let id = c.mt_token_approval(IRON.to_string(), accounts(1))
+            .approved_account_ids[&market()].approval_id;
+
+        setup(market(), 1);
+        c.mt_transfer(accounts(3), IRON.to_string(), U128(10), Some((accounts(1), id.0)), None);
+        let left = c.mt_token_approval(IRON.to_string(), accounts(1));
+        assert_eq!(left.approved_account_ids[&market()].amount, U128(20), "30 - 10");
+
+        // Spend the rest; the entry goes away rather than lingering at zero.
+        setup(market(), 1);
+        c.mt_transfer(accounts(3), IRON.to_string(), U128(20), Some((accounts(1), id.0)), None);
+        assert!(
+            c.mt_token_approval(IRON.to_string(), accounts(1)).approved_account_ids.is_empty(),
+            "an exhausted approval must not linger"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "the approved amount is lower than this transfer")]
+    fn a_transfer_beyond_the_approved_amount_is_refused() {
+        let mut c = stocked();
+        setup(accounts(0), 1);
+        c.mt_transfer(accounts(1), IRON.to_string(), U128(100), None, None);
+        setup(accounts(1), 1);
+        c.mt_approve(vec![IRON.to_string()], vec![U128(5)], market(), None);
+        let id = c.mt_token_approval(IRON.to_string(), accounts(1))
+            .approved_account_ids[&market()].approval_id;
+        setup(market(), 1);
+        c.mt_transfer(accounts(3), IRON.to_string(), U128(6), Some((accounts(1), id.0)), None);
+    }
+
+    /// A re-grant must invalidate the old id, or an owner who reduced an
+    /// allowance would still be exposed to the previous one.
+    #[test]
+    #[should_panic(expected = "approval_id does not match the current approval")]
+    fn a_stale_approval_id_is_refused_after_a_re_grant() {
+        let mut c = stocked();
+        setup(accounts(0), 1);
+        c.mt_transfer(accounts(1), IRON.to_string(), U128(100), None, None);
+        setup(accounts(1), 1);
+        c.mt_approve(vec![IRON.to_string()], vec![U128(50)], market(), None);
+        let first = c.mt_token_approval(IRON.to_string(), accounts(1))
+            .approved_account_ids[&market()].approval_id;
+
+        setup(accounts(1), 1);
+        c.mt_approve(vec![IRON.to_string()], vec![U128(10)], market(), None);
+        let second = c.mt_token_approval(IRON.to_string(), accounts(1))
+            .approved_account_ids[&market()].approval_id;
+        assert!(second.0 > first.0, "a re-grant must increment the id");
+
+        setup(market(), 1);
+        c.mt_transfer(accounts(3), IRON.to_string(), U128(5), Some((accounts(1), first.0)), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "no approval for this caller and material")]
+    fn an_unapproved_caller_cannot_move_someone_elses_materials() {
+        let mut c = stocked();
+        setup(accounts(0), 1);
+        c.mt_transfer(accounts(1), IRON.to_string(), U128(100), None, None);
+        setup(market(), 1);
+        c.mt_transfer(accounts(3), IRON.to_string(), U128(1), Some((accounts(1), 1)), None);
+    }
+
+    #[test]
+    fn revoking_withdraws_one_account_and_revoke_all_withdraws_everyone() {
+        let mut c = stocked();
+        setup(accounts(0), 1);
+        c.mt_transfer(accounts(1), IRON.to_string(), U128(100), None, None);
+        setup(accounts(1), 1);
+        c.mt_approve(vec![IRON.to_string()], vec![U128(10)], market(), None);
+        c.mt_approve(vec![IRON.to_string()], vec![U128(10)], accounts(4), None);
+        assert_eq!(c.mt_token_approval(IRON.to_string(), accounts(1)).approved_account_ids.len(), 2);
+
+        setup(accounts(1), 1);
+        c.mt_revoke(vec![IRON.to_string()], market());
+        let left = c.mt_token_approval(IRON.to_string(), accounts(1));
+        assert_eq!(left.approved_account_ids.len(), 1);
+        assert!(left.approved_account_ids.contains_key(&accounts(4)), "only the named one goes");
+
+        setup(accounts(1), 1);
+        c.mt_revoke_all(vec![IRON.to_string()]);
+        assert!(c.mt_token_approval(IRON.to_string(), accounts(1)).approved_account_ids.is_empty());
+    }
+
+    #[test]
+    fn mt_is_approved_checks_the_amount_and_the_id() {
+        let mut c = stocked();
+        setup(accounts(0), 1);
+        c.mt_transfer(accounts(1), IRON.to_string(), U128(100), None, None);
+        setup(accounts(1), 1);
+        c.mt_approve(vec![IRON.to_string()], vec![U128(40)], market(), None);
+        let id = c.mt_token_approval(IRON.to_string(), accounts(1))
+            .approved_account_ids[&market()].approval_id;
+
+        setup(accounts(1), 0);
+        assert!(c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(40)], None));
+        assert!(c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(1)], Some(vec![id])));
+        assert!(!c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(41)], None), "over the amount");
+        assert!(!c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(1)], Some(vec![U64(id.0 + 99)])), "wrong id");
+        assert!(!c.mt_is_approved(vec![IRON.to_string()], accounts(4), vec![U128(1)], None), "never approved");
+        // Mismatched argument lengths are false rather than a panic: this is a
+        // view a caller may probe with, not a state change.
+        assert!(!c.mt_is_approved(vec![IRON.to_string()], market(), vec![], None));
+    }
+
+    #[test]
+    #[should_panic(expected = "approving yourself has no effect")]
+    fn approving_yourself_is_refused() {
+        let mut c = stocked();
+        setup(accounts(1), 1);
+        c.mt_approve(vec![IRON.to_string()], vec![U128(1)], accounts(1), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "requires a deposit")]
+    fn approving_for_free_is_refused() {
+        let mut c = stocked();
+        setup(accounts(1), 0);
+        c.mt_approve(vec![IRON.to_string()], vec![U128(1)], market(), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "an approval of zero is a revocation")]
+    fn approving_zero_is_refused_rather_than_silently_doing_nothing() {
+        let mut c = stocked();
+        setup(accounts(1), 1);
+        c.mt_approve(vec![IRON.to_string()], vec![U128(0)], market(), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "every approval in a batch must name the same owner")]
+    fn a_batch_must_not_mix_owners() {
+        let mut c = stocked();
+        setup(market(), 1);
+        c.mt_batch_transfer(
+            accounts(3),
+            vec![IRON.to_string(), OAK.to_string()],
+            vec![U128(1), U128(1)],
+            Some(vec![Some((accounts(1), 1)), Some((accounts(4), 2))]),
+            None,
+        );
     }
 
     #[test]

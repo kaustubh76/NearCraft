@@ -1,0 +1,12 @@
+{
+  "topic": "gasless-play",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 14797,
+  "command": "node --test tests/near/gasless.mjs",
+  "cwd": ".",
+  "proves": "On a real nearcore node, a player holding only a function-call access key buys goods and pays nothing: the player balance delta is exactly 0 and the relayer pays. Also records that a delegate action's inner call cannot carry a deposit, which is why a scoped key cannot sell.",
+  "output_sha256": "4c5cc9e7548ff59c2afdb72d14c646b7f7089238ce57832bff9342b29a210272",
+  "output_bytes": 819,
+  "recorded_at": "2026-11-11T12:04:04.643Z"
+}

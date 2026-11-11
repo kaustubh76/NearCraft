@@ -21,7 +21,7 @@
 // player's balance does not move. `tests/near/gasless.mjs` asserts both.
 
 import { createHash } from 'node:crypto'
-import { Account, JsonRpcProvider, KeyPair } from 'near-api-js'
+import { Account, JsonRpcProvider, KeyPair, actions, teraToGas } from 'near-api-js'
 
 export class OnboardingError extends Error {
   constructor(code, detail) {
@@ -60,11 +60,17 @@ export function createOnboarding({
   rootAccountId,
   rootKey,
   marketContract,
+  itemsContract,
+  /// Materials the player pre-approves the market to pull when they sell.
+  sellableItems = [],
   playerMethods,
   verifyIdentity,
   rpcUrl = 'https://rpc.testnet.near.org',
-  startingBalance = 10_000_000_000_000_000_000_000n, // 0.01 NEAR: storage only
-  gasAllowance = 2_000_000_000_000_000_000_000_000n, // 2 NEAR of allowance
+  startingBalance = 100_000_000_000_000_000_000_000n, // 0.1 NEAR: storage + the approval deposit
+  gasAllowance = 2_000_000_000_000_000_000_000_000n,  // 2 NEAR of gas allowance
+  approvalDeposit = 10_000_000_000_000_000_000_000n,  // 0.01 NEAR for approval storage
+  /// Standing allowance per material, so one approval lasts.
+  sellAllowance = 1_000_000_000n,
   log = () => {},
 }) {
   if (typeof verifyIdentity !== 'function') {
@@ -89,9 +95,28 @@ export function createOnboarding({
   return Object.freeze({
     playerAccountId: (p, s) => playerAccountId(p, s, rootAccountId),
 
-    /// Turn a login token into a playable account and the key the server will
-    /// sign with on that player's behalf. Idempotent: logging in again returns
-    /// the same account.
+    /// Turn a login token into a playable account and the key the server signs
+    /// with on that player's behalf. Idempotent: logging in again returns the
+    /// same account id.
+    ///
+    /// ## Why this is three transactions
+    ///
+    /// A player who holds only a function-call access key cannot attach a
+    /// deposit, which means they can never call `mt_approve` — and without an
+    /// approval they can never sell, because NEP-245 requires 1 yoctoNEAR on a
+    /// transfer. The approval therefore has to be granted *while a full-access
+    /// key still exists*, and that key must then be destroyed.
+    ///
+    ///   1. root: `CreateAccount` + `Transfer` + `AddKey(full access)`
+    ///   2. player, with that key: `mt_approve` granting the market its pull
+    ///      rights over every sellable material, deposit paid from the funded
+    ///      balance
+    ///   3. player: `AddKey(function-call, scoped)` **then** `DeleteKey(full
+    ///      access)` — in that order, in one batch, or the account would lock
+    ///      itself out between the two
+    ///
+    /// The player never sees a key at any point, and after this there is no
+    /// full-access key in existence for the account. `keyLimits()` proves it.
     async signIn(token) {
       let identity
       try {
@@ -104,44 +129,72 @@ export function createOnboarding({
       }
 
       const accountId = playerAccountId(identity.provider, identity.subject, rootAccountId)
-      const already = await exists(accountId)
-
-      // The key the game server signs with. Generated per sign-in for a new
-      // account; an existing player's key is held by the caller, because this
-      // module deliberately stores nothing.
-      const playerKey = KeyPair.fromRandom('ed25519')
-      const publicKey = playerKey.getPublicKey().toString()
-
-      if (!already) {
-        await root().createSubAccount({
-          accountOrPrefix: accountId,
-          publicKey,
-          nearToTransfer: startingBalance,
-        })
-        log({ event: 'player_created', accountId, provider: identity.provider })
+      if (await exists(accountId)) {
+        // Already onboarded. This module stores nothing, so the caller holds
+        // the scoped key; there is no key to hand back here.
+        return Object.freeze({ accountId, created: false, permittedMethods: Object.freeze([...playerMethods]) })
       }
 
-      // Scoped to the market, to an explicit method list. Never full access.
-      await new Account(accountId, provider, playerKey.toString()).addFunctionCallAccessKey({
-        publicKey,
-        contractId: marketContract,
-        methodNames: [...playerMethods],
-        allowance: gasAllowance.toString(),
-      }).catch(() => {
-        // On a brand-new account `createSubAccount` already installed this key
-        // as full-access; replacing it with a scoped one is a separate concern
-        // handled by `restrictKey` below, which the caller runs once the player
-        // has been handed nothing.
+      const bootstrap = KeyPair.fromRandom('ed25519')
+      const scoped = KeyPair.fromRandom('ed25519')
+
+      // 1. Create, fund, and install a temporary full-access key.
+      await root().signAndSendTransaction({
+        receiverId: accountId,
+        actions: [
+          actions.createAccount(),
+          actions.transfer(startingBalance),
+          actions.addFullAccessKey(bootstrap.getPublicKey()),
+        ],
       })
+      log({ event: 'player_created', accountId, provider: identity.provider })
+
+      const asPlayer = new Account(accountId, provider, bootstrap.toString())
+
+      // 2. Grant the market its pull rights, while a full-access key still
+      //    exists to attach the deposit.
+      if (sellableItems.length > 0) {
+        if (!itemsContract) throw new OnboardingError('NO_ITEMS_CONTRACT', 'sellableItems needs itemsContract')
+        await asPlayer.callFunction({
+          contractId: itemsContract,
+          methodName: 'mt_approve',
+          args: {
+            token_ids: [...sellableItems],
+            // A standing allowance, so one approval lasts rather than needing
+            // a fresh deposit per sale.
+            amounts: sellableItems.map(() => sellAllowance.toString()),
+            account_id: marketContract,
+            msg: null,
+          },
+          deposit: approvalDeposit,
+          gas: teraToGas('60'),
+        })
+        log({ event: 'market_approved', accountId, items: sellableItems.length })
+      }
+
+      // 3. Install the scoped key and destroy the full-access one — add before
+      //    delete, in one transaction, or a failure between them would leave an
+      //    account nobody can use.
+      await asPlayer.signAndSendTransaction({
+        receiverId: accountId,
+        actions: [
+          actions.addFunctionCallAccessKey(
+            scoped.getPublicKey(), marketContract, [...playerMethods], gasAllowance,
+          ),
+          actions.deleteKey(bootstrap.getPublicKey()),
+        ],
+      })
+      log({ event: 'player_restricted', accountId, methods: playerMethods })
 
       return Object.freeze({
         accountId,
-        publicKey,
+        publicKey: scoped.getPublicKey().toString(),
         /// The server holds this. The player never sees it, which is what makes
         /// "no seed phrase" true rather than a slogan.
-        serverKey: playerKey.toString(),
-        created: !already,
+        serverKey: scoped.toString(),
+        created: true,
         permittedMethods: Object.freeze([...playerMethods]),
+        approvedForSale: Object.freeze([...sellableItems]),
       })
     },
 

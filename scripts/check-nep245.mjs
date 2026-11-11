@@ -22,6 +22,12 @@ const NEP245_CORE = [
   'mt_supply', 'mt_batch_supply',
 ]
 const NEP245_ENUMERATION = ['mt_tokens', 'mt_tokens_for_owner']
+/// Approval Management. Implemented because a player holding only a
+/// function-call access key cannot attach the 1 yoctoNEAR a transfer needs, so
+/// without approvals they could buy but never sell. See docs/GASLESS.md.
+const NEP245_APPROVAL = [
+  'mt_approve', 'mt_revoke', 'mt_revoke_all', 'mt_is_approved', 'mt_token_approval',
+]
 
 /// Modifiers that are load-bearing rather than cosmetic.
 const REQUIRED_MODIFIERS = {
@@ -31,6 +37,16 @@ const REQUIRED_MODIFIERS = {
     mt_transfer_call: ['payable'], mt_batch_transfer_call: ['payable'],
     // A resolver callable by anyone would let a caller fake a refund.
     mt_resolve_transfer: ['private'],
+    // Approvals cost storage, and revocation must prove intent.
+    mt_approve: ['payable'], mt_revoke: ['payable'], mt_revoke_all: ['payable'],
+  },
+  market: {
+    on_items_delivered: ['private'],
+    on_materials_pulled: ['private'],
+    // THE one that matters: a function-call key cannot attach NEAR, so both
+    // the agent purchase path and the player sell path must stay non-payable.
+    buy_with_credit: [],
+    sell: [],
   },
   market: {
     // A rollback callable by anyone would let a caller unwind someone's purchase.
@@ -64,20 +80,21 @@ function fns(name) {
 // ----------------------------------------------------- NEP-245 completeness
 
 const items = fns('items')
-for (const [label, group] of [['core', NEP245_CORE], ['enumeration', NEP245_ENUMERATION]]) {
+for (const [label, group] of [['core', NEP245_CORE], ['enumeration', NEP245_ENUMERATION], ['approval management', NEP245_APPROVAL]]) {
   const missing = group.filter((m) => !items.has(m))
   if (missing.length) problems.push(`items: NEP-245 ${label} missing ${missing.join(', ')}`)
   else console.log(`ok    NEP-245 ${label}: ${group.length}/${group.length} present`)
 }
 
-// Not implemented, and deliberately so — see BASELINE.md and the contract docs.
-// If one of these ever appears, the README's scope statement has gone stale.
-const NOT_CLAIMED = ['mt_approve', 'mt_revoke', 'mt_revoke_all', 'mt_is_approved', 'mt_metadata_contract']
+// Metadata is the one extension still not implemented: a token id *is* the
+// material name here, so it would be redundant. If it ever appears, the
+// README's scope statement has gone stale.
+const NOT_CLAIMED = ['mt_metadata_contract', 'mt_metadata_token_all', 'mt_metadata_base_by_token_id']
 const unexpected = NOT_CLAIMED.filter((m) => items.has(m))
 if (unexpected.length) {
-  problems.push(`items: exposes ${unexpected.join(', ')} but the README says Approval/Metadata are not implemented`)
+  problems.push(`items: exposes ${unexpected.join(', ')} but the README says Metadata is not implemented`)
 } else {
-  console.log('ok    Approval Management and Metadata absent, as documented')
+  console.log('ok    Metadata absent, as documented')
 }
 
 // -------------------------------------------------------------- modifiers
