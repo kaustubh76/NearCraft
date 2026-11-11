@@ -27,6 +27,8 @@ const CHECKS = [
     proves: '61 Rust unit tests across both contracts. Offline, no wasm target, no network.' },
   { topic: 'policy-and-injection', cmd: 'node', args: ['--test', 'tests/near/policy.mjs', 'tests/near/injection.mjs', 'tests/near/market.mjs'],
     proves: 'The policy layer refuses out-of-policy agent calls, a prompt-injected agent is blocked across two layers AND recognised as paying a known-bad account, and the plugin HTTP contract is well-formed. Offline.' },
+  { topic: 'agent-run', cmd: 'npm', args: ['run', '--silent', 'agent'], requiresWasm: true,
+    proves: 'An agent with a scoped key shopping on a real nearcore node, end to end: an unknown counterparty parked for a human and approved, the same counterparty clearing on its own once trust accrued, and a prompt-injected objective BLOCKED because the public guard contract has corroborated reports against the account it names. Every layer is the real one, including two vendored baseline modules.' },
   { topic: 'gasless-play', cmd: 'node', args: ['--test', 'tests/near/gasless.mjs'], requiresWasm: true,
     proves: 'On a real nearcore node, a player holding only a function-call access key buys goods and pays nothing: the player balance delta is exactly 0 and the relayer pays. Also records that a delegate action\'s inner call cannot carry a deposit, which is why a scoped key cannot sell.' },
   { topic: 'counterparty-and-approval', cmd: 'node', args: ['--test', 'tests/near/counterparty.mjs', 'tests/near/human-approval.mjs', 'tests/near/onboarding.mjs', 'tests/near/relayer.mjs'],

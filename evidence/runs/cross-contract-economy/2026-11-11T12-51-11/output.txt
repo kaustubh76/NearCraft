@@ -1,0 +1,39 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.63s
+     Running tests/economy.rs (target/debug/deps/economy-23d38934c6f53296)
+
+running 6 tests
+
+--- purchase across two contracts ---
+  paid 4000000000000000000000000 yoctoNEAR, received 10 iron_ingot
+  shelf now 246, merchant treasury +4000000000000000000000000
+test a_purchase_moves_materials_across_contracts ... ok
+
+--- delivery failed, purchase rolled back ---
+  logs: delivery failed; purchase rolled back and 1500000000000000000000000 yoctoNEAR credited to player.dev-20261111125209-56055665820017.test.near
+  player holds 0 glass, credited 1500000000000000000000000 yoctoNEAR
+test a_failed_delivery_rolls_the_whole_purchase_back ... ok
+
+--- sale via mt_transfer_call -> mt_on_transfer ---
+  sold 12 iron_ingot at a bid of 358400000000000000000000, proceeds 4300800000000000000000000
+  player holds 8 iron_ingot, shelf 248
+test a_sale_routes_through_mt_transfer_call ... ok
+
+--- closed merchant refuses, resolver refunds ---
+  player still holds 6 iron_ingot, credit unchanged: true
+test a_closed_merchant_refuses_a_sale_and_the_materials_come_back ... ok
+
+--- withdrawal ---
+  credit 3392000000000000000000000 yoctoNEAR; account balance 15983323515099039599999999 -> 19390280615762486399999999
+
+--- flooding an undercapitalised merchant ---
+  second withdrawal refused
+
+test withdrawals_move_real_near ... ok
+  after lot 1: treasury 220000000000000000000000 yoctoNEAR
+  closed after 1 lot(s)
+  posts no bid, still sells: "Pauper holds 260 (normally stocked) but will not buy more: it has 0.220 NEAR left to spend and one costs 0.320."
+
+test a_merchant_can_be_flooded_until_it_stops_buying ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.28s
+

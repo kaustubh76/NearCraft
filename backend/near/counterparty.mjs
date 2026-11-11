@@ -18,6 +18,21 @@
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 
+/// The guard contract answers in snake_case, as NEAR contracts do over JSON.
+/// Accepting either shape here is the fix for a bug an end-to-end run caught
+/// and the unit tests did not: the scorer read camelCase, so every on-chain
+/// report was silently ignored and a reported account scored clean. Normalising
+/// at the boundary keeps the wire shape in exactly one place.
+export function normaliseGuard(summary) {
+  const g = summary ?? {}
+  return {
+    distinctReporters: Number(g.distinct_reporters ?? g.distinctReporters ?? 0),
+    atOrOverThreshold: Boolean(g.at_or_over_threshold ?? g.atOrOverThreshold ?? false),
+    threshold: Number(g.threshold ?? 0),
+    reasons: g.reasons ?? [],
+  }
+}
+
 export const ALLOW = 'allow'
 export const WARN = 'warn'
 export const BLOCK = 'block'
@@ -25,9 +40,14 @@ export const BLOCK = 'block'
 /// An account with no contract has this code hash. All ones, 32 chars.
 const NO_CONTRACT = '11111111111111111111111111111111'
 
-/// Below this, an account has barely been used — it holds keys and little else.
-/// A bare account with one key measures around 182 bytes; 264 was observed on a
-/// faucet-funded account. This is a *proxy* for age, not age.
+/// Below this, an account holds little more than its keys. A bare account with
+/// one key measures ~182 bytes; 264 was observed on a faucet-funded one.
+///
+/// Calibration note, from an end-to-end run: this cannot be adverse on its own.
+/// *Every* legitimate new account is near the floor, so treating it as adverse
+/// unconditionally made `allow` unreachable for anyone, forever. It now counts
+/// only for an account this service has never seen before — where it adds
+/// something to "unknown" — and stops mattering once there is history.
 const FRESH_STORAGE_BYTES = 400
 
 /// Prior successful interactions before a counterparty can be trusted outright.
@@ -63,8 +83,9 @@ export function score(signals) {
   if (s.exists !== false && s.isContract && s.firstSeenBlockHeight == null) {
     adverse.push('a contract this service has never seen before')
   }
+  const unseen = s.firstSeenBlockHeight == null
   const fresh = s.exists !== false && typeof s.storageUsage === 'number' && s.storageUsage < FRESH_STORAGE_BYTES
-  if (fresh) adverse.push(`barely-used account (${s.storageUsage} bytes of storage)`)
+  if (fresh && unseen) adverse.push(`barely-used account, never seen before (${s.storageUsage} bytes of storage)`)
 
   if (guard.atOrOverThreshold) {
     const why = `${guard.distinctReporters} distinct accounts reported this one (threshold ${guard.threshold})`
@@ -200,9 +221,10 @@ export function createCounterpartyService({ provider, guardContract, ledger, den
 
     // Signal 4: what have other agents said, on chain?
     try {
-      signals.guard = await provider.callFunction({
+      const summary = await provider.callFunction({
         contractId: guardContract, method: 'summary', args: { account_id: accountId },
       })
+      signals.guard = normaliseGuard(summary)
     } catch {
       // If the guard cannot be read we must not silently treat that as "clean".
       signals.guard = { distinctReporters: 0, atOrOverThreshold: false, threshold: 0, reasons: [], unavailable: true }

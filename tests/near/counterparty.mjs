@@ -4,7 +4,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ALLOW, BLOCK, WARN, createMemoryLedger, score } from '../../backend/near/counterparty.mjs'
+import { ALLOW, BLOCK, WARN, createMemoryLedger, normaliseGuard, score } from '../../backend/near/counterparty.mjs'
 
 const CLEAN_GUARD = { distinctReporters: 0, atOrOverThreshold: false, threshold: 3, reasons: [] }
 
@@ -72,10 +72,18 @@ test('an unknown counterparty warns and is never allowed', () => {
   assert.ok(r.reasons.some((x) => /no prior interaction/.test(x)))
 })
 
-test('a barely-used account warns, with its storage named', () => {
-  const r = score(trusted({ storageUsage: 264, priorInteractions: null }))
-  assert.equal(r.verdict, WARN)
-  assert.ok(r.reasons.some((x) => /barely-used account \(264 bytes/.test(x)))
+test('a barely-used account names its storage only when it is also unknown', () => {
+  // Unknown and tiny: say so, with the figure, so a human reviewing the warn
+  // has something concrete.
+  const stranger = score(trusted({ storageUsage: 264, firstSeenBlockHeight: null, priorInteractions: null }))
+  assert.equal(stranger.verdict, WARN)
+  assert.ok(stranger.reasons.some((x) => /264 bytes of storage/.test(x)))
+
+  // Known, but no dealings yet: still a warn, but not because of its size —
+  // every legitimate new NEAR account is near the storage floor.
+  const known = score(trusted({ storageUsage: 264, priorInteractions: null }))
+  assert.equal(known.verdict, WARN)
+  assert.ok(!known.reasons.some((x) => /bytes of storage/.test(x)), 'size is not the complaint here')
 })
 
 test('an account that does not exist warns rather than erroring', () => {
@@ -179,4 +187,53 @@ test('trust accrues: three interactions turn a warn into an allow', async () => 
   await ledger.noteInteraction(agent, shop, { blockHeight: 12 })
   r = score({ ...signals(), priorInteractions: await ledger.interactions(agent, shop) })
   assert.equal(r.verdict, ALLOW, 'the third crosses the line')
+})
+
+// ------------------------------------------------- the wire shape
+
+// This is the regression test for a bug an end-to-end run found and these tests
+// did not: the fakes above are camelCase, but the guard contract answers in
+// snake_case like every NEAR contract. The scorer read camelCase, so on-chain
+// reports were silently ignored and a reported account scored clean.
+test('the guard contract\'s snake_case answer is understood', () => {
+  const fromChain = {
+    distinct_reporters: 3,
+    at_or_over_threshold: true,
+    threshold: 3,
+    reasons: ['drained an agent budget'],
+  }
+  const g = normaliseGuard(fromChain)
+  assert.equal(g.distinctReporters, 3)
+  assert.equal(g.atOrOverThreshold, true)
+  assert.equal(g.threshold, 3)
+
+  // And the whole point: it must now actually reach a verdict.
+  const r = score(trusted({ guard: g, codeChangedSinceFirstSeen: true }))
+  assert.equal(r.verdict, BLOCK, 'a reported, corroborated account must block')
+})
+
+test('an unreported account from the chain scores clean', () => {
+  const g = normaliseGuard({ distinct_reporters: 0, at_or_over_threshold: false, threshold: 3, reasons: [] })
+  assert.equal(score(trusted({ guard: g })).verdict, ALLOW)
+})
+
+test('normaliseGuard tolerates junk rather than throwing', () => {
+  for (const junk of [null, undefined, {}, { distinct_reporters: '4' }]) {
+    const g = normaliseGuard(junk)
+    assert.equal(typeof g.distinctReporters, 'number')
+    assert.ok(!Number.isNaN(g.distinctReporters))
+  }
+  assert.equal(normaliseGuard({ distinct_reporters: '4' }).distinctReporters, 4, 'strings are coerced')
+})
+
+test('a barely-used account only counts against one we have never seen', () => {
+  // Every legitimate new NEAR account sits near the storage floor, so this
+  // cannot be adverse unconditionally — it made `allow` unreachable for anyone.
+  const seenAndDealtWith = trusted({ storageUsage: 182, firstSeenBlockHeight: 10 })
+  assert.equal(score(seenAndDealtWith).verdict, ALLOW, 'history must outweigh a small footprint')
+
+  const stranger = trusted({ storageUsage: 182, firstSeenBlockHeight: null, priorInteractions: null })
+  const r = score(stranger)
+  assert.equal(r.verdict, WARN)
+  assert.ok(r.reasons.some((x) => /never seen before/.test(x)))
 })

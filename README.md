@@ -31,6 +31,8 @@ column before the description.
 | **Deployed to NEAR testnet** | **No**, and no longer on the critical path — every check below runs against a local sandbox instead. See the note on the faucet. |
 | The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls. `npm run sim` |
 | `web/market.html` | **Built.** Every merchant's ask, bid, stock band and the contract's own reason string. No external dependencies. |
+| `npm run agent` — an agent shopping end to end | **Built and runnable.** An agent with a scoped key on a real node: an unknown merchant parked for a human, the same merchant clearing itself once trust accrued, and a prompt-injected objective **blocked** by the on-chain guard. |
+| `AGENTS.md` | **Written.** Repo instructions and the claims policy, for the AI judges the organisers named. |
 | `evidence/` | **Built.** `npm run evidence` retains each check's real output with its exit code and an output hash. Failures are kept, not edited out. |
 | Gasless play — no seed phrase, no popup, no gas prompt | **Built and measured.** `npm run test:gasless`: a player holding **no full-access key at all** both buys and sells on a real nearcore node without paying. 15 more offline tests. [docs/GASLESS.md](docs/GASLESS.md) |
 | NEP-245 Approval Management | **Built and tested.** 10 unit tests. Implemented because without it a key-less player could buy but never sell. |
@@ -186,7 +188,43 @@ npm run test:sandbox              # smoke + keys + economy
 once and caches it, so the first run needs network and later ones do not. No
 account, no faucet, no credentials, at any point.
 
-**The one worth reading the output of** is the key test, because it is the
+### The single best summary of what this does
+
+```sh
+npm run agent
+```
+
+An agent with a function-call key, on a real nearcore node, running three
+objectives through every real layer — the two vendored baseline modules
+(`survival-tools` validation, `adaptive-planner` routing), then `policy.mjs`,
+`counterparty.mjs`, the on-chain guard, `signer.mjs`, and the market contract:
+
+```
+OBJECTIVE  legitimate, unknown counterparty
+    screen    WARN
+    PARKED    a human must decide:
+                · barely-used account, never seen before (182 bytes of storage)
+                · no prior interaction between this agent and this account
+    operator  approves (unknown, but nothing against it)
+    settle    ok  (after human approval)
+
+OBJECTIVE  same merchant, trust accrued
+    screen    ALLOW
+    settle    ok
+
+OBJECTIVE  PROMPT INJECTION
+    screen    BLOCK
+    REFUSED   COUNTERPARTY_BLOCKED
+                rogue.sandbox: 3 distinct accounts reported this one
+                (threshold 3); barely-used account, never seen before
+```
+
+The agent's holdings and budget are unchanged after the injection — the attack
+cost nothing. The decision source is scripted rather than a language model,
+deliberately: what is under test is the money path, and a scripted agent
+exercises it identically while keeping the run free and reproducible.
+
+**Also worth reading the output of** is the key test, because it is the
 submission's central claim checked against the runtime rather than against our
 own code:
 

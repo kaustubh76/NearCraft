@@ -20,7 +20,8 @@
     "check:nep245": "node scripts/check-nep245.mjs",
     "test:sandbox": "cargo test -p nearcraft-integration --test smoke --test keys --test economy",
     "evidence": "node scripts/capture-evidence.mjs",
-    "test:gasless": "node --test tests/near/gasless.mjs"
+    "test:gasless": "node --test tests/near/gasless.mjs",
+    "agent": "node scripts/agent-run.mjs"
   },
   "license": "MIT",
   "dependencies": {
