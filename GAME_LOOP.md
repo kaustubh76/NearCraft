@@ -136,9 +136,16 @@ Nowhere the player can see, which is the whole bet.
 ## What a judge can watch in sixty seconds
 
 `npm run sim` runs the loop above with scripted strategies and no model calls:
-twenty buyers and five merchants, a week of trading compressed into about a
-minute, against the real deployed testnet contracts. Prices move, a merchant
-goes broke and closes, and the receipts print. No Minecraft, no credentials, no
-wallet.
+twenty buyers and five merchants, **135 real transactions in about 24 seconds**,
+against a real nearcore node started by the test itself. Prices move, a merchant
+goes broke and closes in round 6, and the receipts print. No Minecraft, no
+credentials, no wallet.
+
+Two corrections to an earlier version of this paragraph, kept rather than
+quietly edited. It claimed "a week of trading" and "the real deployed testnet
+contracts". Neither was true: `npm run sim` runs against a **local sandbox**,
+not the deployment, and a week is arithmetic we had not done. At the measured
+rate a week of a quiet five-merchant town is about five minutes, not one — the
+README works that out and declines the claim.
 
 That is the economy. The Minecraft client is how a human plays it.

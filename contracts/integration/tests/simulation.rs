@@ -27,6 +27,31 @@ use serde_json::json;
 use std::collections::BTreeMap;
 
 const ROUNDS: usize = 8;
+
+/// Prepaid gas per trade. NOT max_gas(): prepaid gas is what reserves room in a
+/// chunk, and nearcore's per-chunk limit is 1000 TGas — so 300 TGas per call
+/// caps a block at three trades however many buyers are ready. These are
+/// ceilings measured from the receipts, with headroom.
+///
+/// `buy` is market -> items.mt_transfer -> on_items_delivered.
+/// A sale is items.mt_transfer_call -> market.mt_on_transfer -> mt_resolve_transfer,
+/// which is one receipt deeper.
+/// Slippage tolerance, in basis points.
+///
+/// Concurrent buyers all read the same quote, and the first one to clear moves
+/// the price — stock down, demand up. A deposit sized exactly to the quote is
+/// therefore refused by the time it executes, which is the contract being right,
+/// not a bug: `require!(paid >= total)`. A real buyer tolerates a little
+/// slippage, and overpayment is credited straight back, so the buffer costs
+/// nothing.
+///
+/// Note what this does NOT do: the decision to buy at all is still judged on the
+/// quoted unit price, so a bargain-hunter stays a bargain-hunter. The buffer
+/// only covers execution.
+const SLIPPAGE_BPS: u128 = 2_000;
+
+const BUY_GAS: near_workspaces::types::Gas = near_workspaces::types::Gas::from_tgas(100);
+const SELL_GAS: near_workspaces::types::Gas = near_workspaces::types::Gas::from_tgas(150);
 const BUYERS: usize = 20;
 
 /// Materials and their base prices, mirroring config/catalog.json.
@@ -211,98 +236,150 @@ async fn a_scripted_economy_moves_without_a_single_model_call() -> anyhow::Resul
     let m = Market::open().await?;
 
     // Twenty buyers, each with its own named sub-account and its own budget.
+    // Created concurrently — twenty account creations in sequence was several
+    // seconds of the wall clock this run is measured by.
+    let created = futures::future::join_all((0..BUYERS).map(|i| {
+        let root = m.root.clone();
+        async move {
+            root.create_subaccount(&format!("buyer-{i}"))
+                .initial_balance(NearToken::from_near(12))
+                .transact().await?.into_result().map_err(anyhow::Error::from)
+        }
+    })).await;
+
     let mut buyers = Vec::new();
-    for i in 0..BUYERS {
-        let acc = m.root.create_subaccount(&format!("buyer-{i}"))
-            .initial_balance(NearToken::from_near(12)).transact().await?.into_result()?;
-        buyers.push((Strategy::of(i), acc, 0u128 /* spent */, BTreeMap::<String, (u64, u128)>::new()));
+    for (i, acc) in created.into_iter().enumerate() {
+        buyers.push((Strategy::of(i), acc?, 0u128 /* spent */, BTreeMap::<String, (u64, u128)>::new()));
     }
     println!("\n{BUYERS} buyers, {} merchants, {} materials, {ROUNDS} rounds, no model calls\n",
              MERCHANTS.len(), MATERIALS.len());
-    println!("{:>5}  {:>7}  {:>6}  {:>9}  {:>8}  {}", "round", "trades", "sales", "volume", "closed", "cheapest iron / oak");
-    println!("{}", "-".repeat(78));
+    println!("{:>5}  {:>7}  {:>6}  {:>8}  {:>9}  {:>8}  {}",
+             "round", "trades", "sales", "refused", "volume", "closed", "cheapest iron / oak");
+    println!("{}", "-".repeat(88));
 
     let mut total_trades = 0u32;
     let mut total_sales = 0u32;
     let mut volume = 0u128;
+    let mut total_refused = 0u32;
     let mut first_closure: Option<usize> = None;
 
     for round in 1..=ROUNDS {
         let mut trades = 0u32;
         let mut sales = 0u32;
+        let mut refused = 0u32;
 
-        for (idx, (strategy, buyer, spent, held)) in buyers.iter_mut().enumerate() {
-            let item = MATERIALS[(round + idx) % MATERIALS.len()].0;
-            let base = MATERIALS.iter().find(|(x, _)| *x == item).unwrap().1;
-            let base_yocto = NearToken::from_millinear(base).as_yoctonear();
+        // Every buyer's turn runs concurrently. They are separate accounts with
+        // separate access keys, so their nonces cannot collide — which is what
+        // makes this safe, and is also why the merchants' own calls stay serial.
+        //
+        // It is a better model of the game too: twenty players in a market town
+        // act at the same time and all see the same prices, rather than queuing
+        // politely while each one's transaction clears.
+        let turns = std::mem::take(&mut buyers).into_iter().enumerate().map(|(idx, state)| {
+            let m = &m;
+            async move {
+                let (strategy, buyer, mut spent, mut held) = state;
+                let mut trades = 0u32;
+                let mut sales = 0u32;
+                let mut vol = 0u128;
+                let mut refused = 0u32;
 
-            let mut quotes = m.quotes(item, 4).await?;
-            quotes.retain(|q| q["stock"].as_str().unwrap().parse::<u128>().unwrap() >= 4);
-            if quotes.is_empty() { continue }
-            quotes.sort_by_key(|q| q["unit_price"].as_str().unwrap().parse::<u128>().unwrap());
-            let best = &quotes[0];
-            let unit: u128 = best["unit_price"].as_str().unwrap().parse()?;
-            let total: u128 = best["total"].as_str().unwrap().parse()?;
-            let merchant = best["merchant_id"].as_str().unwrap().to_string();
+                let item = MATERIALS[(round + idx) % MATERIALS.len()].0;
+                let base = MATERIALS.iter().find(|(x, _)| *x == item).unwrap().1;
+                let base_yocto = NearToken::from_millinear(base).as_yoctonear();
 
-            let buy = match strategy {
-                Strategy::Bargain => unit <= base_yocto,
-                Strategy::Greedy => true,
-                Strategy::Hoarder => true,
-                Strategy::Flipper => unit < base_yocto * 11 / 10,
-                Strategy::Noise => (round + idx) % 3 != 0,
-                Strategy::Dumper => true,
-            };
-
-            if buy && buyer.view_account().await?.balance.as_yoctonear() > total + NearToken::from_near(2).as_yoctonear() {
-                let outcome = buyer.call(m.market.id(), "buy")
-                    .args_json(json!({ "merchant_id": merchant, "item": item, "count": 4 }))
-                    .deposit(NearToken::from_yoctonear(total))
-                    .max_gas().transact().await?;
-                if outcome.is_success() {
-                    trades += 1;
-                    *spent += total;
-                    volume += total;
-                    // Remember the unit price paid: a flipper needs it to judge a sale.
-                    let e = held.entry(item.to_string()).or_insert((0, unit));
-                    e.0 += 4;
-                    e.1 = unit; // most recent cost basis
-
+                let mut quotes = m.quotes(item, 4).await?;
+                quotes.retain(|q| q["stock"].as_str().unwrap().parse::<u128>().unwrap() >= 4);
+                if quotes.is_empty() {
+                    return Ok(((strategy, buyer, spent, held), trades, sales, vol, refused));
                 }
-            }
+                quotes.sort_by_key(|q| q["unit_price"].as_str().unwrap().parse::<u128>().unwrap());
+                let best = &quotes[0];
+                let unit: u128 = best["unit_price"].as_str().unwrap().parse()?;
+                let total: u128 = best["total"].as_str().unwrap().parse()?;
+                let merchant = best["merchant_id"].as_str().unwrap().to_string();
 
-            // A flipper sells back once some merchant's bid beats what it paid.
-            // It shops the bids, so the best bid wins — and the best bid comes
-            // from whichever merchant is thinnest on stock, which is how a thin
-            // merchant gets drained and eventually closes.
-            if matches!(strategy, Strategy::Flipper | Strategy::Dumper) {
-                if let Some((count, paid)) = held.get(item).copied().filter(|(c, _)| *c >= 4) {
-                    let mut bids: Vec<(u128, String)> = quotes
-                        .iter()
-                        .filter_map(|q| {
-                            let bid = q["merchant_bid"].as_str()?.parse::<u128>().ok()?;
-                            Some((bid, q["merchant_id"].as_str()?.to_string()))
-                        })
-                        .collect();
-                    bids.sort_by(|a, b| b.0.cmp(&a.0));
-                    if let Some((bid, to)) = bids.first() {
-                        // A flipper needs a profit; a dumper does not care.
-                        if *bid > paid || matches!(strategy, Strategy::Dumper) {
-                            let sold = buyer.call(m.items.id(), "mt_transfer_call")
-                                .args_json(json!({
-                                    "receiver_id": m.market.id(), "token_id": item, "amount": "4",
-                                    "approval": null, "memo": null, "msg": to,
-                                }))
-                                .deposit(NearToken::from_yoctonear(1))
-                                .max_gas().transact().await?;
-                            if sold.is_success() {
-                                sales += 1;
-                                held.insert(item.to_string(), (count - 4, paid));
+                let buy = match strategy {
+                    Strategy::Bargain => unit <= base_yocto,
+                    Strategy::Greedy => true,
+                    Strategy::Hoarder => true,
+                    Strategy::Flipper => unit < base_yocto * 11 / 10,
+                    Strategy::Noise => (round + idx) % 3 != 0,
+                    Strategy::Dumper => true,
+                };
+
+                let offered = total * (10_000 + SLIPPAGE_BPS) / 10_000;
+                if buy && buyer.view_account().await?.balance.as_yoctonear() > offered + NearToken::from_near(2).as_yoctonear() {
+                    let outcome = buyer.call(m.market.id(), "buy")
+                        .args_json(json!({ "merchant_id": merchant, "item": item, "count": 4 }))
+                        .deposit(NearToken::from_yoctonear(offered))
+                        .gas(BUY_GAS).transact().await?;
+                    if outcome.is_success() {
+                        trades += 1;
+                        // What the purchase cost is the quoted total; anything
+                        // over it came back as credit.
+                        spent += total;
+                        vol += total;
+                        // Remember the unit price paid: a flipper needs it to judge a sale.
+                        let e = held.entry(item.to_string()).or_insert((0, unit));
+                        e.0 += 4;
+                        e.1 = unit; // most recent cost basis
+                    } else {
+                        // The market refused it — almost always a quote that
+                        // went stale while a simultaneous buyer cleared first.
+                        // Counted rather than swallowed, because a silent drop
+                        // is how the first parallel run lost 86 trades without
+                        // saying so.
+                        refused += 1;
+                    }
+                }
+
+                // A flipper sells back once some merchant's bid beats what it paid.
+                // It shops the bids, so the best bid wins — and the best bid comes
+                // from whichever merchant is thinnest on stock, which is how a thin
+                // merchant gets drained and eventually closes.
+                if matches!(strategy, Strategy::Flipper | Strategy::Dumper) {
+                    if let Some((count, paid)) = held.get(item).copied().filter(|(c, _)| *c >= 4) {
+                        let mut bids: Vec<(u128, String)> = quotes
+                            .iter()
+                            .filter_map(|q| {
+                                let bid = q["merchant_bid"].as_str()?.parse::<u128>().ok()?;
+                                Some((bid, q["merchant_id"].as_str()?.to_string()))
+                            })
+                            .collect();
+                        bids.sort_by(|a, b| b.0.cmp(&a.0));
+                        if let Some((bid, to)) = bids.first() {
+                            // A flipper needs a profit; a dumper does not care.
+                            if *bid > paid || matches!(strategy, Strategy::Dumper) {
+                                let sold = buyer.call(m.items.id(), "mt_transfer_call")
+                                    .args_json(json!({
+                                        "receiver_id": m.market.id(), "token_id": item, "amount": "4",
+                                        "approval": null, "memo": null, "msg": to,
+                                    }))
+                                    .deposit(NearToken::from_yoctonear(1))
+                                    .gas(SELL_GAS).transact().await?;
+                                if sold.is_success() {
+                                    sales += 1;
+                                    held.insert(item.to_string(), (count - 4, paid));
+                                }
                             }
                         }
                     }
                 }
+
+                Ok::<_, anyhow::Error>(((strategy, buyer, spent, held), trades, sales, vol, refused))
             }
+        }).collect::<Vec<_>>();
+
+        // join_all drives them all on this one task. The work is waiting on RPC,
+        // not computing, so concurrency is the whole win — no threads needed.
+        for result in futures::future::join_all(turns).await {
+            let (state, t, s, v, r) = result?;
+            buyers.push(state);
+            trades += t;
+            sales += s;
+            volume += v;
+            refused += r;
         }
 
         total_trades += trades;
@@ -317,8 +394,9 @@ async fn a_scripted_economy_moves_without_a_single_model_call() -> anyhow::Resul
         if closed_now > 0 && first_closure.is_none() {
             first_closure = Some(round);
         }
-        println!("{:>5}  {:>7}  {:>6}  {:>9}  {:>8}  {} / {}",
-                 round, trades, sales, near(volume), closed_now, near(iron), near(oak));
+        println!("{:>5}  {:>7}  {:>6}  {:>8}  {:>9}  {:>8}  {} / {}",
+                 round, trades, sales, refused, near(volume), closed_now, near(iron), near(oak));
+        total_refused += refused;
     }
 
     // ---------------------------------------------------------------- report
@@ -358,8 +436,8 @@ async fn a_scripted_economy_moves_without_a_single_model_call() -> anyhow::Resul
     }
 
     let closed = m.closed_count().await?;
-    println!("\n{total_trades} purchases, {total_sales} sell-backs, {} NEAR of volume, \
-              {closed} merchant(s) closed{}, in {:.1}s of wall clock\n",
+    println!("\n{total_trades} purchases, {total_sales} sell-backs, {total_refused} refused on a stale quote, \
+              {} NEAR of volume, {closed} merchant(s) closed{}, in {:.1}s of wall clock\n",
              near(volume),
              match first_closure { Some(r) => format!(" (first in round {r})"), None => String::new() },
              started.elapsed().as_secs_f64());

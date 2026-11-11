@@ -34,7 +34,7 @@ export class RelayRefusal extends Error {
   }
 }
 
-export const DEFAULT_GAS = teraToGas('60')
+const DEFAULT_GAS = teraToGas('60')
 
 /// Build the delegate action a player's scoped key will sign.
 ///

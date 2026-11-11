@@ -1,0 +1,12 @@
+{
+  "topic": "cross-contract-economy",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 13866,
+  "command": "cargo test -p nearcraft-integration --test economy -- --nocapture",
+  "cwd": "contracts",
+  "proves": "Buy, the rollback on a failed delivery, a sale through mt_transfer_call, a closed merchant refusing and the resolver refunding, and withdrawals moving real NEAR.",
+  "output_sha256": "ca13ba02e01946168ba67501349ec6cd29e4e15f24ab8474aa51650d309da537",
+  "output_bytes": 1771,
+  "recorded_at": "2026-11-11T17:33:08.106Z"
+}

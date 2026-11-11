@@ -113,6 +113,27 @@ baseline project, where it was the thing that made the evidence worth reading.
 - **An empty `method_names` means *any method on that contract*.** near-api-js
   defaults it to `[]`. Always pass it explicitly. `npm run keys` exits non-zero
   if it ever finds an unrestricted key.
+- **`max_gas()` silently caps throughput to three transactions a block.**
+  Prepaid gas is what reserves room in a chunk, and nearcore's per-chunk limit
+  is 1000 TGas — so 300 TGas per call lets only three share a chunk however many
+  callers are ready. The simulation prepays measured ceilings instead (100 TGas
+  for a buy, 150 for a sale) and got 4.7× the throughput.
+- **Concurrency makes every quote stale, and the contract is right to refuse.**
+  Run twenty buyers at once and they all read the same price; the first to clear
+  moves it, so a deposit sized exactly to the quote fails `require!(paid >=
+  total)`. Buyers need a slippage tolerance. The first parallel run lost 86
+  trades to this and said nothing, because the failure was swallowed by
+  `if outcome.is_success()`. Count refusals.
+- **Never serve the repository root.** `.local/` is inside it and holds the
+  deploying account's private key, so a static server confined to the root will
+  still hand that key to anything that can reach the port. `scripts/serve-web.mjs`
+  serves an allowlist — `web/`, `backend/`, `deployment.json` — and a test
+  asserts the key files are unreachable.
+- **There is no root `Cargo.toml`.** The workspace is `contracts/Cargo.toml`, so
+  every cargo invocation needs `--manifest-path`. `npm run sim` and
+  `npm run test:sandbox` were both broken for exactly this reason while
+  `npm run evidence` worked, because that script sets `cwd: 'contracts'` instead.
+  Two commands the README tells a judge to run, failing on line one.
 - **An agent has three separate pots and conflating them wastes an afternoon.**
   (1) its *spend budget*, credited inside the market contract; (2) its *key
   allowance*, capping gas the key may authorise; (3) its *account balance*,

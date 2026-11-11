@@ -29,7 +29,7 @@ column before the description.
 | `backend/near` — signer, policy, warn→human approval | **Built and tested.** 53 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
 | **Sandbox integration tests** | **Built and passing.** A real local NEAR node via `near-workspaces`. 12 tests: 4 prove a restricted key's limits *at the protocol level*, 6 cover the cross-contract buy/sell/rollback paths, 1 runs the economy, 1 proves the node starts. |
 | **Deployed to NEAR testnet** | **Yes.** `items.nearcraftmc.testnet`, `market.nearcraftmc.testnet`, `guard.nearcraftmc.testnet` — 5 merchants, 2 agents, 1 player. `npm run reads` and `npm run keys` query it with no credentials. |
-| The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls. `npm run sim` |
+| The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls — **135 real transactions in 23.7s** on a real nearcore node, buyers running concurrently. `npm run sim` |
 | `web/market.html` | **Built, and reads the live chain.** Every merchant's ask, bid, stock band and the contract's own reason string, read from the deployed contract over public RPC with no API key. Falls back to the retained simulation snapshot when offline, and says which it is showing. 8 tests. `npm run web` |
 | **A real agent transaction on public testnet** | **Done.** [`CJXc3vK8Yom…`](https://testnet.nearblocks.io/txns/CJXc3vK8YomMVAZn6j6R6FHKqtSF9t4Ev4Tbcq4eqnhZ) — an agent signing with a `buy_with_credit`-scoped key, after being parked for human approval. `npm run live:agent`, retained in `evidence/live/`. |
 | `npm run agent` — an agent shopping end to end | **Built and runnable.** An agent with a scoped key on a real node: an unknown merchant parked for a human, the same merchant clearing itself once trust accrued, and a prompt-injected objective **blocked** by the on-chain guard. |
@@ -345,26 +345,38 @@ gameplay is exercised by any of them.
 npm run sim
 ```
 
-Twenty buyers across six scripted strategies, five merchants, four materials,
+Twenty buyers across six scripted strategies, five merchants, eight materials,
 eight rounds, **no model calls** — plain arithmetic, so what is being tested is
-the market and not a language model's taste. A representative run, in about 110
+the market and not a language model's taste. A representative run, in about 24
 seconds:
 
 ```
-round   trades   sales     volume    closed  cheapest iron / oak
-    1       19       6     12.991         0  0.448 / 0.084
-    4       15       3     45.611         0  0.534 / 0.102
-    8       11       3     88.944         0  0.611 / 0.102
-118 purchases, 28 sell-backs, 88.944 NEAR of volume
+round   trades   sales  refused     volume    closed  cheapest iron / oak
+    3       16       3        3     29.852         0  0.506 / 0.100
+    6       17       5        0     62.457         1  0.592 / 0.100
+    8       10       3        0     82.590         1  0.614 / 0.100
+110 purchases, 25 sell-backs, 17 refused on a stale quote, 82.590 NEAR of volume,
+1 merchant(s) closed (first in round 6), in 23.7s of wall clock
 
-bargain   x4  spent    2.544  earned   0.000  holding   32 units
-dumper    x3  spent   20.362  earned  18.582  holding    0 units
-greedy    x4  spent   26.610  earned   0.000  holding  128 units
+bargain   x4  spent    3.702  earned   0.648  holding   52 units
+dumper    x3  spent   18.677  earned  19.543  holding    0 units
+greedy    x4  spent   25.566  earned   4.756  holding  120 units
 ```
 
-Iron rose from 0.448 to 0.611 NEAR because buyers drained the shelves, and
-trades fell from 19 to 11 as the bargain hunters priced themselves out. Nobody
-scripted that; it falls out of the price rule. The test asserts the things that
+Iron rose from 0.448 to 0.614 NEAR because buyers drained the shelves, and
+trades fell as the bargain hunters priced themselves out. Nobody scripted that;
+it falls out of the price rule.
+
+**The `refused` column is the interesting one.** Each buyer's turn now runs
+concurrently — they are separate accounts with separate nonces, so this is safe,
+and it models a market town better than twenty players queuing politely. But it
+means all twenty read the *same* quote, and the first one to clear moves the
+price. A deposit sized exactly to the quote is then refused by the time it
+executes, which is the contract being right: `require!(paid >= total)`. Buyers
+therefore carry a 20% slippage tolerance, and the contract credits any
+overpayment straight back. The refusals that remain are real stale quotes, and
+they are counted rather than swallowed — the first parallel run silently lost 86
+trades to this before the counter existed. The test asserts the things that
 are robustly true — volume, that iron rose above base, that sell-backs happened,
 and that a bargain hunter spends less than half what a hoarder does.
 
@@ -380,14 +392,35 @@ sells briskly cannot go broke.** It earns on every sale and only spends when
 buying from you. The merchants that close are the ones that opened
 undercapitalised, or that you flooded on purpose.
 
-**On "fast-forward":** the `games` prompt asks for a week of trading in about a
-minute. What this compresses is *trading volume* — a few hundred real
-transactions that a populated server would take days to generate. It does **not**
-advance a week of block height: `fast_forward` in the sandbox produces blocks
-rather than jumping, and a week is 604,800 of them, which we measured as far too
-slow to put in a test. Demand decay is the only time-dependent mechanic and is
-exercised separately. Calling this "a week of wall-clock time" would be a claim
-we cannot support, so we don't.
+**On "fast-forward", with numbers.** The `games` prompt asks for a week of
+trading in about a minute. Here is exactly what we do and do not deliver.
+
+What this compresses is *trading volume and price discovery*: **135 real
+transactions on a real nearcore node in 23.7 seconds — 5.7 trades per second.**
+That is 4.7× what it was, and the gain came from running each buyer's turn
+concurrently rather than serially, plus dropping `max_gas()`. Prepaid gas is
+what reserves room in a chunk and nearcore's per-chunk limit is 1000 TGas, so
+300 TGas per call had been capping a block at three trades no matter how many
+buyers were ready; the two paths now prepay measured ceilings of 100 and 150
+TGas.
+
+It does **not** advance a week of block height. `fast_forward` in the sandbox
+produces blocks rather than jumping, and a week is 604,800 of them, which we
+measured as far too slow to put in a test. Demand decay is the only
+time-dependent mechanic and is exercised separately.
+
+**Is 135 trades a week?** Only for a quiet town, so here is the arithmetic
+rather than an adjective. Take the cadence in `GAME_LOOP.md` — a player makes a
+trading decision every few minutes — and say each of five merchants serves one
+trade every ten minutes across eight active hours: that is about **1,680 trades
+a week**. At the measured 5.7 trades per second that is **roughly five minutes,
+not one** — and only if the shelves could be kept stocked, which this contract
+does not model, because merchants do not restock. Trades already fall from 17 a
+round to 10 as the market drains.
+
+So: a week of trading in about five minutes, under a stated definition, with
+restocking unimplemented. Not a week in a minute. We would rather print the rate
+we measured than round it up.
 
 ### Needs a live testnet deployment (the bonus, not the proof)
 
@@ -403,13 +436,19 @@ npm run keys      # reads method_names + allowance back from the chain
 
 | Track | How |
 |---|---|
-| **`games`** | Materials as NEP-245 multi-tokens (one contract, every item type). Merchant prices from stock and recent demand, with the rule in one readable file and the merchant's reasoning shown in-game. Social login, no seed phrase or gas prompt in the normal loop. Fast-forward mode. The loop itself is specified in [GAME_LOOP.md](GAME_LOOP.md). |
+| **`games`** | Requirement by requirement, with the gaps named. **(1)** Materials as NEP-245 multi-tokens, one contract holding every item type — core 10/10, Enumeration 2/2, Approval Management 5/5, read off the compiled ABI. **(2)** No seed phrase, no wallet popup, no gas prompt: measured, a player holding **no full-access key at all** both buys and sells for free. The one stubbed piece is OAuth token verification, behind `verifyIdentity` — so the mechanism is real and the login is not, and we say which half is which. **(3)** The price rule in one readable file, [`contracts/market/src/pricing.rs`](contracts/market/src/pricing.rs), and the merchant's own reason string rendered beside every quote — on the live web page today; **the in-game tooltip needs the Minecraft host, which is not up**. **(4)** Fast-forward: 135 real transactions in 23.7s. **That is not "a week in a minute"** — the arithmetic is worked out above and the claim declined. The loop is specified in [GAME_LOOP.md](GAME_LOOP.md), written before any code. |
 | **`security`** | All three requirements. **(1)** A counterparty check returning `allow`/`warn`/`block` with reasons, scoring the four named signals — account activity, is-a-contract and code-changed, prior interactions, and an on-chain shared blocklist other agents report to with evidence. The wrapper refuses to sign on `block` and **parks the call for a human on `warn`**. **(2)** Agents sign with a function-call access key scoped to one contract with an explicit method list and allowance, never full-access — its limits are explained above and proved in the sandbox. **(3)** The attack demo: a prompt-injected agent tries to pay a known-bad account, is stopped, and the log is printed. Signals and their data sources are written up in [docs/SECURITY_SIGNALS.md](docs/SECURITY_SIGNALS.md), which was written before the code, as the prompt asks. |
-| **`swarms`** | Each agent gets its own named sub-account, so every on-chain action traces to one agent. A sealed-bid commit-reveal round coordinator, second-price clearing, with rules fixed in [RULES.md](RULES.md) before any contract code, and a scripted no-LLM simulation. |
 
-`swarms` is entered **only if** its coordinator is actually deployed and
-simulated. Entering a track whose stated requirements are unmet is not something
-this project will do.
+**Two tracks are entered: `games` and `security`.**
+
+**`swarms` is not entered.** It was planned as a third. Its round rules were
+fixed in [RULES.md](RULES.md) before any code, as that prompt asks — and then
+the sealed-bid coordinator was never built, so the track's stated requirements
+are unmet and we do not select it. `RULES.md` stays in the repo, labelled as
+designed-and-not-implemented, because deleting it would hide that we scoped
+something and dropped it. Entering a track whose requirements we did not meet is
+not something this project will do, and the gate that stopped it existed
+precisely so a third ticket could not eat the primary track's remaining time.
 
 ---
 
