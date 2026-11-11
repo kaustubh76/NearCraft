@@ -4,11 +4,21 @@
   "private": true,
   "type": "module",
   "description": "An agent-run market economy inside a Minecraft recreation of South Mumbai, settled on NEAR.",
-  "engines": { "node": ">=26.3.1" },
-  "scripts": {
-    "verify:baseline": "node scripts/verify-baseline.mjs",
-    "sim": "node sim/fastforward.mjs",
-    "test": "node --test tests/near tests/baseline"
+  "engines": {
+    "node": ">=26.3.1"
   },
-  "license": "MIT"
+  "scripts": {
+    "build:contracts": "cargo near build non-reproducible-wasm --manifest-path contracts/items/Cargo.toml && cargo near build non-reproducible-wasm --manifest-path contracts/market/Cargo.toml",
+    "test:contracts": "cargo test --manifest-path contracts/Cargo.toml",
+    "deploy": "node scripts/deploy.mjs",
+    "reads": "node scripts/reads.mjs",
+    "keys": "node scripts/keys.mjs",
+    "sim": "node sim/fastforward.mjs",
+    "verify:baseline": "node scripts/verify-baseline.mjs",
+    "test": "npm run test:contracts && npm run verify:baseline"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "near-api-js": "^7.4.0"
+  }
 }

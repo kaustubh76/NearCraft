@@ -1,0 +1,16 @@
+[package]
+name = "nearcraft-items"
+description = "NEP-245 multi-token contract holding every NearCraft material as one token id."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = { workspace = true }
+
+[dev-dependencies]
+near-sdk = { workspace = true, features = ["unit-testing"] }

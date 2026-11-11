@@ -1,0 +1,25 @@
+{
+  "note": "The genesis state of the NearCraft economy. Deploy reads this; the simulation and the plugin read the deployed contracts, never this file.",
+  "merchants": [
+    { "prefix": "ironmonger",   "name": "Ironmonger",   "floor_near": "1",   "fund_near": "25" },
+    { "prefix": "timberwright", "name": "Timberwright", "floor_near": "1",   "fund_near": "25" },
+    { "prefix": "stonecutter",  "name": "Stonecutter",  "floor_near": "1",   "fund_near": "15" },
+    { "prefix": "glassblower",  "name": "Glassblower",  "floor_near": "0.5", "fund_near": "8" },
+    { "prefix": "chandler",     "name": "Chandler",     "floor_near": "0.5", "fund_near": "4" }
+  ],
+  "materials": [
+    { "token_id": "iron_ingot",  "base_near": "0.40", "supply": 20000, "stock": { "ironmonger": 256, "stonecutter": 64 } },
+    { "token_id": "oak_log",     "base_near": "0.10", "supply": 40000, "stock": { "timberwright": 1024, "chandler": 128 } },
+    { "token_id": "stone",       "base_near": "0.05", "supply": 60000, "stock": { "stonecutter": 2048, "ironmonger": 256 } },
+    { "token_id": "glass",       "base_near": "0.25", "supply": 10000, "stock": { "glassblower": 96 } },
+    { "token_id": "coal",        "base_near": "0.15", "supply": 30000, "stock": { "ironmonger": 512, "chandler": 256 } },
+    { "token_id": "copper_ingot","base_near": "0.30", "supply": 15000, "stock": { "ironmonger": 128, "glassblower": 32 } },
+    { "token_id": "oak_planks",  "base_near": "0.12", "supply": 25000, "stock": { "timberwright": 512 } },
+    { "token_id": "redstone",    "base_near": "0.60", "supply": 8000,  "stock": { "chandler": 48, "ironmonger": 24 } }
+  ],
+  "agents": [
+    { "prefix": "worker-1", "budget_near": "5", "gas_allowance_near": "0.25" },
+    { "prefix": "worker-2", "budget_near": "5", "gas_allowance_near": "0.25" }
+  ],
+  "agent_permitted_methods": ["buy_with_credit"]
+}
