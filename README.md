@@ -37,7 +37,7 @@ column before the description.
 | `evidence/` | **Built.** `npm run evidence` retains each check's real output with its exit code and an output hash. Failures are kept, not edited out. |
 | Gasless play — no seed phrase, no popup, no gas prompt | **Built and measured.** `npm run test:gasless`: a player holding **no full-access key at all** both buys and sells on a real nearcore node without paying. 15 more offline tests. [docs/GASLESS.md](docs/GASLESS.md) |
 | NEP-245 Approval Management | **Built and tested.** 10 unit tests. Implemented because without it a key-less player could buy but never sell. |
-| Minecraft plugin settlement path | **Not built.** See the note below. |
+| Minecraft plugin settlement path | **Not built**, and not startable here — no Java runtime on this machine and the Paper jar lives on the operator host. The note below also corrects our own earlier estimate of the work. |
 | Sealed-bid rounds (`swarms`) | **Not built, and that track is not entered.** See below. |
 
 **Live on NEAR testnet.** The contracts below are deployed and queryable by
@@ -106,14 +106,26 @@ measured, and the provider integration is not.
 
 **On the Minecraft integration:** the game world, its menus and its item
 delivery are baseline — they exist and they work, on Unichain. What is *not*
-done is repointing their settlement calls at NEAR. That turned out to be about
-six edit sites in one file, because the plugin holds no settlement logic at all;
-but building it needs a hash-pinned Paper jar and its bootstrapped library tree,
-which live only on the operator host. **No live NEAR gameplay has been recorded,
-and nothing here should be read as implying one.** The `games` track is entered
-on what is actually demonstrated: NEP-245 materials, one readable price rule,
-merchant reasoning the contract itself produces, and a full economy run anyone
-can reproduce.
+done is repointing their settlement calls at NEAR, and this README previously
+estimated that as "about six edit sites in one file". **That estimate was too
+low, and here is the correction.** Six is the GUI side. The validation itself,
+`InventoryMarketplace.gameOrder`, enforces `chainId == 1301`, an 18-decimal
+`totalBaseUnits` cross-check, a `0x[a-fA-F0-9]{40}` address, Privy consent
+nonces and a ten-state order machine — all EVM-shaped. Repointing it at NEAR is
+a rewrite of the order flow, not an edit pass.
+
+Two hard blockers, both verified rather than assumed: building the plugin needs
+a hash-pinned Paper jar and its bootstrapped library tree, which exist only on
+the operator host; and **this machine has no Java runtime at all**, so nothing
+Java could be compiled or tested here even in extract. Writing a port we could
+not compile would put unverified code into a submission whose whole claim is
+that everything in it was checked, so we did not write one.
+
+**No live NEAR gameplay has been recorded, and nothing here should be read as
+implying one.** The `games` track is entered on what is actually demonstrated:
+NEP-245 materials, one readable price rule, merchant reasoning the contract
+itself produces, a measured key-less buy and sell, a real testnet transaction,
+and a full economy run anyone can reproduce.
 
 ---
 
