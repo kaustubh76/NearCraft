@@ -8,8 +8,8 @@
     "node": ">=26.3.1"
   },
   "scripts": {
-    "build:contracts": "cargo near build non-reproducible-wasm --manifest-path contracts/items/Cargo.toml && cargo near build non-reproducible-wasm --manifest-path contracts/market/Cargo.toml",
-    "test:contracts": "cargo test --manifest-path contracts/Cargo.toml -p nearcraft-items -p nearcraft-market --lib",
+    "build:contracts": "cargo near build non-reproducible-wasm --manifest-path contracts/items/Cargo.toml && cargo near build non-reproducible-wasm --manifest-path contracts/market/Cargo.toml && cargo near build non-reproducible-wasm --manifest-path contracts/guard/Cargo.toml",
+    "test:contracts": "cargo test --manifest-path contracts/Cargo.toml -p nearcraft-items -p nearcraft-market -p nearcraft-guard --lib",
     "deploy": "node scripts/deploy.mjs",
     "reads": "node scripts/reads.mjs",
     "keys": "node scripts/keys.mjs",

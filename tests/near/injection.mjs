@@ -9,6 +9,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { agentPolicy, authorize, PolicyRefusal } from '../../backend/near/policy.mjs'
+import { BLOCK, score, WARN } from '../../backend/near/counterparty.mjs'
 import { validateSurvivalTool } from '../../backend/baseline/playable/survival-tools.mjs'
 
 const MARKET = 'market.nearcraftmc.testnet'
@@ -117,4 +118,49 @@ test('the injected text never reaches a signer as an argument', () => {
     }),
     (e) => e.code === 'ITEM_MALFORMED',
   )
+})
+
+/// The track's requirement 3 says the injected agent tries to pay a
+/// **known-bad** address. The refusals above stop it on method and contract
+/// scope, which is necessary but is not the same thing: they would stop a call
+/// to a perfectly honest account too. This is the part where the address itself
+/// is the problem.
+test('the known-bad address is recognised as known-bad, not merely out of scope', () => {
+  console.log('\n--- the counterparty check, on the injected address ---')
+
+  // Three independent accounts have reported it, and its contract code changed
+  // since this service first saw it — the classic redeploy-under-a-known-name.
+  const reported = score({
+    accountId: ATTACKER,
+    agentId: 'worker-1.nearcraftmc.testnet',
+    exists: true, isContract: true, codeHash: 'deadbeef',
+    storageUsage: 9_000,
+    firstSeenBlockHeight: 100,
+    codeChangedSinceFirstSeen: true,
+    priorInteractions: null,
+    guard: {
+      distinctReporters: 3, atOrOverThreshold: true, threshold: 3,
+      reasons: ['drained an agent budget', 'redeployed under a known name', 'phishing merchant'],
+    },
+  })
+
+  assert.equal(reported.verdict, BLOCK, 'a corroborated report must block');
+  console.log(`  verdict: ${reported.verdict.toUpperCase()}`)
+  for (const r of reported.reasons) console.log(`    - ${r}`)
+
+  // And the reason it blocks is corroboration, not reporter count alone. Strip
+  // the independent signal and the same reports only warn.
+  const reportsOnly = score({
+    accountId: ATTACKER, agentId: 'worker-1.nearcraftmc.testnet',
+    exists: true, isContract: false, storageUsage: 9_000,
+    firstSeenBlockHeight: 100, codeChangedSinceFirstSeen: false,
+    priorInteractions: { count: 9, lastBlockHeight: 900 },
+    guard: {
+      distinctReporters: 3, atOrOverThreshold: true, threshold: 3, reasons: ['drained an agent budget'],
+    },
+  })
+  assert.equal(reportsOnly.verdict, WARN)
+  console.log(`\n  same reports, no corroborating signal: ${reportsOnly.verdict.toUpperCase()}`)
+  console.log('    a permissionless blocklist is sybil-reportable, so reports alone')
+  console.log('    never block — three colluding accounts must not cut anyone off.\n')
 })

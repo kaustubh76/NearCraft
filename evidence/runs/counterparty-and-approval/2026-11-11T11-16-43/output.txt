@@ -1,0 +1,34 @@
+✔ a known, well-used counterparty with history is allowed (0.881083ms)
+✔ reports alone can never reach block, however many there are (0.194959ms)
+✔ reports plus an independent adverse signal do block (0.100792ms)
+✔ an explicit local denylist entry blocks on its own (0.081333ms)
+✔ an unknown counterparty warns and is never allowed (0.104166ms)
+✔ a barely-used account warns, with its storage named (0.090584ms)
+✔ an account that does not exist warns rather than erroring (0.10725ms)
+✔ a redeployed contract warns even with a clean record (0.0985ms)
+✔ a never-before-seen contract warns (0.099292ms)
+✔ thin history warns and says how much more is needed (0.141ms)
+✔ sub-threshold reports are surfaced, not hidden (0.099792ms)
+✔ every verdict carries reasons and is frozen (0.101583ms)
+✔ missing or malformed signals warn rather than throwing (0.11425ms)
+✔ an unreadable guard contract does not read as clean (0.062208ms)
+✔ a first sighting is recorded once and never overwritten (0.155625ms)
+✔ interactions accumulate per agent and counterparty pair (0.152333ms)
+✔ trust accrues: three interactions turn a warn into an allow (0.629791ms)
+✔ block refuses before anything is signed (42.225375ms)
+✔ warn parks the call for a human instead of signing or dropping it (1.934666ms)
+✔ a refusal and a pending decision are different types (1.820625ms)
+✔ rejecting discards the call and signs nothing (0.964667ms)
+✔ an approval cannot override a counterparty that has since been blocked (0.999584ms)
+✔ approving something that is not pending is refused (0.92125ms)
+✔ an unrecognised verdict is not treated as permission (0.87ms)
+✔ policy refusal still happens before the counterparty is even consulted (0.795708ms)
+✔ with no counterparty service wired in, screening is skipped not faked (27.487209ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 189.88175

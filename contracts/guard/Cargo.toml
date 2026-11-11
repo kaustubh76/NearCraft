@@ -1,0 +1,16 @@
+[package]
+name = "nearcraft-guard"
+description = "A shared, public blocklist agents report to, with evidence attached."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = { workspace = true }
+
+[dev-dependencies]
+near-sdk = { workspace = true, features = ["unit-testing"] }

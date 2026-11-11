@@ -24,7 +24,9 @@ column before the description.
 | `BASELINE.md` + hash-verified baseline import | **Done, machine-checked.** `npm run verify:baseline` |
 | `contracts/items` — NEP-245 materials | **Built and tested.** 19 unit tests. NEP-245 core 10/10 + Enumeration 2/2, verified against the compiled ABI. 204.7 KB wasm. |
 | `contracts/market` — merchants, pricing, treasury | **Built and tested.** 42 unit tests. |
-| `backend/near` — function-call-key signer + policy | **Built and tested.** 15 tests, including the prompt-injection attack demo. |
+| `contracts/guard` — the shared blocklist, on-chain | **Built and tested.** 13 unit tests. Public, attributed by the runtime, not deletable by us. |
+| `backend/near/counterparty.mjs` — allow/warn/block | **Built and tested.** 17 tests. Pure scoring, no API key, no indexer. |
+| `backend/near` — signer, policy, warn→human approval | **Built and tested.** 53 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
 | **Sandbox integration tests** | **Built and passing.** A real local NEAR node via `near-workspaces`. 12 tests: 4 prove a restricted key's limits *at the protocol level*, 6 cover the cross-contract buy/sell/rollback paths, 1 runs the economy, 1 proves the node starts. |
 | **Deployed to NEAR testnet** | **No**, and no longer on the critical path — every check below runs against a local sandbox instead. See the note on the faucet. |
 | The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls. `npm run sim` |
@@ -297,7 +299,7 @@ npm run keys      # reads method_names + allowance back from the chain
 | Track | How |
 |---|---|
 | **`games`** | Materials as NEP-245 multi-tokens (one contract, every item type). Merchant prices from stock and recent demand, with the rule in one readable file and the merchant's reasoning shown in-game. Social login, no seed phrase or gas prompt in the normal loop. Fast-forward mode. The loop itself is specified in [GAME_LOOP.md](GAME_LOOP.md). |
-| **`security`** | Agents sign with function-call access keys scoped to one contract with an explicit method list and allowance — never a full-access key. A wrapper refuses to sign on a policy violation and escalates to a human confirmation otherwise. Plus the required attack demo: a prompt-injected agent attempting to pay a known-bad account, blocked, with the log. |
+| **`security`** | All three requirements. **(1)** A counterparty check returning `allow`/`warn`/`block` with reasons, scoring the four named signals — account activity, is-a-contract and code-changed, prior interactions, and an on-chain shared blocklist other agents report to with evidence. The wrapper refuses to sign on `block` and **parks the call for a human on `warn`**. **(2)** Agents sign with a function-call access key scoped to one contract with an explicit method list and allowance, never full-access — its limits are explained above and proved in the sandbox. **(3)** The attack demo: a prompt-injected agent tries to pay a known-bad account, is stopped, and the log is printed. Signals and their data sources are written up in [docs/SECURITY_SIGNALS.md](docs/SECURITY_SIGNALS.md), which was written before the code, as the prompt asks. |
 | **`swarms`** | Each agent gets its own named sub-account, so every on-chain action traces to one agent. A sealed-bid commit-reveal round coordinator, second-price clearing, with rules fixed in [RULES.md](RULES.md) before any contract code, and a scripted no-LLM simulation. |
 
 `swarms` is entered **only if** its coordinator is actually deployed and

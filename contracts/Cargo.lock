@@ -2339,6 +2339,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "nearcraft-guard"
+version = "0.1.0"
+dependencies = [
+ "near-sdk",
+]
+
+[[package]]
 name = "nearcraft-integration"
 version = "0.1.0"
 dependencies = [
