@@ -1,0 +1,38 @@
+
+Agent access keys, as the protocol reports them
+
+worker-1.nearcraftmc.testnet
+  ed25519:52zA3ZH9FZ2PyxgX2rrtznqgzUkeVAtAB6P2tor75i1n
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit]
+    allowance     2 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+  ed25519:D9D4Eo6EmNSBPk66Uee6FMv6gqSSpgf9Y6Nv7V1X4NBJ
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit]
+    allowance     2 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+  ed25519:E1Qp6G9rCKpLGVp9XYHZJTTp3iQszpTDTA7K8jryCdgs
+    FULL ACCESS  (operator recovery key — never given to the agent process)
+
+worker-2.nearcraftmc.testnet
+  ed25519:2orZSEsAFb1wXEzP9xEALgXCidMsBBPk2kiNKWQQitjz
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit]
+    allowance     2 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+  ed25519:AgRX8cS24BffEMd826VVFYHthLaTZHJBE8p7eFS9SB5C
+    FULL ACCESS  (operator recovery key — never given to the agent process)
+  ed25519:FnqMb3BR38wJqJokta2atVZrfTxoWULUzBhdfEojZm9H
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit]
+    allowance     2 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+
+Spend budgets (the second bound, enforced by the market contract)
+
+  worker-1.nearcraftmc.testnet             0.05 NEAR remaining
+  worker-2.nearcraftmc.testnet             0.05 NEAR remaining
+
+all agent keys are correctly scoped
+

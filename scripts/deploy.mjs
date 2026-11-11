@@ -12,7 +12,7 @@
 
 import { writeFile, mkdir, readFile, chmod } from 'node:fs/promises'
 import { Account, KeyPair, actions, teraToGas } from 'near-api-js'
-import { catalog, fromYocto, names, provider, rootAccount, rootAccountId, toYocto } from './near-env.mjs'
+import { catalog, fromYocto, names, provider, rootAccount, rootAccountId, toYocto, RPC_URL } from './near-env.mjs'
 
 const KEYS_PATH = new URL('../.local/nearcraft-keys.json', import.meta.url)
 const MANIFEST_PATH = new URL('../deployment.json', import.meta.url)
@@ -22,11 +22,24 @@ const WASM = {
   guard: new URL('../contracts/target/near/nearcraft_guard/nearcraft_guard.wasm', import.meta.url),
 }
 
+/// Every economic amount in the catalog is multiplied by this.
+///
+/// A faucet account holds 10 NEAR and the three contracts alone stake ~5.7 of
+/// it in storage, so the catalog's full-size economy (77 NEAR of merchant
+/// treasuries) cannot fit. Scaling is uniform, so every *ratio* — prices to
+/// treasuries to floors to budgets — is preserved exactly and the market
+/// behaves identically; only the units shrink. Contract account funding is NOT
+/// scaled, because storage staking is a fixed cost in real NEAR.
+const SCALE = Number(process.env.NEAR_ECONOMY_SCALE ?? '1')
+if (!(SCALE > 0)) throw new Error('NEAR_ECONOMY_SCALE must be a positive number')
+
 const p = provider()
 const root = rootAccount()
 const n = names()
 const cat = await catalog()
 const log = (...a) => console.log(...a)
+/// Scaled catalog amount, for anything economic.
+const econ = (amount) => (toYocto(amount) * BigInt(Math.round(SCALE * 1e6))) / 1_000_000n
 
 // ---------------------------------------------------------------- key storage
 
@@ -52,6 +65,22 @@ function keyFor(accountId) {
 }
 
 // ------------------------------------------------------------------- helpers
+
+/// Deposit only the shortfall against a target, so re-running does not keep
+/// adding budget. `fund_credit` has no "set" form — it only adds — so
+/// idempotency has to live here.
+async function topUpCredit(accountId, target) {
+  const current = BigInt(await p.callFunction({
+    contractId: n.market, method: 'credit_of', args: { account_id: accountId },
+  }).catch(() => '0'))
+  if (current >= target) {
+    log(`  funded   ${accountId} already at ${fromYocto(current)} NEAR`)
+    return
+  }
+  const short = target - current
+  await call(rootAccountId(), n.market, 'fund_credit', { account_id: accountId }, { deposit: short })
+  log(`  funded   ${accountId} +${fromYocto(short)} -> ${fromYocto(target)} NEAR`)
+}
 
 async function exists(accountId) {
   try {
@@ -113,7 +142,8 @@ async function call(accountId, contractId, methodName, args, { deposit = 0n, tga
 
 // --------------------------------------------------------------------- steps
 
-log(`\nNearCraft deploy — root ${rootAccountId()}\n`)
+log(`\nNearCraft deploy — root ${rootAccountId()}`)
+log(`economy scale ${SCALE}${SCALE === 1 ? '' : ' (ratios preserved; only the units shrink)'}\n`)
 
 if (!(await exists(rootAccountId()))) {
   throw new Error(
@@ -124,9 +154,16 @@ if (!(await exists(rootAccountId()))) {
 }
 
 log('contracts')
-await ensureAccount(n.items, toYocto('4'))
-await ensureAccount(n.market, toYocto('8'))
-await ensureAccount(n.guard, toYocto(cat.guard?.fund_near ?? '3'))
+// Storage staking is ~1e19 yoctoNEAR per byte, so fund each contract account
+// from its actual wasm size plus margin rather than from a guess.
+const stakeFor = async (wasmUrl, marginNear) => {
+  const { stat } = await import('node:fs/promises')
+  const { size } = await stat(wasmUrl)
+  return BigInt(size) * 10_000_000_000_000_000_000n + toYocto(marginNear)
+}
+await ensureAccount(n.items, await stakeFor(WASM.items, '0.3'))
+await ensureAccount(n.market, await stakeFor(WASM.market, '0.5'))
+await ensureAccount(n.guard, await stakeFor(WASM.guard, '0.3'))
 await saveKeys(keys)
 
 for (const [accountId, wasm] of [[n.items, WASM.items], [n.market, WASM.market], [n.guard, WASM.guard]]) {
@@ -147,7 +184,7 @@ for (const [accountId, args] of [
     log(`  init     ${accountId}  ${JSON.stringify(args)}`)
   } catch (e) {
     // `new` is `#[init]`, so a second call fails. That is the idempotent path.
-    if (/already initialized|Contract already/i.test(String(e))) log(`  already  ${accountId} initialised`)
+    if (/already.{0,16}initiali[sz]ed/i.test(String(e))) log(`  already  ${accountId} initialised`)
     else throw e
   }
 }
@@ -170,13 +207,13 @@ log('\nmerchants')
 const registered = new Map((await p.callFunction({ contractId: n.market, method: 'merchants', args: {} }).catch(() => [])).map(([id, m]) => [id, m]))
 for (const merchant of cat.merchants) {
   const id = n.sub(merchant.prefix)
-  await ensureAccount(id, toYocto('0.5'))
+  await ensureAccount(id, toYocto('0.05'))
   if (registered.has(id)) { log(`  known    ${id}`); continue }
   await call(rootAccountId(), n.market, 'register_merchant', {
-    merchant_id: id, name: merchant.name, floor: toYocto(merchant.floor_near).toString(),
+    merchant_id: id, name: merchant.name, floor: econ(merchant.floor_near).toString(),
   })
-  await call(rootAccountId(), n.market, 'fund_merchant', { merchant_id: id }, { deposit: toYocto(merchant.fund_near) })
-  log(`  opened   ${id}  "${merchant.name}"  treasury ${merchant.fund_near} NEAR, floor ${merchant.floor_near}`)
+  await call(rootAccountId(), n.market, 'fund_merchant', { merchant_id: id }, { deposit: econ(merchant.fund_near) })
+  log(`  opened   ${id}  "${merchant.name}"  treasury ${fromYocto(econ(merchant.fund_near))} NEAR, floor ${fromYocto(econ(merchant.floor_near))}`)
 }
 await saveKeys(keys)
 
@@ -185,9 +222,9 @@ for (const m of cat.materials) {
   for (const [prefix, stock] of Object.entries(m.stock)) {
     await call(rootAccountId(), n.market, 'list_item', {
       merchant_id: n.sub(prefix), item: m.token_id,
-      base_price: toYocto(m.base_near).toString(), stock: String(stock),
+      base_price: econ(m.base_near).toString(), stock: String(stock),
     })
-    log(`  stocked  ${prefix.padEnd(13)} ${m.token_id.padEnd(13)} ${String(stock).padStart(5)} @ ${m.base_near} NEAR`)
+    log(`  stocked  ${prefix.padEnd(13)} ${m.token_id.padEnd(13)} ${String(stock).padStart(5)} @ ${fromYocto(econ(m.base_near))} NEAR`)
   }
 }
 
@@ -197,7 +234,19 @@ log('\nagents — function-call keys scoped to the market, nothing else')
 const agentKeys = {}
 for (const agent of cat.agents) {
   const id = n.sub(agent.prefix)
-  await ensureAccount(id, toYocto('0.3'))
+  await ensureAccount(id, toYocto('0.05'))
+
+  // Skip if this account already carries a function-call key scoped to the
+  // market — otherwise every run adds one more.
+  const existingScoped = await p.query({
+    request_type: 'view_access_key_list', finality: 'optimistic', account_id: id,
+  }).then(({ keys: ks }) => ks.filter((k) => k.access_key.permission?.FunctionCall?.receiver_id === n.market))
+    .catch(() => [])
+  if (existingScoped.length) {
+    log(`  keyed    ${id} already (${existingScoped.length} scoped key(s))`)
+    await topUpCredit(id, econ(agent.budget_near))
+    continue
+  }
 
   const fcKey = KeyPair.fromRandom('ed25519')
   const publicKey = fcKey.getPublicKey().toString()
@@ -215,11 +264,11 @@ for (const agent of cat.agents) {
 
   // Its spend budget is a separate, second bound — see `fund_credit` in the
   // market contract for why a function-call key needs one.
-  await call(rootAccountId(), n.market, 'fund_credit', { account_id: id }, { deposit: toYocto(agent.budget_near) })
+  await topUpCredit(id, econ(agent.budget_near))
 
   agentKeys[id] = { secretKey: fcKey.toString(), publicKey, permitted: cat.agent_permitted_methods }
   keys[`${id}#function-call`] = fcKey.toString()
-  log(`  keyed    ${id}  methods=[${cat.agent_permitted_methods}] gas=${agent.gas_allowance_near} budget=${agent.budget_near} NEAR`)
+  log(`  keyed    ${id}  methods=[${cat.agent_permitted_methods}] gas=${agent.gas_allowance_near} budget=${fromYocto(econ(agent.budget_near))} NEAR`)
 }
 await saveKeys(keys)
 
@@ -230,7 +279,7 @@ const players = []
 for (const prefix of cat.players?.accounts ?? ['player-1']) {
   const id = n.sub(prefix)
   const existed = await exists(id)
-  await ensureAccount(id, toYocto('0.3'))
+  await ensureAccount(id, toYocto('0.1'))
 
   if (!existed) {
     // The approval has to be granted while a full-access key still exists: a
@@ -270,8 +319,7 @@ for (const prefix of cat.players?.accounts ?? ['player-1']) {
     log(`  exists   ${id}`)
   }
 
-  await call(rootAccountId(), n.market, 'fund_credit', { account_id: id },
-    { deposit: toYocto(cat.players?.budget_near ?? '2') })
+  await topUpCredit(id, econ(cat.players?.budget_near ?? '2'))
   players.push({ account_id: id, permitted_methods: cat.players?.methods ?? [] })
 }
 await saveKeys(keys)
@@ -281,8 +329,9 @@ await saveKeys(keys)
 const manifest = {
   note: 'Written by npm run deploy. Public ids only — no secret material.',
   network: 'testnet',
-  rpc: process.env.NEAR_RPC || 'https://rpc.testnet.near.org',
+  rpc: RPC_URL,
   deployed_at: new Date().toISOString(),
+  economy_scale: SCALE,
   root: rootAccountId(),
   contracts: { items: n.items, market: n.market, guard: n.guard },
   merchants: cat.merchants.map((m) => ({ account_id: n.sub(m.prefix), name: m.name })),
@@ -290,7 +339,7 @@ const manifest = {
   players,
   agents: Object.entries(agentKeys).map(([account_id, k]) => ({
     account_id,
-    function_call_key: k.publicKey,
+    function_call_public_key: k.publicKey,
     permitted_methods: k.permitted,
     scoped_to: n.market,
   })),

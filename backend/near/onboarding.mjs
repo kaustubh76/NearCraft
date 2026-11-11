@@ -65,7 +65,7 @@ export function createOnboarding({
   sellableItems = [],
   playerMethods,
   verifyIdentity,
-  rpcUrl = 'https://rpc.testnet.near.org',
+  rpcUrl = 'https://test.rpc.fastnear.com',
   startingBalance = 100_000_000_000_000_000_000_000n, // 0.1 NEAR: storage + the approval deposit
   gasAllowance = 2_000_000_000_000_000_000_000_000n,  // 2 NEAR of gas allowance
   approvalDeposit = 10_000_000_000_000_000_000_000n,  // 0.01 NEAR for approval storage

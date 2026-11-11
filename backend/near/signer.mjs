@@ -28,7 +28,7 @@ export class HumanApprovalRequired extends Error {
 /// callback. Drawn from the key's allowance, which is gas-only.
 const GAS = 60_000_000_000_000n
 
-export function createAgentSigner({ policy, secretKey, rpcUrl = 'https://rpc.testnet.near.org', log = () => {}, counterparty = null }) {
+export function createAgentSigner({ policy, secretKey, rpcUrl = 'https://test.rpc.fastnear.com', log = () => {}, counterparty = null }) {
   if (!secretKey) throw new PolicyRefusal('NO_AGENT_KEY', 'the agent has no function-call key')
   const provider = new JsonRpcProvider({ url: rpcUrl })
   const keyPair = KeyPair.fromString(secretKey)

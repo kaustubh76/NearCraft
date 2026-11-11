@@ -28,7 +28,7 @@ column before the description.
 | `backend/near/counterparty.mjs` — allow/warn/block | **Built and tested.** 17 tests. Pure scoring, no API key, no indexer. |
 | `backend/near` — signer, policy, warn→human approval | **Built and tested.** 53 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
 | **Sandbox integration tests** | **Built and passing.** A real local NEAR node via `near-workspaces`. 12 tests: 4 prove a restricted key's limits *at the protocol level*, 6 cover the cross-contract buy/sell/rollback paths, 1 runs the economy, 1 proves the node starts. |
-| **Deployed to NEAR testnet** | **No**, and no longer on the critical path — every check below runs against a local sandbox instead. See the note on the faucet. |
+| **Deployed to NEAR testnet** | **Yes.** `items.nearcraftmc.testnet`, `market.nearcraftmc.testnet`, `guard.nearcraftmc.testnet` — 5 merchants, 2 agents, 1 player. `npm run reads` and `npm run keys` query it with no credentials. |
 | The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls. `npm run sim` |
 | `web/market.html` | **Built.** Every merchant's ask, bid, stock band and the contract's own reason string. No external dependencies. |
 | `npm run agent` — an agent shopping end to end | **Built and runnable.** An agent with a scoped key on a real node: an unknown merchant parked for a human, the same merchant clearing itself once trust accrued, and a prompt-injected objective **blocked** by the on-chain guard. |
@@ -39,14 +39,35 @@ column before the description.
 | Minecraft plugin settlement path | **Not built.** See the note below. |
 | Sealed-bid rounds (`swarms`) | **Not built, and that track is not entered.** See below. |
 
-**Nothing is deployed to NEAR testnet yet**, so no account id in this README is
-live and `npm run reads` / `npm run keys` will tell you so rather than invent
-output. `helper.testnet.near.org` returns 404 and the web faucet was erroring, so
-a `*.testnet` account could not be created. **That stopped mattering:** the
-verification below runs against a real NEAR node in a local sandbox, so it needs
-no account, no faucet and no credentials at all. Testnet deployment is a bonus
-claim rather than the proof, and `npm run deploy` is idempotent and ready for
-whenever an account exists.
+**Live on NEAR testnet.** The contracts below are deployed and queryable by
+anyone, with no credentials:
+
+```
+items    items.nearcraftmc.testnet
+market   market.nearcraftmc.testnet
+guard    guard.nearcraftmc.testnet
+```
+
+```sh
+npm run reads     # every merchant's ask, bid, stock band and the contract's own reason
+npm run keys      # each agent key's receiver, method list and allowance, from the chain
+```
+
+**One thing to know about the figures.** A testnet faucet account holds 10 NEAR
+and the three contracts stake about 5.7 of it in storage, so the full-size
+economy in `config/catalog.json` (77 NEAR of merchant treasuries) does not fit.
+The deployment therefore runs at `NEAR_ECONOMY_SCALE=0.01`, recorded as
+`economy_scale` in `deployment.json`. Scaling is **uniform**, so every ratio —
+price to treasury to floor to budget — is preserved and the market behaves
+identically; only the units shrink. The sandbox runs the full-size economy.
+
+The web faucet was failing, and `helper.testnet.near.org` is 404. What worked is
+`POST https://helper.nearprotocol.com/account`, the endpoint `near-cli-rs` uses
+for `sponsor-by-faucet-service`.
+
+Note also that **`rpc.testnet.near.org` is deprecated** and answers HTTP 429
+telling you to stop using it — it killed a deploy part-way through. Everything
+here defaults to `https://test.rpc.fastnear.com`.
 
 **On the `swarms` track:** not entered. The sealed-bid coordinator described in
 [RULES.md](RULES.md) is designed and not implemented, so its requirements are

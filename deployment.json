@@ -1,0 +1,72 @@
+{
+  "note": "Written by npm run deploy. Public ids and PUBLIC keys only \u2014 no secret material. Amounts reflect economy_scale; see the README.",
+  "network": "testnet",
+  "rpc": "https://test.rpc.fastnear.com",
+  "deployed_at": "2026-11-11T16:11:12.642Z",
+  "economy_scale": 0.01,
+  "root": "nearcraftmc.testnet",
+  "contracts": {
+    "items": "items.nearcraftmc.testnet",
+    "market": "market.nearcraftmc.testnet",
+    "guard": "guard.nearcraftmc.testnet"
+  },
+  "merchants": [
+    {
+      "account_id": "ironmonger.nearcraftmc.testnet",
+      "name": "Ironmonger"
+    },
+    {
+      "account_id": "timberwright.nearcraftmc.testnet",
+      "name": "Timberwright"
+    },
+    {
+      "account_id": "stonecutter.nearcraftmc.testnet",
+      "name": "Stonecutter"
+    },
+    {
+      "account_id": "glassblower.nearcraftmc.testnet",
+      "name": "Glassblower"
+    },
+    {
+      "account_id": "chandler.nearcraftmc.testnet",
+      "name": "Chandler"
+    }
+  ],
+  "materials": [
+    "iron_ingot",
+    "oak_log",
+    "stone",
+    "glass",
+    "coal",
+    "copper_ingot",
+    "oak_planks",
+    "redstone"
+  ],
+  "players": [
+    {
+      "account_id": "player-1.nearcraftmc.testnet",
+      "permitted_methods": [
+        "buy_with_credit",
+        "sell"
+      ]
+    }
+  ],
+  "agents": [
+    {
+      "account_id": "worker-1.nearcraftmc.testnet",
+      "permitted_methods": [
+        "buy_with_credit"
+      ],
+      "scoped_to": "market.nearcraftmc.testnet",
+      "function_call_public_key": "ed25519:D9D4Eo6EmNSBPk66Uee6FMv6gqSSpgf9Y6Nv7V1X4NBJ"
+    },
+    {
+      "account_id": "worker-2.nearcraftmc.testnet",
+      "permitted_methods": [
+        "buy_with_credit"
+      ],
+      "scoped_to": "market.nearcraftmc.testnet",
+      "function_call_public_key": "ed25519:2orZSEsAFb1wXEzP9xEALgXCidMsBBPk2kiNKWQQitjz"
+    }
+  ]
+}

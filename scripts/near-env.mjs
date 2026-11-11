@@ -7,7 +7,11 @@
 import { readFile } from 'node:fs/promises'
 import { Account, JsonRpcProvider, KeyPair } from 'near-api-js'
 
-export const RPC_URL = process.env.NEAR_RPC || 'https://rpc.testnet.near.org'
+/// `rpc.testnet.near.org` is **deprecated** and answers HTTP 429 with
+/// "THIS ENDPOINT IS DEPRECATED! STOP USING IT NOW!" — it killed a live deploy
+/// part-way through. FastNEAR's testnet endpoint is the documented replacement
+/// and was verified returning chain_id "testnet" before this change.
+export const RPC_URL = process.env.NEAR_RPC || 'https://test.rpc.fastnear.com'
 
 /// Read-only access needs no credentials at all.
 export function provider() {

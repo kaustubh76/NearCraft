@@ -57,7 +57,7 @@ export function createRelayer({
   relayerKey,
   marketContract,
   permittedMethods,
-  rpcUrl = 'https://rpc.testnet.near.org',
+  rpcUrl = 'https://test.rpc.fastnear.com',
   log = () => {},
 }) {
   if (!relayerKey) throw new RelayRefusal('NO_RELAYER_KEY')

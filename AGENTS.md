@@ -114,6 +114,9 @@ baseline project, where it was the thing that made the evidence worth reading.
 - **`cargo test` at the workspace root pulls in the 110-second simulation.**
   `npm run test:contracts` names the three contract crates and `--lib`
   deliberately, so the fast path stays fast.
+- **`rpc.testnet.near.org` is deprecated** and answers HTTP 429 with "STOP
+  USING IT NOW". It killed a live deployment part-way through. Use
+  `https://test.rpc.fastnear.com`, which is the default here, or set `NEAR_RPC`.
 - **`fast_forward` produces blocks rather than jumping.** A week is 604,800 of
   them, which is why no claim about block time is made.
 

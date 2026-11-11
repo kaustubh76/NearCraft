@@ -71,6 +71,11 @@ try {
 
   for (const [label, script] of [
     ['npm run deploy — the real bootstrap', 'scripts/deploy.mjs'],
+    // Deploy is meant to be idempotent, and a fresh sandbox never exercises
+    // that: every step takes its create branch. A second pass is the only way
+    // to test the resume path — which is how an off-by-a-word regex in the
+    // "already initialised" guard survived until a live re-run hit it.
+    ['npm run deploy AGAIN — the idempotent resume path', 'scripts/deploy.mjs'],
     ['npm run reads — every merchant quote and reason', 'scripts/reads.mjs'],
     ['npm run keys — agent key limits, read back from the chain', 'scripts/keys.mjs'],
   ]) {

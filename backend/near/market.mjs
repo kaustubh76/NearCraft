@@ -157,7 +157,7 @@ export function displayNear(yocto) {
 // ------------------------------------------------------------------ runtime
 
 /// Read-only market client. Needs no key and no credentials.
-export function createMarketReader({ marketContract, itemsContract, rpcUrl = 'https://rpc.testnet.near.org' }) {
+export function createMarketReader({ marketContract, itemsContract, rpcUrl = 'https://test.rpc.fastnear.com' }) {
   const provider = new JsonRpcProvider({ url: rpcUrl })
   return Object.freeze({
     async quotes(item, count) {

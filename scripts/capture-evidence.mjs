@@ -27,6 +27,10 @@ const CHECKS = [
     proves: '61 Rust unit tests across both contracts. Offline, no wasm target, no network.' },
   { topic: 'policy-and-injection', cmd: 'node', args: ['--test', 'tests/near/policy.mjs', 'tests/near/injection.mjs', 'tests/near/market.mjs'],
     proves: 'The policy layer refuses out-of-policy agent calls, a prompt-injected agent is blocked across two layers AND recognised as paying a known-bad account, and the plugin HTTP contract is well-formed. Offline.' },
+  { topic: 'live-testnet-reads', cmd: 'npm', args: ['run', '--silent', 'reads'],
+    proves: 'The deployed contracts on NEAR testnet answering a public, credential-free query: every merchant ask, bid, stock band and the contract\'s own reason string. Needs no account and no key.' },
+  { topic: 'live-testnet-keys', cmd: 'npm', args: ['run', '--silent', 'keys'],
+    proves: 'Each live agent key\'s receiver_id, method_names and allowance, read back from the chain rather than asserted, plus the spend budgets. Exits non-zero if any agent key is ever unrestricted.' },
   { topic: 'agent-run', cmd: 'npm', args: ['run', '--silent', 'agent'], requiresWasm: true,
     proves: 'An agent with a scoped key shopping on a real nearcore node, end to end: an unknown counterparty parked for a human and approved, the same counterparty clearing on its own once trust accrued, and a prompt-injected objective BLOCKED because the public guard contract has corroborated reports against the account it names. Every layer is the real one, including two vendored baseline modules.' },
   { topic: 'gasless-play', cmd: 'node', args: ['--test', 'tests/near/gasless.mjs'], requiresWasm: true,
@@ -120,8 +124,9 @@ const summary = {
   // What these records do NOT establish, stated here so a reader does not have
   // to infer it.
   boundaries: [
-    'All of this runs locally. Nothing here is a public-chain result.',
-    'No NEAR testnet deployment exists, so no live-network behaviour is recorded.',
+    'Most of these run locally, against a nearcore sandbox. The two topics named live-testnet-* are real, credential-free reads of the deployed contracts on public NEAR testnet.',
+    'Those live reads are VIEW calls only. No public-chain transaction is sent by any check here, so nothing below is evidence of live write behaviour.',
+    'The live deployment runs at a reduced economy scale (see economy_scale in deployment.json); its figures are not the full-size economy the sandbox runs.',
     'No Minecraft gameplay is recorded; the plugin is not exercised by any check here.',
     'A passing check establishes what its own output shows and nothing wider.',
   ],

@@ -1,0 +1,12 @@
+{
+  "topic": "live-testnet-keys",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 1324,
+  "command": "npm run --silent keys",
+  "cwd": ".",
+  "proves": "Each live agent key's receiver_id, method_names and allowance, read back from the chain rather than asserted, plus the spend budgets. Exits non-zero if any agent key is ever unrestricted.",
+  "output_sha256": "c8ef9899c1908eb801f7a10800db28570e8a1f272f61e7be264c4fe2b026b081",
+  "output_bytes": 1575,
+  "recorded_at": "2026-11-11T16:13:04.759Z"
+}

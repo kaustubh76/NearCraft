@@ -1,6 +1,6 @@
 {
   "note": "Written by npm run evidence. Each run keeps its own directory; failures are retained alongside passes and are never edited out.",
-  "recorded_at": "2026-11-11T12:51:11.973Z",
+  "recorded_at": "2026-11-11T16:14:41.040Z",
   "host": {
     "platform": "darwin",
     "arch": "arm64",
@@ -8,13 +8,14 @@
   },
   "wasm_built": true,
   "totals": {
-    "pass": 9,
+    "pass": 11,
     "fail": 0,
     "skipped": 0
   },
   "boundaries": [
-    "All of this runs locally. Nothing here is a public-chain result.",
-    "No NEAR testnet deployment exists, so no live-network behaviour is recorded.",
+    "Most of these run locally, against a nearcore sandbox. The two topics named live-testnet-* are real, credential-free reads of the deployed contracts on public NEAR testnet.",
+    "Those live reads are VIEW calls only. No public-chain transaction is sent by any check here, so nothing below is evidence of live write behaviour.",
+    "The live deployment runs at a reduced economy scale (see economy_scale in deployment.json); its figures are not the full-size economy the sandbox runs.",
     "No Minecraft gameplay is recorded; the plugin is not exercised by any check here.",
     "A passing check establishes what its own output shows and nothing wider."
   ],
@@ -22,47 +23,57 @@
     {
       "topic": "unit-tests",
       "status": "pass",
-      "path": "evidence/runs/unit-tests/2026-11-11T12-51-11/"
+      "path": "evidence/runs/unit-tests/2026-11-11T16-14-41/"
     },
     {
       "topic": "policy-and-injection",
       "status": "pass",
-      "path": "evidence/runs/policy-and-injection/2026-11-11T12-51-11/"
+      "path": "evidence/runs/policy-and-injection/2026-11-11T16-14-41/"
+    },
+    {
+      "topic": "live-testnet-reads",
+      "status": "pass",
+      "path": "evidence/runs/live-testnet-reads/2026-11-11T16-14-41/"
+    },
+    {
+      "topic": "live-testnet-keys",
+      "status": "pass",
+      "path": "evidence/runs/live-testnet-keys/2026-11-11T16-14-41/"
     },
     {
       "topic": "agent-run",
       "status": "pass",
-      "path": "evidence/runs/agent-run/2026-11-11T12-51-11/"
+      "path": "evidence/runs/agent-run/2026-11-11T16-14-41/"
     },
     {
       "topic": "gasless-play",
       "status": "pass",
-      "path": "evidence/runs/gasless-play/2026-11-11T12-51-11/"
+      "path": "evidence/runs/gasless-play/2026-11-11T16-14-41/"
     },
     {
       "topic": "counterparty-and-approval",
       "status": "pass",
-      "path": "evidence/runs/counterparty-and-approval/2026-11-11T12-51-11/"
+      "path": "evidence/runs/counterparty-and-approval/2026-11-11T16-14-41/"
     },
     {
       "topic": "baseline-integrity",
       "status": "pass",
-      "path": "evidence/runs/baseline-integrity/2026-11-11T12-51-11/"
+      "path": "evidence/runs/baseline-integrity/2026-11-11T16-14-41/"
     },
     {
       "topic": "nep245-conformance",
       "status": "pass",
-      "path": "evidence/runs/nep245-conformance/2026-11-11T12-51-11/"
+      "path": "evidence/runs/nep245-conformance/2026-11-11T16-14-41/"
     },
     {
       "topic": "access-key-limits",
       "status": "pass",
-      "path": "evidence/runs/access-key-limits/2026-11-11T12-51-11/"
+      "path": "evidence/runs/access-key-limits/2026-11-11T16-14-41/"
     },
     {
       "topic": "cross-contract-economy",
       "status": "pass",
-      "path": "evidence/runs/cross-contract-economy/2026-11-11T12-51-11/"
+      "path": "evidence/runs/cross-contract-economy/2026-11-11T16-14-41/"
     }
   ]
 }
