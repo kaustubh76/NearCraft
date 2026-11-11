@@ -16,7 +16,8 @@
     "sim": "node sim/fastforward.mjs",
     "verify:baseline": "node scripts/verify-baseline.mjs",
     "test": "npm run test:contracts && npm run test:near && npm run verify:baseline",
-    "test:near": "node --test tests/near/*.mjs"
+    "test:near": "node --test tests/near/*.mjs",
+    "check:nep245": "node scripts/check-nep245.mjs"
   },
   "license": "MIT",
   "dependencies": {

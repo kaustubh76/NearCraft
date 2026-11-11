@@ -22,15 +22,25 @@ column before the description.
 | `GAME_LOOP.md` — the game loop on paper | **Done.** Required by the `games` prompt before any code. |
 | `RULES.md` — round rules + sequence diagram | **Done.** Required by the `swarms` prompt before any code. |
 | `BASELINE.md` + hash-verified baseline import | **Done, machine-checked.** `npm run verify:baseline` |
-| `contracts/items` — NEP-245 materials | **Not built.** |
-| `contracts/market` — merchants, pricing, treasury | **Not built.** |
-| `backend/near` — function-call-key signer + policy | **Not built.** |
+| `contracts/items` — NEP-245 materials | **Built and tested.** 19 tests. NEP-245 core 10/10 + Enumeration 2/2, verified against the compiled ABI. 204.7 KB wasm. |
+| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 39 tests. 186.8 KB wasm. |
+| `backend/near` — function-call-key signer + policy | **Built and tested.** 15 tests, including the prompt-injection attack demo. |
+| **Deployed to NEAR testnet** | **No.** Blocked on creating the root account by hand — see below. |
 | `sim/fastforward.mjs` — scripted week-in-a-minute | **Not built.** |
 | Minecraft plugin settlement path | **Not built.** |
+| Sealed-bid rounds (`swarms`) | **Not built.** Entering that track depends on it; see the honest note below. |
 
-**Nothing is deployed to NEAR testnet yet.** No account IDs in this README are
-live. When they are, the verification block below will run against them and
-this table will say so. Until then, treat every unchecked row as not existing.
+**Nothing is deployed to NEAR testnet yet**, so no account id in this README is
+live and `npm run reads` / `npm run keys` will tell you so rather than invent
+output. Deployment is blocked on one manual step: `helper.testnet.near.org` now
+returns 404, so a `*.testnet` account can no longer be created programmatically.
+`nearcraftmc.testnet` has to be made at [near-faucet.io](https://near-faucet.io)
+first. Everything after that is `npm run deploy`, which is idempotent.
+
+**On the `swarms` track:** the sealed-bid coordinator in `RULES.md` is designed
+but not implemented. If it is not deployed and simulated before the deadline, we
+will not select that track. Entering a track whose stated requirements are unmet
+is not something this project will do.
 
 ---
 
@@ -86,26 +96,61 @@ track is being entered on.
 ### Runs today, no credentials, no network
 
 ```sh
-npm run verify:baseline
+npm install
+npm test
 ```
-→ prints 11 `ok` lines and `baseline verified: 11 files unchanged`. Recomputes
-every SHA-256 in `backend/baseline/MANIFEST.json` and exits non-zero on any
-drift, so the disclosure above is a check rather than a claim.
 
-### Will run once the contracts land (not yet true)
+Needs Rust and Node 22+, nothing else — not even the wasm target, because
+near-sdk unit tests build for the host. All three checks pass right now:
 
 ```sh
-cargo test --manifest-path contracts/items/Cargo.toml
-cargo test --manifest-path contracts/market/Cargo.toml
-node tests/near/policy.mjs       # out-of-policy method → refused before signing
-node tests/near/injection.mjs    # prompt-injected agent → blocked, log written
-npm run sim                      # 20 buyers, 5 sellers, a week of trading in ~60s
+npm run test:contracts    # 58 Rust unit tests across both contracts
+npm run test:near         # 15 policy + prompt-injection tests
+npm run verify:baseline   # 11 vendored files, SHA-256 unchanged
 ```
 
-The `npm run sim` target is the one to care about: scripted strategies, **no
-model calls**, run against the deployed testnet contracts, printing every
-round's prices and receipts. It needs no credentials and no Minecraft server,
-which means a reviewer can see the whole economy work from a fresh clone.
+The one worth reading the output of:
+
+```sh
+node --test tests/near/injection.mjs
+```
+
+A poisoned objective instructs an agent to pay `attacker.testnet`. Nine hostile
+requests are refused across two layers and the log prints each refusal with its
+reason — then the legitimate half of the same objective is authorised, because
+this is a policy boundary and not a kill switch.
+
+To rebuild the wasm yourself (needs `cargo-near`):
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install cargo-near      # compiles from source; takes a few minutes
+npm run build:contracts
+npm run check:nep245          # NEP-245 conformance, read off the compiled ABI
+```
+
+`check:nep245` is kept out of `npm test` on purpose: it reads the ABI that
+`cargo-near` emits, and a conformance check that quietly passed when it could
+not find an ABI would be worse than no check. It asserts the core 10 and
+Enumeration 2 are present, that Approval Management and Metadata are absent as
+documented, and that the modifiers carrying security meaning are right —
+including that `buy_with_credit` is **not** payable, since a function-call
+access key cannot attach NEAR and would otherwise be unable to call it.
+
+### Needs a deployment first (not yet true)
+
+```sh
+npm run deploy    # idempotent; needs NEAR_ROOT_KEY
+npm run reads     # every merchant's price, bid, stock band and reason
+npm run keys      # reads each agent key's limits back from the protocol
+npm run sim       # 20 buyers, 5 sellers, a week of trading in ~60s
+```
+
+`npm run keys` is the check behind the security claim: it reads
+`method_names` and `allowance` back from the chain and **exits non-zero** if any
+agent key is ever unrestricted. `npm run sim` is the one to care about for the
+economy — scripted strategies, no model calls, run against the deployed
+contracts, needing no credentials and no Minecraft server.
 
 ---
 
