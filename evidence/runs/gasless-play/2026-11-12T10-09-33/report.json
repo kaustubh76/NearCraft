@@ -1,0 +1,12 @@
+{
+  "topic": "gasless-play",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 13745,
+  "command": "node --test tests/near/gasless.mjs",
+  "cwd": ".",
+  "proves": "On a real nearcore node, a player holding only a function-call access key buys goods and pays nothing: the player balance delta is exactly 0 and the relayer pays. It also SELLS: a player with no full-access key at all sells under a NEP-245 approval through the non-payable market.sell, and pays nothing. Records that a delegate action's inner call cannot carry a deposit, which is why selling cannot go through mt_transfer_call.",
+  "output_sha256": "cf6900b21c81fd27ff7ca370646905eff7a71fbb17aba75d43b61f3ce5ec3f1d",
+  "output_bytes": 822,
+  "recorded_at": "2026-11-12T10:10:10.274Z"
+}

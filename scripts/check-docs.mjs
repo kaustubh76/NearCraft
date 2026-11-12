@@ -171,6 +171,12 @@ const RETIRED_CLAIMS = [
     why: 'merchants do restock now, permissionlessly, and it was never the binding constraint on throughput' },
   { pattern: /holds a function-call key, nothing more/i,
     why: 'an agent account also carries a disclosed operator full-access key; only the agent PROCESS holds just the scoped key' },
+  { pattern: /the mechanic is built; the stake accounting is not/i,
+    why: 'the stake accounting is built: basis, backers, and margin attributed in on_items_delivered' },
+  { pattern: /a tracked stake repaid out of the merchant.{0,3}s future margin.{0,80}(is not built|only designed)/i,
+    why: 'the tracked stake is built and its migration has run on testnet' },
+  { pattern: /no contract here has (a migrate method|one) yet/i,
+    why: 'market.migrate() exists and has run on public testnet' },
 ]
 for (const doc of [...DOCS, 'web/market.html']) {
   if (!(await exists(doc))) continue
@@ -181,7 +187,15 @@ for (const doc of [...DOCS, 'web/market.html']) {
     // own correction.
     if (!pattern.test(text)) continue
     const near = text.slice(Math.max(0, text.search(pattern) - 400), text.search(pattern) + 600)
-    if (/not true|was false|was wrong|corrections?|declined|rather than quietly|an earlier version|there was no such|no such file|never written|never built/i.test(near)) continue
+    // The escape-hatch list is deliberately narrow. It used to include
+    // "rather than quietly", which is a STYLISTIC phrase this project uses all
+    // the time — and it duly disarmed a brand-new rule within minutes of that
+    // rule being written, because the prose beside the claim happened to say
+    // "rather than quietly dropped". An escape hatch that ordinary wording can
+    // trip is an escape hatch that turns every rule into a coin flip, so each
+    // pattern here has to be something a writer only says when correcting a
+    // claim, never something they might say while making one.
+    if (/not true|was false|was wrong|superseded|retired|declined|an earlier version|there was no such|no such file|never written|never built/i.test(near)) continue
     fail(doc, `makes a claim we retired: ${why}`)
   }
 }

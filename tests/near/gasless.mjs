@@ -247,3 +247,83 @@ test('a player with no full-access key sells, and still pays nothing', async (t)
   assert.equal(BigInt(held), 40n, 'ten materials left the player')
   assert.ok(BigInt(credit) > 0n, 'and the player was paid for them')
 })
+
+test('a player with no full-access key backs a merchant, and still pays nothing', async (t) => {
+  const sandbox = await Sandbox.start({})
+  t.after(() => sandbox.tearDown())
+
+  const provider = new JsonRpcProvider({ url: sandbox.rpcUrl })
+  const root = new Account(DEFAULT_ACCOUNT_ID, provider, DEFAULT_PRIVATE_KEY)
+  const balance = async (id) =>
+    BigInt((await provider.query({ request_type: 'view_account', finality: 'optimistic', account_id: id })).amount)
+
+  async function sub(name, funds) {
+    const key = KeyPair.fromRandom('ed25519')
+    await root.createSubAccount({
+      accountOrPrefix: name, publicKey: key.getPublicKey().toString(), nearToTransfer: funds,
+    })
+    return { id: `${name}.${DEFAULT_ACCOUNT_ID}`, key }
+  }
+
+  const items = await sub('items', near(10))
+  const market = await sub('market', near(20))
+  const merchant = await sub('ironmonger', near(2))
+  const relayer = await sub('relayer', near(50))
+  const player = await sub('player', near(1))
+
+  const itemsAcc = new Account(items.id, provider, items.key.toString())
+  const marketAcc = new Account(market.id, provider, market.key.toString())
+  await itemsAcc.deployContract(await wasm('nearcraft_items'))
+  await marketAcc.deployContract(await wasm('nearcraft_market'))
+  await itemsAcc.callFunction({ contractId: items.id, methodName: 'new', args: { owner_id: market.id }, gas: teraToGas('30') })
+  await marketAcc.callFunction({ contractId: market.id, methodName: 'new', args: { owner_id: root.accountId, items_contract: items.id }, gas: teraToGas('30') })
+  await marketAcc.callFunction({ contractId: items.id, methodName: 'mt_mint', args: { token_id: 'iron_ingot', amount: '100000', receiver_id: market.id }, gas: teraToGas('60') })
+  await root.callFunction({ contractId: market.id, methodName: 'register_merchant', args: { merchant_id: merchant.id, name: 'Ironmonger', floor: '0' }, gas: teraToGas('30') })
+  await root.callFunction({ contractId: market.id, methodName: 'fund_merchant', args: { merchant_id: merchant.id }, deposit: near(10), gas: teraToGas('30') })
+  await root.callFunction({ contractId: market.id, methodName: 'list_item', args: { merchant_id: merchant.id, item: 'iron_ingot', base_price: (near(1) / 10n).toString(), stock: '1000' }, gas: teraToGas('30') })
+
+  // The scoped key carries invest_with_credit. It has to be issued with it:
+  // onboarding deletes the bootstrap full-access key, and a function-call key
+  // cannot add keys, so a player's method list is fixed for life.
+  const scoped = KeyPair.fromRandom('ed25519')
+  const asBootstrap = new Account(player.id, provider, player.key.toString())
+  await asBootstrap.addFunctionCallAccessKey({
+    publicKey: scoped.getPublicKey().toString(),
+    contractId: market.id,
+    methodNames: ['buy_with_credit', 'sell', 'invest_with_credit'],
+    allowance: near(2),
+  })
+  await root.callFunction({ contractId: market.id, methodName: 'fund_credit', args: { account_id: player.id }, deposit: near(2), gas: teraToGas('30') })
+
+  const asPlayer = new Account(player.id, provider, scoped.toString())
+  const stake = near(1)
+  const signed = await asPlayer.createSignedMetaTransaction({
+    receiverId: market.id,
+    actions: [actions.functionCall('invest_with_credit',
+      { merchant_id: merchant.id, amount: stake.toString() }, teraToGas('60'), 0n)],
+  })
+
+  const before = { player: await balance(player.id), relayer: await balance(relayer.id) }
+  await new Account(relayer.id, provider, relayer.key.toString())
+    .relayMetaTransaction(signed.signedDelegate)
+  const after = { player: await balance(player.id), relayer: await balance(relayer.id) }
+
+  const backer = await provider.callFunction({
+    contractId: market.id, method: 'backer_of', args: { merchant_id: merchant.id },
+  })
+
+  console.log('\n--- gasless investment ---')
+  console.log(`  player  delta ${after.player - before.player} yoctoNEAR`)
+  console.log(`  relayer delta ${after.relayer - before.relayer} yoctoNEAR`)
+  console.log(`  stake recorded: ${JSON.stringify(backer)}\n`)
+
+  // `invest` is #[payable], so a scoped key could never call it — this is the
+  // non-payable twin, and without it the mechanic the games prompt describes
+  // would be unreachable for exactly the players it is for.
+  assert.equal(after.player - before.player, 0n, 'the player must not pay a single yoctoNEAR')
+  assert.ok(after.relayer < before.relayer, 'the relayer must be the one that paid')
+  assert.ok(backer, 'the stake must be recorded against the merchant')
+  assert.equal(backer.account_id, player.id, 'and recorded against the player who made it')
+  assert.equal(backer.principal, stake.toString(), 'for the full amount')
+  assert.equal(backer.repaid, '0', 'with nothing earned back before any trade')
+})

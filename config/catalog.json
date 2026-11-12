@@ -121,7 +121,7 @@
   ],
   "agent_gas_allowance_note": "Measured in the sandbox: a function-call key's allowance is checked as a per-call ceiling against PREPAID gas and drawn down by gas actually burned. A 60 TGas call needs ~0.2 NEAR of headroom and burns ~0.007 NEAR, so 2 NEAR permits many calls. The earlier 0.25 would have left almost no margin. Never use max_gas() from an agent key: 300 TGas demands ~1 NEAR.",
   "guard": {
-    "note": "The public blocklist agents report to. Without it deployed, counterparty.mjs falls into its `unavailable` branch and screening silently degrades \u2014 so deploy must create it.",
+    "note": "The public blocklist agents report to. Without it deployed, counterparty.mjs falls into its `unavailable` branch and screening silently degrades — so deploy must create it.",
     "fund_near": "3"
   },
   "players": {
@@ -152,8 +152,9 @@
     "gas_near": "0.3",
     "permitted_methods": [
       "buy_with_credit",
-      "sell"
+      "sell",
+      "invest_with_credit"
     ],
-    "note": "Pays gas so a player never sees a gas prompt (NEP-366 meta transactions). Funded for GAS ONLY \u2014 it holds no spend budget and signs nothing of its own. gas_near is real NEAR and is NOT scaled by NEAR_ECONOMY_SCALE: 0.05 is below one 60 TGas call's prepaid cost, which is the three-pots trap in AGENTS.md. permitted_methods is the relayer's OWN allowlist \u2014 a relayer that submits anything is an open faucet for whoever asks."
+    "note": "Pays gas so a player never sees a gas prompt (NEP-366 meta transactions). Funded for GAS ONLY — it holds no spend budget and signs nothing of its own. gas_near is real NEAR and is NOT scaled by NEAR_ECONOMY_SCALE: 0.05 is below one 60 TGas call's prepaid cost, which is the three-pots trap in AGENTS.md. permitted_methods is the relayer's OWN allowlist — a relayer that submits anything is an open faucet for whoever asks. invest_with_credit is on the list because a player holding only a scoped key cannot pay for its own gas, so relaying is the ONLY way it can back a merchant — a method the player key permits but the relayer refuses is a method that does not exist for that player."
   }
 }

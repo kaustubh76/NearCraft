@@ -499,3 +499,135 @@ async fn the_market_never_owes_more_than_it_holds() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn a_backer_earns_its_stake_back_out_of_the_merchant_s_margin() -> anyhow::Result<()> {
+    let world = World::setup().await?;
+
+    // Thin the shelf so the merchant has to restock, which is what gives its
+    // stock a recorded cost. Without a cost basis every sale looks like pure
+    // margin, and a backer would be repaid out of its own principal.
+    world
+        .root
+        .call(world.market.id(), "list_item")
+        .args_json(json!({
+            "merchant_id": world.ironmonger.id(), "item": IRON,
+            "base_price": NearToken::from_millinear(400).as_yoctonear().to_string(), "stock": "20",
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+
+    let poker = world
+        .root
+        .create_subaccount("poker")
+        .initial_balance(NearToken::from_near(5))
+        .transact()
+        .await?
+        .into_result()?;
+    poker
+        .call(world.market.id(), "restock")
+        .args_json(json!({ "merchant_id": world.ironmonger.id(), "item": IRON }))
+        .max_gas()
+        .transact()
+        .await?
+        .into_result()?;
+
+    let basis = |item: &'static str| {
+        let market = world.market.clone();
+        let merchant = world.ironmonger.id().clone();
+        async move {
+            let s: String = market
+                .view("basis_of")
+                .args_json(json!({ "merchant_id": merchant, "item": item }))
+                .await?
+                .json()?;
+            Ok::<u128, anyhow::Error>(s.parse()?)
+        }
+    };
+    let basis_after_restock = basis(IRON).await?;
+    assert!(basis_after_restock > 0, "the restock recorded what it cost");
+
+    // A player backs the shop.
+    let backer = world
+        .root
+        .create_subaccount("backer")
+        .initial_balance(NearToken::from_near(10))
+        .transact()
+        .await?
+        .into_result()?;
+    let stake = NearToken::from_near(3);
+    backer
+        .call(world.market.id(), "invest")
+        .args_json(json!({ "merchant_id": world.ironmonger.id() }))
+        .deposit(stake)
+        .max_gas()
+        .transact()
+        .await?
+        .into_result()?;
+
+    let staked: serde_json::Value = world
+        .market
+        .view("backer_of")
+        .args_json(json!({ "merchant_id": world.ironmonger.id() }))
+        .await?
+        .json()?;
+    assert_eq!(staked["account_id"], backer.id().to_string());
+    assert_eq!(staked["principal"], stake.as_yoctonear().to_string());
+    assert_eq!(staked["repaid"], "0", "nothing earned back before any trade");
+
+    // The merchant cannot withdraw the money it was just lent.
+    let theft = world
+        .ironmonger
+        .call(world.market.id(), "withdraw_treasury")
+        .max_gas()
+        .transact()
+        .await?;
+    assert!(theft.is_failure(), "a backed merchant withdrew its backer's principal");
+    assert!(
+        format!("{:?}", theft.into_result().unwrap_err()).contains("outstanding stake"),
+        "refused, but not for the right reason"
+    );
+
+    // Now somebody shops, and the delivery succeeds.
+    let shopper = world
+        .root
+        .create_subaccount("shopper")
+        .initial_balance(NearToken::from_near(20))
+        .transact()
+        .await?
+        .into_result()?;
+    let total = world.quote_total(IRON, 8).await?;
+    shopper
+        .call(world.market.id(), "buy")
+        .args_json(json!({ "merchant_id": world.ironmonger.id(), "item": IRON, "count": 8 }))
+        .deposit(NearToken::from_yoctonear(total))
+        .max_gas()
+        .transact()
+        .await?
+        .into_result()?;
+
+    let repaid: serde_json::Value = world
+        .market
+        .view("backer_of")
+        .args_json(json!({ "merchant_id": world.ironmonger.id() }))
+        .await?
+        .json()?;
+    let earned: u128 = repaid["repaid"].as_str().unwrap().parse()?;
+    assert!(earned > 0, "the sale earned the backer nothing: {repaid:?}");
+    assert_eq!(
+        world.credit_of(&backer).await?,
+        earned,
+        "what the backer earned is withdrawable credit, to the yoctoNEAR"
+    );
+    assert!(
+        basis(IRON).await? < basis_after_restock,
+        "the goods that were sold took their cost off the shelf"
+    );
+
+    println!(
+        "  backer staked {} and has earned back {} after one sale of 8",
+        stake, earned
+    );
+    Ok(())
+}

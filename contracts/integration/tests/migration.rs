@@ -1,4 +1,4 @@
-//! The state-migration mechanism, proven against the bytes testnet is running.
+//! The state-migration mechanism, proven against the bytes testnet was running.
 //!
 //!   cargo test --test migration -- --nocapture
 //!
@@ -11,10 +11,19 @@
 //! Three things make this test worth more than a description of that:
 //!
 //! 1. It deploys **`fixtures/market-live.wasm`** — the bytes fetched from
-//!    `market.nearcraftmc.testnet` with a public `view_code` call — so what is
-//!    migrated is the code that is actually running, not a fresh build of it.
-//!    The hash is pinned below and checked against what the node reports after
+//!    `market.nearcraftmc.testnet` with a public `view_code` call, taken
+//!    immediately before the migration that supersedes them. So the state
+//!    layout being migrated is one that was really on the chain, not a
+//!    reconstruction of it from whichever build happens to be on disk. The hash
+//!    is pinned below and re-checked against what the node reports after
 //!    deploying, so the fixture cannot be swapped quietly.
+//!
+//!    It is deliberately NOT re-fetched after each migration. Once the live
+//!    contract carries the new shape, re-fetching would make fixture and build
+//!    the same shape, a plain redeploy would brick nothing, and step 2 below
+//!    would silently stop testing the thing it exists for. Re-pin it when the
+//!    shape changes again — the same rule MarketV2 follows in
+//!    market/src/lib.rs.
 //! 2. It **breaks the contract first**, with a plain redeploy, and asserts a
 //!    view really does fail. A migration test that never sees the failure it
 //!    exists to prevent is a test that would pass on an identity migration —
@@ -31,20 +40,20 @@ use near_workspaces::types::{Gas, NearToken};
 use near_workspaces::ContractState;
 use serde_json::json;
 
-/// The `code_hash` that `market.nearcraftmc.testnet` reports, and therefore the
-/// hash of the fixture.
+/// The `code_hash` `market.nearcraftmc.testnet` reported before the migration
+/// that added `backers`, and therefore the hash of the fixture.
 ///
 /// Pinned rather than computed so that replacing the fixture with a convenient
 /// local build is a loud failure. Re-pin it deliberately, when the live
-/// contract's own shape moves on — see MarketV1's note in market/src/lib.rs.
-const LIVE_MARKET_CODE_HASH: &str = "7KML46Pr78rCqEipQ1ch2tNkQ9ULfG6wtHg4PPuazBQJ";
+/// contract's shape moves on again — see MarketV2's note in market/src/lib.rs.
+const PRE_MIGRATION_MARKET_CODE_HASH: &str = "Fz7QzELwDNh9w79vwTqv2ZddGLMsLxDNMRGjMHd8CfcG";
 
 fn live_market_wasm() -> anyhow::Result<Vec<u8>> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/market-live.wasm");
     std::fs::read(&path).map_err(|e| {
         anyhow::anyhow!(
             "cannot read {}: {e}\n\n\
-             This is the wasm running on testnet, fetched with a view_code call. \
+             This is the wasm testnet ran BEFORE the latest migration, fetched with view_code. \
              It is committed; .gitignore's blanket *.wasm is negated for it.",
             path.display()
         )
@@ -98,8 +107,8 @@ async fn a_plain_redeploy_bricks_live_state_and_migrate_rescues_it() -> anyhow::
 
     assert_eq!(
         deployed_hash(&w).await?,
-        LIVE_MARKET_CODE_HASH,
-        "the fixture is not the code testnet is running — re-fetch it with view_code \
+        PRE_MIGRATION_MARKET_CODE_HASH,
+        "the fixture is not the pre-migration code from testnet — re-fetch it with view_code \
          rather than re-pinning the hash to whatever is on disk"
     );
 
@@ -178,7 +187,18 @@ async fn a_plain_redeploy_bricks_live_state_and_migrate_rescues_it() -> anyhow::
         json!({ "merchant_id": w.ironmonger.id(), "item": IRON }),
     )
     .await?;
-    assert_eq!(basis, 0, "the new collection reads as empty rather than as garbage");
+    assert_eq!(basis, 0, "a pre-existing collection still reads correctly after migrating");
+
+    // And the collection the migration ADDED reads as empty rather than as
+    // garbage, which is the honest answer: money invested before this migration
+    // was a donation, because nothing recorded who gave it.
+    let backer: Option<serde_json::Value> = w
+        .market
+        .view("backer_of")
+        .args_json(json!({ "merchant_id": w.ironmonger.id() }))
+        .await?
+        .json()?;
+    assert!(backer.is_none(), "the new collection is empty, not corrupt: {backer:?}");
 
     Ok(())
 }

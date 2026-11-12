@@ -105,6 +105,7 @@ async fn every_view_method_is_callable_as_a_view() -> anyhow::Result<()> {
         (&world.market, "quotes", json!({ "item": IRON, "count": 1 })),
         (&world.market, "ledger_total", json!({})),
         (&world.market, "basis_of", json!({ "merchant_id": merchant, "item": IRON })),
+        (&world.market, "backer_of", json!({ "merchant_id": merchant })),
         // ----------------------------------------------------------- guard
         (&guard, "contract_source_metadata", json!({})),
         (&guard, "threshold", json!({})),

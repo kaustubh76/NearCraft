@@ -181,6 +181,20 @@ async function initialised(accountId) {
   return (r.values ?? []).length > 0
 }
 
+/// Does this merchant already have this material on a shelf?
+///
+/// `quote` succeeds only when the merchant exists AND the listing exists, so a
+/// panic means one of them is missing and either way the shelf wants listing.
+/// There is no false "yes", which is the direction that would matter.
+async function listed(merchantId, item) {
+  try {
+    await p.callFunction({ contractId: n.market, method: 'quote', args: { merchant_id: merchantId, item, count: 1 } })
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function deploy(accountId, wasmUrl, { migrate = false } = {}) {
   let code
   try {
@@ -388,11 +402,28 @@ for (const merchant of cat.merchants) {
 }
 await saveKeys(keys)
 
-log('\nshelves')
+// This loop used to run UNCONDITIONALLY, and the file's own header says
+// "re-running is safe: every step checks before it acts". It was not safe.
+// `list_item` SETS stock rather than adding to it, so every re-run reset every
+// shelf on the live market to its catalogue figure — silently undoing whatever
+// trading had happened since — and now would scale each shelf's cost basis down
+// to match. It was also by far the most expensive thing root did: nineteen
+// calls, each needing ~0.061 NEAR of headroom just to be attempted, which is
+// how a re-run ran root dry one step after a successful migration.
+//
+// `NEAR_RELIST=1` keeps the old behaviour for when resetting the shelves is
+// what you actually want.
+const relist = process.env.NEAR_RELIST === '1'
+log(`\nshelves${relist ? '  (NEAR_RELIST=1 — RESETTING stock to catalogue values)' : ''}`)
 for (const m of cat.materials) {
   for (const [prefix, stock] of Object.entries(m.stock)) {
+    const merchantId = n.sub(prefix)
+    if (!relist && (await listed(merchantId, m.token_id))) {
+      log(`  listed   ${prefix.padEnd(13)} ${m.token_id.padEnd(13)} already (NEAR_RELIST=1 to reset it)`)
+      continue
+    }
     await call(rootAccountId(), n.market, 'list_item', {
-      merchant_id: n.sub(prefix), item: m.token_id,
+      merchant_id: merchantId, item: m.token_id,
       base_price: econ(m.base_near).toString(), stock: String(stock),
     })
     log(`  stocked  ${prefix.padEnd(13)} ${m.token_id.padEnd(13)} ${String(stock).padStart(5)} @ ${fromYocto(econ(m.base_near))} NEAR`)

@@ -99,6 +99,32 @@ pub struct Listing {
     pub demand_at: u64,
 }
 
+/// Who put money into a merchant, and how much of it they have earned back.
+///
+/// **One backer per merchant, by construction.** That settles dilution, pro
+/// rata and transferability — the three rules `docs/RECAPITALIZATION.md` says
+/// were never fixed — by making them not arise, and it keeps the payout O(1)
+/// inside a callback with a fixed gas budget; pro rata means unbounded
+/// iteration there. As a game rule it is also better: the first player to reach
+/// a shut shop gets the deal.
+#[near(serializers = [json, borsh])]
+#[derive(Clone)]
+pub struct Backer {
+    pub account_id: AccountId,
+    /// Everything this account has staked, across however many investments.
+    pub principal: U128,
+    /// How much of it has come back out of the merchant's margin.
+    pub repaid: U128,
+}
+
+impl Backer {
+    /// What the merchant still owes. Saturating, so a rounding error can never
+    /// make a repaid stake look like a fresh claim.
+    fn owed(&self) -> u128 {
+        self.principal.0.saturating_sub(self.repaid.0)
+    }
+}
+
 #[derive(BorshSerialize, BorshDeserialize, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[borsh(crate = "near_sdk::borsh")]
 struct ListingKey {
@@ -158,27 +184,32 @@ pub struct Market {
     /// field to the nested struct would invalidate every stored listing value
     /// and turn this migration into a per-entry rewrite onto a fresh prefix.
     basis: IterableMap<ListingKey, U128>,
+    /// Who backed each merchant, and what it still owes them.
+    backers: IterableMap<AccountId, Backer>,
 }
 
 /// The state shape running on testnet today, kept only so `migrate` can read
 /// it.
 ///
-/// Identical to `Market` minus `basis`, in the same field order with the same
+/// Identical to `Market` minus `backers`, in the same field order with the same
 /// generic parameters, because borsh is positional: it reads bytes by layout,
 /// never by name. That is also why the old layout is a strict PREFIX of the new
 /// one, which is what makes the probe in `migrate` sound rather than lucky.
 ///
 /// **The rule for this struct, so migrations never become archaeology:**
 /// `migrate` handles the current shape and the immediately-previous one, and
-/// nothing older. Delete `MarketV1` once the live contract has moved past it.
+/// nothing older. `MarketV1` — the five-field shape from before cost basis —
+/// was deleted when the live contract moved past it, which is this rule being
+/// followed rather than described.
 #[derive(BorshDeserialize)]
 #[borsh(crate = "near_sdk::borsh")]
-struct MarketV1 {
+struct MarketV2 {
     owner_id: AccountId,
     items_contract: AccountId,
     merchants: IterableMap<AccountId, Merchant>,
     listings: IterableMap<ListingKey, Listing>,
     credits: IterableMap<AccountId, U128>,
+    basis: IterableMap<ListingKey, U128>,
 }
 
 #[near]
@@ -192,6 +223,7 @@ impl Market {
             listings: IterableMap::new(b"l".to_vec()),
             credits: IterableMap::new(b"c".to_vec()),
             basis: IterableMap::new(b"b".to_vec()),
+            backers: IterableMap::new(b"k".to_vec()),
         }
     }
 
@@ -230,19 +262,19 @@ impl Market {
             return current;
         }
 
-        let old = MarketV1::try_from_slice(&raw)
+        let old = MarketV2::try_from_slice(&raw)
             .expect("state is neither the current shape nor the one before it");
-        env::log_str("migrate: carried state forward from the shape that had no cost basis");
+        env::log_str("migrate: carried state forward from the shape that had no backers");
         Market {
             owner_id: old.owner_id,
             items_contract: old.items_contract,
             merchants: old.merchants,
             listings: old.listings,
             credits: old.credits,
-            // Empty, and that is the honest answer: restocks that happened
-            // before this migration spent money nobody recorded, so their cost
-            // cannot be reconstructed. Recording starts here.
-            basis: IterableMap::new(b"b".to_vec()),
+            basis: old.basis,
+            // Empty, and that is the honest answer: money invested before this
+            // migration was a donation, because nothing recorded who gave it.
+            backers: IterableMap::new(b"k".to_vec()),
         }
     }
 
@@ -299,17 +331,13 @@ impl Market {
     /// sells — its treasury falls to its floor and it stops posting bids — and
     /// anyone can reopen it by funding it.
     ///
-    /// **What the investor gets back is the shop, not a dividend**, and that is
-    /// a real incentive rather than altruism: a closed merchant will not buy
-    /// from you. If the only merchant that deals in iron is broke, the player
-    /// with iron to sell is exactly the person who wants it funded. The
-    /// mechanic works because the interest is self-interest.
-    ///
-    /// A richer version — a tracked stake repaid out of the merchant's future
-    /// margin — is designed in `docs/RECAPITALIZATION.md` and **is not built**.
-    /// It needs per-stakeholder accounting and a cost basis per shelf, which is
-    /// new contract state; this needs none, which is why it exists today. The
-    /// note says which is which.
+    /// **The investor gets two things.** The shop reopens, which is a real
+    /// incentive rather than altruism — a closed merchant will not buy from
+    /// you, so if the only merchant dealing in iron is broke, the player with
+    /// iron to sell is exactly the person who wants it funded. And the stake is
+    /// now **recorded and repaid** out of the merchant's future margin, which
+    /// is the version `docs/RECAPITALIZATION.md` designed. It needed a cost
+    /// basis per shelf and per-stakeholder state, and both now exist.
     ///
     /// Deliberately not restricted to closed merchants. A merchant one yocto
     /// above its floor is broke in every practical sense, and refusing money to
@@ -318,8 +346,13 @@ impl Market {
     pub fn invest(&mut self, merchant_id: AccountId) -> bool {
         let amount = env::attached_deposit().as_yoctonear();
         require!(amount > 0, "attach something to invest");
+        self.assert_can_be_backed(&merchant_id);
         let was_closed = self.is_closed(merchant_id.clone());
-        self.add_to_treasury(merchant_id.clone(), amount);
+        // The stake is recorded FIRST, because buying out a previous backer
+        // takes its cost out of this investment — only the remainder is working
+        // capital for the merchant.
+        let bought_out = self.record_stake(&merchant_id, &env::predecessor_account_id(), amount);
+        self.add_to_treasury(merchant_id.clone(), amount - bought_out);
         let reopened = was_closed && !self.is_closed(merchant_id.clone());
 
         env::log_str(&format!(
@@ -350,9 +383,11 @@ impl Market {
         let budget = self.credits.get(&who).copied().unwrap_or(U128(0)).0;
         require!(budget >= amount.0, "insufficient credit to invest that much");
 
+        self.assert_can_be_backed(&merchant_id);
         let was_closed = self.is_closed(merchant_id.clone());
         self.credits.insert(who.clone(), U128(budget - amount.0));
-        self.add_to_treasury(merchant_id.clone(), amount.0);
+        let bought_out = self.record_stake(&merchant_id, &who, amount.0);
+        self.add_to_treasury(merchant_id.clone(), amount.0 - bought_out);
         let reopened = was_closed && !self.is_closed(merchant_id.clone());
 
         env::log_str(&format!(
@@ -361,6 +396,147 @@ impl Market {
             if reopened { ", which reopened its shop" } else { "" }
         ));
         reopened
+    }
+
+    /// Record that stock arrived on a shelf at a cost.
+    ///
+    /// Two things put stock on a shelf for money: `restock` buys it from the
+    /// house, and a player SELLS into the merchant. Both are acquisitions at a
+    /// price, and both have to land here — a merchant that only ever bought
+    /// from players would otherwise show zero basis, every resale would look
+    /// like pure margin, and a backer would be paid out of principal.
+    fn add_basis(&mut self, key: &ListingKey, amount: u128) {
+        if amount == 0 {
+            return;
+        }
+        let held = self.basis.get(key).copied().unwrap_or(U128(0)).0;
+        self.basis.insert(key.clone(), U128(held + amount));
+    }
+
+    /// Take a recorded cost back off a shelf, for a rollback.
+    fn remove_basis(&mut self, key: &ListingKey, amount: u128) {
+        let held = self.basis.get(key).copied().unwrap_or(U128(0)).0;
+        self.basis.insert(key.clone(), U128(held.saturating_sub(amount)));
+    }
+
+    /// Can this merchant be backed at all?
+    ///
+    /// A merchant with no shelves has no way to earn margin, so a stake in it
+    /// could never be repaid. That became reachable the moment `is_closed`
+    /// started reporting an empty merchant as closed — before that fix, an
+    /// empty merchant looked open and nobody would have tried to rescue it.
+    fn assert_can_be_backed(&self, merchant_id: &AccountId) {
+        require!(self.merchants.contains_key(merchant_id), "unknown merchant");
+        require!(
+            self.stocks_anything(merchant_id),
+            "this merchant has no shelves, so a stake in it could never be repaid"
+        );
+    }
+
+    /// Note who staked what, and return how much of the stake went to buying
+    /// out a previous backer rather than into the merchant.
+    ///
+    /// One backer at a time, and a newcomer takes the slot by **covering the
+    /// incumbent's outstanding claim in full** — which is all the incumbent was
+    /// ever owed, so nothing is taken from them.
+    ///
+    /// Without the buy-out, one yoctoNEAR claimed the slot and locked everyone
+    /// else out until the merchant happened to make a sale. That is cheap enough
+    /// to be free, and it denies the exact mechanic `invest` exists for: a shop
+    /// nobody can rescue. With it, squatting costs the squatter their stake and
+    /// buys them nothing.
+    ///
+    /// The same account always just adds to its own stake.
+    fn record_stake(&mut self, merchant_id: &AccountId, who: &AccountId, amount: u128) -> u128 {
+        let existing = self.backers.get(merchant_id).cloned();
+        let mut bought_out = 0;
+
+        let (principal, repaid) = match existing {
+            // Topping up your own stake.
+            Some(b) if &b.account_id == who => (b.principal.0 + amount, b.repaid.0),
+            // Taking the slot from someone with an open claim: cover it.
+            Some(b) if b.owed() > 0 => {
+                let owed = b.owed();
+                require!(
+                    amount > owed,
+                    "this merchant has a backer owed more than that; to take its place, \
+                     invest more than the outstanding claim"
+                );
+                self.credit(&b.account_id, owed);
+                bought_out = owed;
+                env::log_str(&format!(
+                    "{who} bought out {}, repaying the {} NEAR it was owed",
+                    b.account_id,
+                    near_str(owed)
+                ));
+                (amount - owed, 0)
+            }
+            // Free slot, or the last backer was repaid in full.
+            _ => (amount, 0),
+        };
+        self.backers.insert(
+            merchant_id.clone(),
+            Backer { account_id: who.clone(), principal: U128(principal), repaid: U128(repaid) },
+        );
+        bought_out
+    }
+
+    /// Consume the sold goods' cost basis, and pay the backer its share of
+    /// whatever margin is left.
+    ///
+    /// Called from `on_items_delivered`'s **Ok** branch, which already carries
+    /// `count` and `paid` — so there is no signature change, and nothing to
+    /// unwind on failure, because on failure no margin was ever attributed.
+    /// That matters more than it looks: adding an argument to an existing
+    /// `#[private]` callback breaks any receipt already in flight, and the
+    /// rollback that would have refunded a player never runs.
+    fn attribute_margin(&mut self, merchant_id: &AccountId, item: &str, count: u128, paid: u128) {
+        let key = ListingKey { merchant_id: merchant_id.clone(), item: item.to_string() };
+        let Some(listing) = self.listings.get(&key).cloned() else { return };
+
+        // `buy` has already taken the units off the shelf, so the shelf these
+        // goods came from was this much bigger.
+        let stock_before = listing.stock.0 + count;
+        let basis_total = self.basis.get(&key).copied().unwrap_or(U128(0)).0;
+        let cost = pricing::cost_of_goods(basis_total, stock_before, count);
+
+        // The goods are gone, so their cost leaves the shelf whether or not
+        // anyone is paid. Skipping this when there is no backer would inflate
+        // the basis per unit and understate every later margin.
+        if cost > 0 {
+            self.basis.insert(key, U128(basis_total - cost));
+        }
+
+        let Some(backer) = self.backers.get(merchant_id).cloned() else { return };
+        let owed = backer.owed();
+        if owed == 0 {
+            return;
+        }
+        let Some(merchant) = self.merchants.get(merchant_id).cloned() else { return };
+        let spare = merchant.treasury.0.saturating_sub(merchant.floor.0);
+        let payout = pricing::backer_payout(pricing::margin(paid, cost), owed, spare);
+        if payout == 0 {
+            return;
+        }
+
+        let mut merchant = merchant;
+        merchant.treasury = U128(merchant.treasury.0 - payout);
+        self.merchants.insert(merchant_id.clone(), merchant);
+        // Treasury out, credit in: a pure internal transfer, so the ledger
+        // total does not move and the money invariant closes with no new
+        // counters.
+        self.credit(&backer.account_id, payout);
+        let still_owed = owed - payout;
+        self.backers.insert(
+            merchant_id.clone(),
+            Backer { repaid: U128(backer.repaid.0 + payout), ..backer.clone() },
+        );
+        env::log_str(&format!(
+            "{} earned {} NEAR of margin from {merchant_id}; {} NEAR of its stake outstanding",
+            backer.account_id,
+            near_str(payout),
+            near_str(still_owed)
+        ));
     }
 
     /// The one place a treasury grows from outside. Shared so the owner's
@@ -463,6 +639,12 @@ impl Market {
         self.basis.get(&ListingKey { merchant_id, item }).copied().unwrap_or(U128(0))
     }
 
+    /// Who backed this merchant, and what it still owes them. `None` means
+    /// nobody has a claim — either never backed, or backed and repaid in full.
+    pub fn backer_of(&self, merchant_id: AccountId) -> Option<Backer> {
+        self.backers.get(&merchant_id).cloned()
+    }
+
     pub fn credit_of(&self, account_id: AccountId) -> U128 {
         self.credits.get(&account_id).copied().unwrap_or(U128(0))
     }
@@ -545,6 +727,7 @@ impl Market {
         #[callback_result] result: Result<(), PromiseError>,
     ) -> bool {
         if result.is_ok() {
+            self.attribute_margin(&merchant_id, &item, count.0, paid.0);
             return true;
         }
         let key = ListingKey { merchant_id: merchant_id.clone(), item };
@@ -628,7 +811,7 @@ impl Market {
         // Bookkeeping first, then the pull; `on_materials_pulled` unwinds it if
         // the pull fails, the same shape as `buy`.
         self.listings.insert(
-            key,
+            key.clone(),
             Listing {
                 stock: U128(listing.stock.0 + take),
                 demand_bps: U128(pricing::ease_demand(demand, take)),
@@ -636,6 +819,8 @@ impl Market {
                 ..listing
             },
         );
+        // The merchant just bought these units, so what it paid is their cost.
+        self.add_basis(&key, proceeds);
         let mut merchant = merchant;
         merchant.treasury = U128(merchant.treasury.0 - proceeds);
         self.merchants.insert(merchant_id.clone(), merchant);
@@ -675,9 +860,11 @@ impl Market {
             return true;
         }
         let key = ListingKey { merchant_id: merchant_id.clone(), item };
+        // The units never arrived, so neither did their cost.
+        self.remove_basis(&key, proceeds.0);
         if let Some(listing) = self.listings.get(&key).cloned() {
             self.listings.insert(
-                key,
+                key.clone(),
                 Listing {
                     stock: U128(listing.stock.0.saturating_sub(count.0)),
                     demand_bps: U128(pricing::bump_demand(listing.demand_bps.0, count.0)),
@@ -764,7 +951,7 @@ impl Market {
         let proceeds = unit_bid.saturating_mul(take);
 
         self.listings.insert(
-            key,
+            key.clone(),
             Listing {
                 stock: U128(listing.stock.0 + take),
                 demand_bps: U128(pricing::ease_demand(demand, take)),
@@ -772,6 +959,10 @@ impl Market {
                 ..listing
             },
         );
+        // Same acquisition, different doorway: the push path must record the
+        // cost exactly as the pull path does, or which route a player took
+        // would silently change the merchant's books.
+        self.add_basis(&key, proceeds);
         let mut merchant = merchant;
         merchant.treasury = U128(merchant.treasury.0 - proceeds);
         self.merchants.insert(merchant_id.clone(), merchant);
@@ -826,8 +1017,7 @@ impl Market {
         );
         // What this stock cost, recorded at the moment it is spent. A cost not
         // written down when it is incurred cannot be reconstructed afterwards.
-        let held_basis = self.basis.get(&key).copied().unwrap_or(U128(0)).0;
-        self.basis.insert(key, U128(held_basis + cost));
+        self.add_basis(&key, cost);
         let mut merchant = merchant;
         merchant.treasury = U128(merchant.treasury.0 - cost);
         self.merchants.insert(merchant_id.clone(), merchant);
@@ -880,8 +1070,7 @@ impl Market {
         // The basis has to come back with the stock, or the shelf would carry a
         // cost for units that never arrived and every later margin would be
         // understated.
-        let held_basis = self.basis.get(&key).copied().unwrap_or(U128(0)).0;
-        self.basis.insert(key, U128(held_basis.saturating_sub(cost.0)));
+        self.remove_basis(&key, cost.0);
         if let Some(merchant) = self.merchants.get(&merchant_id).cloned() {
             self.merchants.insert(
                 merchant_id.clone(),
@@ -946,6 +1135,14 @@ impl Market {
     pub fn withdraw_treasury(&mut self) -> Promise {
         let who = env::predecessor_account_id();
         let mut merchant = self.merchants.get(&who).cloned().expect("caller is not a merchant");
+        // A backer's principal goes straight into the treasury, so without
+        // this the merchant could simply withdraw the stake someone just put
+        // in. The margin repays the backer first.
+        let owed = self.backers.get(&who).map(Backer::owed).unwrap_or(0);
+        require!(
+            owed == 0,
+            "this merchant has an outstanding stake; its margin repays the backer first"
+        );
         let withdrawable = merchant.treasury.0.saturating_sub(merchant.floor.0);
         require!(withdrawable > 0, "treasury is at or below its floor");
         merchant.treasury = U128(merchant.treasury.0 - withdrawable);
@@ -1349,17 +1546,6 @@ mod tests {
         m.on_restocked(ironmonger(), IRON.to_string(), U128(1), U128(BASE), Err(PromiseError::Failed));
         conserved(&m, deposited, paid_out, "after a restock rollback");
 
-        // ── in: a payable investment ────────────────────────────────────────
-        ctx(player(), BASE * 7);
-        let _ = m.invest(ironmonger());
-        deposited += BASE * 7;
-        conserved(&m, deposited, paid_out, "after invest");
-
-        // ── internal: investing from credit ─────────────────────────────────
-        ctx(player(), 0);
-        let _ = m.invest_with_credit(ironmonger(), U128(BASE * 2));
-        conserved(&m, deposited, paid_out, "after invest_with_credit");
-
         // ── out: a credit withdrawal ────────────────────────────────────────
         let owed = m.credit_of(player()).0;
         ctx(player(), 0);
@@ -1386,6 +1572,48 @@ mod tests {
         m.on_treasury_paid(ironmonger(), U128(withdrawable), Err(PromiseError::Failed));
         paid_out -= withdrawable;
         conserved(&m, deposited, paid_out, "after a failed treasury payout");
+
+        // The investment paths come LAST on purpose. A stake blocks
+        // `withdraw_treasury` — the treasury is where a backer's principal
+        // sits, so an unguarded merchant could simply cash it out — and the
+        // first draft of this test put them earlier and ran straight into that
+        // guard, which is the guard working.
+
+        // ── in: a payable investment ────────────────────────────────────────
+        ctx(player(), BASE * 7);
+        let _ = m.invest(ironmonger());
+        deposited += BASE * 7;
+        conserved(&m, deposited, paid_out, "after invest");
+
+        // ── internal: investing from credit ─────────────────────────────────
+        ctx(player(), 0);
+        let _ = m.invest_with_credit(ironmonger(), U128(BASE * 2));
+        conserved(&m, deposited, paid_out, "after invest_with_credit");
+
+        // ── in: a buy-out, which splits one deposit two ways ────────────────
+        // Part of it repays the incumbent as credit, the rest becomes treasury.
+        // Both land inside the ledger, so the whole deposit must still be
+        // accounted for — this is the step most likely to leak, because it is
+        // the only one where a single deposit has two destinations.
+        ctx(accounts(2), BASE * 30);
+        let _ = m.invest(ironmonger());
+        deposited += BASE * 30;
+        conserved(&m, deposited, paid_out, "after a backer was bought out");
+
+        // ── internal: margin repaying the backer out of the treasury ────────
+        // A successful delivery, which is where margin is attributed. Treasury
+        // out, backer credit in — so it must net to exactly zero.
+        ctx(player(), BASE * 40);
+        let bought = m.quote(ironmonger(), IRON.to_string(), 2).total.0;
+        let _ = m.buy(ironmonger(), IRON.to_string(), 2);
+        deposited += BASE * 40;
+        conserved(&m, deposited, paid_out, "after the buy that precedes a margin split");
+        ctx("market.test.near".parse().unwrap(), 0);
+        m.on_items_delivered(
+            player(), ironmonger(), IRON.to_string(), U128(2), U128(bought),
+            Ok(()),
+        );
+        conserved(&m, deposited, paid_out, "after margin was attributed to a backer");
 
         // Fourteen paths, and not one yoctoNEAR unaccounted for.
         assert!(deposited > 0 && ledger(&m) > 0, "the walk actually moved money");
@@ -1551,6 +1779,224 @@ mod tests {
             after.demand_bps, demand_before,
             "a restock is not a player buying or selling, so demand must not move"
         );
+    }
+
+    #[test]
+    fn a_merchant_buying_from_a_player_records_what_it_paid() {
+        let mut m = market();
+        assert_eq!(
+            m.basis_of(ironmonger(), IRON.to_string()),
+            U128(0),
+            "a shelf stocked by the owner cost the merchant nothing"
+        );
+        let bid = m.quote(ironmonger(), IRON.to_string(), 1).merchant_bid.unwrap().0;
+
+        ctx(items(), 0);
+        let _ = m.mt_on_transfer(
+            player(), vec![player()], vec![IRON.to_string()], vec![U128(10)],
+            ironmonger().to_string(),
+        );
+
+        // This is the acquisition a basis built only from restocks would miss,
+        // and missing it would make every resale look like pure margin.
+        assert_eq!(
+            m.basis_of(ironmonger(), IRON.to_string()),
+            U128(bid * 10),
+            "what the merchant paid the player is the cost of those units"
+        );
+    }
+
+    #[test]
+    fn a_failed_pull_takes_the_recorded_cost_back_with_the_stock() {
+        let mut m = market();
+        let bid = m.quote(ironmonger(), IRON.to_string(), 1).merchant_bid.unwrap().0;
+        ctx(player(), 0);
+        let _ = m.sell(ironmonger(), IRON.to_string(), 4, U64(1));
+        let recorded = m.basis_of(ironmonger(), IRON.to_string()).0;
+        assert!(recorded > 0, "the sale recorded a cost to begin with");
+
+        ctx("market.test.near".parse().unwrap(), 0);
+        m.on_materials_pulled(
+            player(), ironmonger(), IRON.to_string(), U128(4), U128(bid * 4),
+            Err(PromiseError::Failed),
+        );
+        assert_eq!(
+            m.basis_of(ironmonger(), IRON.to_string()),
+            U128(0),
+            "the units never arrived, so neither did their cost"
+        );
+    }
+
+    #[test]
+    fn a_stake_is_recorded_and_repaid_out_of_margin() {
+        let mut m = thin_market();
+        // Give the shelf a real cost basis, so margin is margin and not just
+        // revenue against goods that look free.
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+
+        ctx(player(), BASE * 5);
+        let _ = m.invest(ironmonger());
+        let staked = m.backer_of(ironmonger()).expect("the stake was recorded");
+        assert_eq!(staked.account_id, player());
+        assert_eq!(staked.principal, U128(BASE * 5));
+        assert_eq!(staked.repaid, U128(0), "nothing earned back yet");
+
+        // A third party buys, and the delivery succeeds — which is the only
+        // place margin is ever attributed.
+        let credit_before = m.credit_of(player()).0;
+        ctx(accounts(2), BASE * 200);
+        let total = m.quote(ironmonger(), IRON.to_string(), 4).total.0;
+        let _ = m.buy(ironmonger(), IRON.to_string(), 4);
+        ctx("market.test.near".parse().unwrap(), 0);
+        m.on_items_delivered(
+            accounts(2), ironmonger(), IRON.to_string(), U128(4), U128(total),
+            Ok(()),
+        );
+
+        let after = m.backer_of(ironmonger()).expect("still a backer");
+        assert!(after.repaid.0 > 0, "the backer earned some of its stake back");
+        assert_eq!(
+            m.credit_of(player()).0 - credit_before,
+            after.repaid.0,
+            "and what it earned arrived as withdrawable credit, to the yocto"
+        );
+        assert!(
+            after.repaid.0 < after.principal.0,
+            "one sale does not repay a five NEAR stake, so the claim is still open"
+        );
+    }
+
+    #[test]
+    fn a_failed_delivery_attributes_no_margin_at_all() {
+        let mut m = thin_market();
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+        ctx(player(), BASE * 5);
+        let _ = m.invest(ironmonger());
+
+        ctx(accounts(2), BASE * 200);
+        let total = m.quote(ironmonger(), IRON.to_string(), 4).total.0;
+        let _ = m.buy(ironmonger(), IRON.to_string(), 4);
+
+        // There is nothing to unwind on failure precisely BECAUSE the split
+        // happens in the Ok branch. If margin were attributed before the
+        // delivery resolved, this rollback would have to undo it too.
+        ctx("market.test.near".parse().unwrap(), 0);
+        m.on_items_delivered(
+            accounts(2), ironmonger(), IRON.to_string(), U128(4), U128(total),
+            Err(PromiseError::Failed),
+        );
+        assert_eq!(
+            m.backer_of(ironmonger()).unwrap().repaid,
+            U128(0),
+            "a delivery that failed earned the backer nothing"
+        );
+    }
+
+    #[test]
+    fn the_same_backer_adds_to_its_own_stake() {
+        let mut m = market();
+        ctx(player(), BASE * 3);
+        let _ = m.invest(ironmonger());
+        ctx(player(), BASE * 4);
+        let _ = m.invest(ironmonger());
+        assert_eq!(
+            m.backer_of(ironmonger()).unwrap().principal,
+            U128(BASE * 7),
+            "two investments by one account are one growing stake"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "invest more than the outstanding claim")]
+    fn a_smaller_stake_cannot_take_the_slot_from_an_open_claim() {
+        let mut m = market();
+        ctx(player(), BASE * 3);
+        let _ = m.invest(ironmonger());
+        // One backer per merchant: it keeps the payout O(1) inside a callback
+        // and settles dilution by making it impossible. Matching the claim is
+        // not enough — it has to be covered AND exceeded, or an investment that
+        // left nothing for the merchant would still take the slot.
+        ctx(accounts(2), BASE * 3);
+        let _ = m.invest(ironmonger());
+    }
+
+    #[test]
+    fn a_bigger_stake_buys_the_incumbent_out_and_takes_the_slot() {
+        let mut m = market();
+        ctx(player(), BASE * 3);
+        let _ = m.invest(ironmonger());
+        let treasury_after_first = m.merchant_treasury_for(ironmonger());
+        let incumbent_credit = m.credit_of(player()).0;
+
+        // Without this path, one yoctoNEAR claimed the slot and locked everyone
+        // out until the merchant happened to make a sale — denying the exact
+        // mechanic invest exists for, for free.
+        ctx(accounts(2), BASE * 10);
+        let _ = m.invest(ironmonger());
+
+        let now = m.backer_of(ironmonger()).unwrap();
+        assert_eq!(now.account_id, accounts(2), "the newcomer holds the slot");
+        assert_eq!(
+            now.principal,
+            U128(BASE * 7),
+            "its stake is what it put in MINUS what buying out the incumbent cost"
+        );
+        assert_eq!(
+            m.credit_of(player()).0 - incumbent_credit,
+            BASE * 3,
+            "the incumbent was repaid exactly what it was owed, so nothing was taken from it"
+        );
+        assert_eq!(
+            m.merchant_treasury_for(ironmonger()) - treasury_after_first,
+            BASE * 7,
+            "and only the remainder became working capital for the merchant"
+        );
+    }
+
+    #[test]
+    fn a_repaid_backer_frees_the_slot_without_a_buy_out() {
+        let mut m = market();
+        ctx(player(), BASE * 3);
+        let _ = m.invest(ironmonger());
+        // Pretend the stake was fully repaid.
+        let b = m.backer_of(ironmonger()).unwrap();
+        m.backers.insert(
+            ironmonger(),
+            Backer { repaid: b.principal, ..b },
+        );
+        // A settled claim is not a claim, so the next investor just takes it.
+        ctx(accounts(2), BASE);
+        let _ = m.invest(ironmonger());
+        let now = m.backer_of(ironmonger()).unwrap();
+        assert_eq!(now.account_id, accounts(2));
+        assert_eq!(now.principal, U128(BASE), "nothing was spent buying anyone out");
+    }
+
+    #[test]
+    #[should_panic(expected = "outstanding stake; its margin repays the backer first")]
+    fn a_backed_merchant_cannot_withdraw_the_stake_it_was_given() {
+        let mut m = market();
+        ctx(player(), BASE * 3);
+        let _ = m.invest(ironmonger());
+        // The principal lands in the treasury, so without this guard the
+        // merchant could simply cash out the money it was just lent.
+        ctx(ironmonger(), 0);
+        let _ = m.withdraw_treasury();
+    }
+
+    #[test]
+    #[should_panic(expected = "no shelves, so a stake in it could never be repaid")]
+    fn a_merchant_with_no_shelves_cannot_be_backed() {
+        ctx(owner(), 0);
+        let mut m = Market::new(owner(), items());
+        m.register_merchant(ironmonger(), "Ironmonger".into(), U128(BASE));
+        // It reports closed — correctly, since B-4 — and a stake in a shop with
+        // nothing to sell could never earn margin to repay itself.
+        assert!(m.is_closed(ironmonger()));
+        ctx(player(), BASE * 3);
+        let _ = m.invest(ironmonger());
     }
 
     #[test]

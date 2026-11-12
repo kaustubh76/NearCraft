@@ -38,7 +38,7 @@ column before the description.
 | Social / email login | **Built and tested.** [`backend/near/oidc.mjs`](backend/near/oidc.mjs) — JWKS fetch, JWT signature verification, `iss`/`aud`/`exp`/`nbf`/`sub` checks. 25 offline tests including `alg: none`, the HMAC confusion attack, a swapped payload and a token minted for another application. **Not configured against a real provider**, so the demo onboards seeded identities. |
 | Gasless play — no seed phrase, no popup, no gas prompt | **Built and measured on public testnet.** `npm run live:player`: a player holding **no full-access key at all** buys and sells on NEAR testnet and its balance moves by **exactly 0** — the relayer pays. Reproduced twice, hashes retained in `evidence/live/`. Also `npm run test:gasless` on a local node, plus 15 offline tests. [docs/GASLESS.md](docs/GASLESS.md) |
 | The money invariant | **Built and tested.** `sum(treasuries) + sum(credits) == deposited − paid out`, asserted after **every one** of the contract's fourteen money-moving calls, so a failure names the step rather than the session. Proved by injecting a real leak — a sale that credits the seller without debiting the treasury — which the test catches as "the ledger drifted after sell" with the 1.66 NEAR created from nothing. Plus the half a unit test cannot see: a sandbox test that the market's own NEAR balance always covers what it owes, across buys, a sale, an investment and a real withdrawal. `docs/RECAPITALIZATION.md`'s own formula for this was **wrong** — it double-counted stakes — and is corrected there. |
-| Reopening a broke merchant — the prompt's own sentence | **Built and tested.** The `games` prompt ends its description with "it closes its shop **until someone invests in it**". `market.invest(merchant_id)` is payable and permissionless; `market.invest_with_credit` is **non-payable** so a player holding one scoped key can call it at all — without that the mechanic would be unreachable for exactly the players it is for. `invest` returns whether the shop reopened, and says so in its log rather than claiming success when the amount fell short. What a funder gets back is the shop, not a dividend — and that is the incentive: a closed merchant will not buy from you. A tracked stake repaid from margin is the richer design in [docs/RECAPITALIZATION.md](docs/RECAPITALIZATION.md) and is **not** built, because it needs new contract state. 9 tests. |
+| Reopening a broke merchant — the prompt's own sentence | **Built and tested.** The `games` prompt ends its description with "it closes its shop **until someone invests in it**". `market.invest(merchant_id)` is payable and permissionless; `market.invest_with_credit` is **non-payable** so a player holding one scoped key can call it at all — without that the mechanic would be unreachable for exactly the players it is for. `invest` returns whether the shop reopened, and says so in its log rather than claiming success when the amount fell short. A funder gets back the shop — a closed merchant will not buy from you, so the player holding iron is exactly the person who wants the ironmonger funded — **and now the stake too**: it is recorded, and half of every later sale's margin repays it until the claim is settled. That is the design in [docs/RECAPITALIZATION.md](docs/RECAPITALIZATION.md), which needed new contract state and the migration to carry it, and both now exist. Covered by `backing_tests` in [contracts/market/src/pricing.rs](contracts/market/src/pricing.rs) for the arithmetic, the `invest`/`backer`/`basis` tests in [contracts/market/src/lib.rs](contracts/market/src/lib.rs) for the behaviour, and one end-to-end run on a real node in [contracts/integration/tests/economy.rs](contracts/integration/tests/economy.rs). |
 | Merchant restocking — "an economy that evolves without a dev patch" | **Built and tested.** `market.restock(merchant_id, item)` is **permissionless and non-payable**, so anyone may refill a thin shelf and a scoped key can do it. The merchant pays out of its own treasury at the bid it *would post for the restocked shelf* — provably below what it sells for, so a restock can never be a loss — and never spends into its floor. It **mints** the goods through `items.mt_mint`, so a shelf never claims stock the contract does not hold; a sandbox test on a real node proves the market's NEP-245 balance rises by exactly the units added. 13 tests. |
 | Payout rollbacks | **Built and tested.** `withdraw` and `withdraw_treasury` used to zero the ledger and then fire a bare transfer with no callback: a failed payout debited the claimant and delivered nothing, and the market silently kept money it no longer accounted for. Both now roll back. 3 unit tests. |
 | NEP-245 Approval Management | **Built and tested.** 10 unit tests. Implemented because without it a key-less player could buy but never sell. |
@@ -136,14 +136,17 @@ Three things make that more than a hopeful anecdote:
   transactions. Actions in a single transaction also revert together, so a
   `migrate` that panics leaves the old code and the old state untouched. That is
   what makes it safe to try at all. `NEAR_MIGRATE=market npm run deploy`.
-- **It was rehearsed against the bytes testnet was running, not against a fresh
-  build of them.** [contracts/integration/tests/migration.rs](contracts/integration/tests/migration.rs)
+- **It was rehearsed against the bytes testnet was really running, not against a
+  fresh build of them.** [contracts/integration/tests/migration.rs](contracts/integration/tests/migration.rs)
   deploys [contracts/integration/fixtures/market-live.wasm](contracts/integration/fixtures/market-live.wasm)
-  — fetched from the chain with a public `view_code` call, `code_hash` pinned in
-  the test and re-checked after deploying — then **breaks the contract on
-  purpose** with a plain redeploy, asserts every view really does fail, and only
-  then rescues it. A migration test that never sees the failure it exists to
-  prevent would pass on a migration that does nothing.
+  — fetched from the chain with a public `view_code` call just before the
+  migration superseded it, `code_hash` pinned in the test and re-checked after
+  deploying — then **breaks the contract on purpose** with a plain redeploy,
+  asserts every view really does fail, and only then rescues it. A migration
+  test that never sees the failure it exists to prevent would pass on a
+  migration that does nothing, which is why the fixture is not re-fetched after
+  each migration: that would make fixture and build the same shape and quietly
+  retire the test.
 - **`migrate` is `#[private]`.** An un-private one would let anyone overwrite
   every treasury and every credit balance in a single call, which makes it the
   most dangerous signature in the project. `npm run check:nep245` pins both its
@@ -153,6 +156,53 @@ Three things make that more than a hopeful anecdote:
 The honest limit: `migrate` carries the current shape and the one before it, and
 nothing older. The `basis` map it adds comes through **empty**, because restocks
 that happened before the migration spent money nobody recorded.
+
+**So an investment is now a stake, not a donation.** `invest` records who put
+money in; a sale attributes margin in `on_items_delivered`'s **Ok** branch; half
+of it becomes the backer's withdrawable credit until the stake is repaid. On a
+real node, a backer staking 3 NEAR into a restocked ironmonger earned 1.53 NEAR
+back from a single sale of 8 iron.
+
+Four decisions in it are worth more than the feature:
+
+- **Margin, not revenue.** The tempting rule is `margin = paid × 20%`, the
+  merchant's spread. It is wrong in a way that costs the investor money: a
+  merchant that restocked a thin shelf at a scarcity price and then sold into a
+  glut made a **loss**, and that rule would pay the backer out of its own
+  principal. `pricing.rs` uses weighted-average cost basis and saturates at
+  zero, so a loss pays nothing. The first of its seven tests is that case.
+- **A player selling into a merchant is an acquisition too.** Cost basis that
+  counted only restocks would make every resale look like pure margin, so both
+  sell paths — the pull and the push — record what the merchant paid.
+- **Nothing to unwind.** Margin is attributed only once delivery has succeeded,
+  so a failed delivery never attributed any. That also avoids adding an argument
+  to an existing `#[private]` callback, which would break any receipt already in
+  flight and take the rollback that refunds a player with it.
+- **`withdraw_treasury` is refused while a stake is open.** The principal lands
+  in the treasury, so without that guard a merchant could simply cash out the
+  money it was just lent.
+- **A backer can be bought out, and that is a fix, not a feature.** One backer
+  per merchant keeps the payout O(1) inside a callback — but the first version
+  meant **one yoctoNEAR claimed the slot and locked everyone else out** until the
+  merchant happened to make a sale. That is cheap enough to be free, and it
+  denies the exact mechanic `invest` exists for: a shop nobody can rescue. So a
+  newcomer takes the slot by covering the incumbent's outstanding claim in full
+  — the incumbent gets back everything it was owed and nothing is taken from it,
+  only the remainder becomes working capital, and squatting now costs the
+  squatter their stake and buys them nothing.
+
+And the limit, stated because it is the honest answer: a backer whose shop never
+trades again does not get its money back. `invest` refuses a merchant with no
+shelves at all, so the one case where repayment was impossible from the start is
+blocked — but after that, the risk is real. That is what investing is.
+
+One consequence of the gasless design worth naming: **a player's key is
+immutable for life.** Onboarding deletes the bootstrap full-access key in the
+same transaction that installs the scoped one, and a function-call key cannot add
+keys. So `p-1d6a3c5d`, onboarded before this existed, carries
+`[buy_with_credit, sell]` and can **never** be given `invest_with_credit`. New
+players get all three. The security property that makes a player safe is the same
+property that freezes what they can do.
 
 **And the prompt's own sentence, on the public chain.** The `games` prompt ends
 its description with "it closes its shop until someone invests in it". Chandler

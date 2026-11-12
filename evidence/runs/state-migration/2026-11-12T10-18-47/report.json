@@ -1,0 +1,12 @@
+{
+  "topic": "state-migration",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 7239,
+  "command": "cargo test -p nearcraft-integration --test migration -- --nocapture",
+  "cwd": "contracts",
+  "proves": "The migration mechanism, against the bytes testnet is actually running. The test deploys contracts/integration/fixtures/market-live.wasm — fetched from market.nearcraftmc.testnet with a public view_code call, with its code_hash pinned and re-checked after deploying, so the fixture cannot be swapped for a convenient local build — writes state through it, then BREAKS the contract with a plain redeploy and asserts every view really does fail to deserialize, then rescues it with deploy+migrate as two actions in ONE transaction and asserts the ledger total, treasury, stock, credit and a live quote all came through unchanged. Also: a second migrate is a no-op rather than a reset, and a stranger calling migrate is refused with \"Method migrate is private\" — which no unit test can show, because near-sdk emits that check only in the wasm32 wrapper, and an un-private migrate would let anyone overwrite the contract state. Verified by injecting a real migration bug (dropping credits): the test named the 2 NEAR that vanished from ledger_total, which credit_of alone could not see.",
+  "output_sha256": "e0fc90d906d273e4881c73cbd83fe2c2d9104827276f3f6b8e77add6d9879ee9",
+  "output_bytes": 859,
+  "recorded_at": "2026-11-12T10:20:25.550Z"
+}

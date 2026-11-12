@@ -311,3 +311,97 @@ mod restock_tests {
         assert!(cost > 0);
     }
 }
+
+// ---------------------------------------------------------------- backing
+
+/// Share of a sale's **margin** that goes to a merchant's backer while its
+/// stake is still outstanding.
+///
+/// Half, so the shop keeps growing while it repays. A backer who took all the
+/// margin would leave the merchant unable to restock, which is how a rescue
+/// turns into a slow second bankruptcy.
+pub const BACKER_SHARE_BPS: u128 = 5_000;
+
+/// Margin on a sale, from what the buyer paid and what the goods cost.
+///
+/// **Saturating, and that is the whole point.** A merchant that restocked a
+/// thin shelf at a scarcity price and then sold into a glut made a LOSS, and the
+/// tempting shortcut — `margin = paid * 20%`, the merchant's spread — would pay
+/// a backer out of its principal in exactly that case. Weighted-average cost
+/// basis cannot: it bottoms out at zero and pays nothing.
+pub fn margin(paid: u128, cost_of_goods: u128) -> u128 {
+    paid.saturating_sub(cost_of_goods)
+}
+
+/// What the goods in a sale of `count` units cost, by weighted average.
+///
+/// Weighted average rather than FIFO because a shelf is fungible: NEP-245
+/// balances carry no acquisition lot, so there is nothing to queue. It also
+/// keeps this O(1), which matters inside a callback with a fixed gas budget.
+pub fn cost_of_goods(basis_total: u128, stock_before: u128, count: u128) -> u128 {
+    if stock_before == 0 || basis_total == 0 {
+        return 0;
+    }
+    let count = count.min(stock_before);
+    basis_total * count / stock_before
+}
+
+/// What a backer is actually paid out of one sale's margin: its share, capped by
+/// what it is still owed and by what the merchant can pay without closing.
+pub fn backer_payout(margin: u128, owed: u128, spare: u128) -> u128 {
+    (margin * BACKER_SHARE_BPS / BPS).min(owed).min(spare)
+}
+
+#[cfg(test)]
+mod backing_tests {
+    use super::*;
+
+    #[test]
+    fn a_sale_at_a_loss_pays_the_backer_nothing() {
+        // Restocked 100 units for 500, so 5 each. Sold 10 into a glut for 30.
+        let cogs = cost_of_goods(500, 100, 10);
+        assert_eq!(cogs, 50);
+        assert_eq!(margin(30, cogs), 0, "a loss is zero margin, never negative");
+        assert_eq!(backer_payout(margin(30, cogs), 1_000, 1_000), 0);
+    }
+
+    #[test]
+    fn the_backer_takes_half_the_margin_and_no_more() {
+        let cogs = cost_of_goods(500, 100, 10); // 50
+        let m = margin(150, cogs); // 100
+        assert_eq!(backer_payout(m, 1_000, 1_000), 50);
+    }
+
+    #[test]
+    fn the_payout_stops_at_what_is_still_owed() {
+        assert_eq!(backer_payout(1_000, 20, 1_000), 20, "never more than the claim");
+    }
+
+    #[test]
+    fn the_payout_never_pushes_a_merchant_below_its_floor() {
+        // `spare` is treasury above floor. Paying a backer into the floor would
+        // close the shop, which is a perverse way to reward investing in it.
+        assert_eq!(backer_payout(1_000, 1_000, 7), 7);
+    }
+
+    #[test]
+    fn unrecorded_basis_reads_as_free_rather_than_as_profit_on_everything() {
+        // Stock that predates cost-basis recording has basis 0. That makes the
+        // whole sale look like margin — generous to the backer, but it cannot
+        // overpay, because the claim and the spare both cap it.
+        assert_eq!(cost_of_goods(0, 100, 10), 0);
+        assert_eq!(margin(100, 0), 100);
+    }
+
+    #[test]
+    fn selling_the_whole_shelf_consumes_the_whole_basis() {
+        assert_eq!(cost_of_goods(500, 100, 100), 500);
+        // And a count beyond the shelf cannot claim more than the shelf cost.
+        assert_eq!(cost_of_goods(500, 100, 250), 500);
+    }
+
+    #[test]
+    fn cost_of_goods_cannot_divide_by_an_empty_shelf() {
+        assert_eq!(cost_of_goods(500, 0, 10), 0);
+    }
+}
