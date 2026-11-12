@@ -56,6 +56,7 @@ const STATUS = {
   NO_TOKEN: 400,
   ROOT_UNDERFUNDED: 503,
   NO_PLAYER_KEY: 503,
+  KEY_NOT_PERSISTED: 500,
   METHOD_NOT_PERMITTED: 403,
   NOT_FOUND: 404,
   // The chain refused the call. Not the caller's fault and not a bug here, so
@@ -82,6 +83,16 @@ export function createPlayService({
   onboarding,
   relayer,
   reader,
+  /// Called with a newly onboarded player's scoped key so the operator can
+  /// persist it.
+  ///
+  /// This is not optional in practice, and the reason is permanent: onboarding
+  /// returns `serverKey` ONLY on the run that creates the account, and deletes
+  /// that account's full-access key in the same transaction. Lose the key and
+  /// the player can never be signed for again by anyone — there is nothing left
+  /// that could add another. A key held only in process memory survives until
+  /// the next restart and then strands the account for good.
+  saveKey = null,
   newSessionId = () => randomUUID(),
   log = () => {},
 }) {
@@ -155,9 +166,6 @@ export function createPlayService({
   }
 
   return Object.freeze({
-    /// Exposed for the sandbox test, which signs in without going through HTTP.
-    sessions,
-
     async handle(method, path, body = {}) {
       try {
         // ------------------------------------------------------------ health
@@ -202,6 +210,23 @@ export function createPlayService({
           }
 
           const accountId = result.accountId
+
+          // A newly created player hands its scoped key back exactly once.
+          // Keep it, and give the operator a chance to persist it, before
+          // anything else can fail — see `saveKey`.
+          if (result.serverKey) {
+            keys[accountId + '#scoped'] = result.serverKey
+            if (saveKey) {
+              try {
+                await saveKey(accountId, result.serverKey)
+              } catch (e) {
+                // Refuse rather than hand back a working session whose key will
+                // vanish at restart and strand an account nothing can re-key.
+                throw new PlayRefusal('KEY_NOT_PERSISTED', e?.message ?? String(e))
+              }
+            }
+          }
+
           // Fail the sign-in rather than hand back a session that cannot act.
           playerKey(accountId)
 

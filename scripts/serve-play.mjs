@@ -15,7 +15,7 @@
 // judge's private key to anything that can reach this port. One guard, one
 // test, two servers.
 import { createServer } from 'node:http'
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { resolveFile, TYPES } from './serve-web.mjs'
 import { createPlayService } from '../backend/near/play.mjs'
@@ -91,8 +91,24 @@ const reader = createMarketReader({
   rpcUrl: manifest.rpc,
 })
 
+/// Persist a newly onboarded player's one-time scoped key.
+///
+/// Onboarding hands this key back exactly once, on the run that creates the
+/// account, and deletes that account's full-access key in the same
+/// transaction. If it is not written down here, the next restart strands the
+/// account permanently: nothing exists that could add another key to it.
+///
+/// Written with mode 0600 into .local/, which is gitignored and which the
+/// static server refuses to serve.
+const KEYS_FILE = new URL('../.local/nearcraft-keys.json', import.meta.url)
+async function saveKey(accountId, secret) {
+  keys[`${accountId}#scoped`] = secret
+  await writeFile(KEYS_FILE, JSON.stringify(keys, null, 2) + '\n', { mode: 0o600 })
+  console.log(`  saved key for ${accountId} -> .local/nearcraft-keys.json`)
+}
+
 const play = createPlayService({
-  deployment: manifest, keys, verifierKind, onboarding, relayer, reader,
+  deployment: manifest, keys, verifierKind, onboarding, relayer, reader, saveKey,
   log: (e) => console.log(`  ${e.event.padEnd(10)} ${JSON.stringify({ ...e, event: undefined })}`),
 })
 

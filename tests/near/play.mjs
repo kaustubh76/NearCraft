@@ -297,3 +297,56 @@ test('an approval id must be the string the chain gave, not a number', async () 
     { sessionId, merchantId: 'ironmonger.x.testnet', item: 'iron_ingot', count: 1 }),
     'APPROVAL_ID_MALFORMED', 400)
 })
+
+// --------------------------------------------------- the one-time server key
+
+test('a newly onboarded player\'s key is kept and handed to the operator', async () => {
+  // signIn returns serverKey only on the run that CREATES the account, and
+  // deletes that account's full-access key in the same transaction. A service
+  // that only ever looks keys up would refuse the very player it just made.
+  const saved = []
+  const { svc, relayed } = build({
+    onboarding: {
+      signIn: async () => ({ accountId: 'p-new.x.testnet', created: true, serverKey: 'ed25519:BRANDNEWKEY' }),
+    },
+  })
+  // Rebuild with a saveKey hook, since build() does not take one.
+  const svc2 = (await import('../../backend/near/play.mjs')).createPlayService({
+    deployment: DEPLOYMENT,
+    keys: {},
+    onboarding: {
+      signIn: async () => ({ accountId: 'p-new.x.testnet', created: true, serverKey: 'ed25519:BRANDNEWKEY' }),
+      keyLimits: async () => LIMITS,
+    },
+    relayer: { relay: async () => ({ outcome: { transaction: { hash: 'H' } } }) },
+    reader: { nearBalance: async () => '1', materials: async () => [], heldBy: async () => [],
+              creditOf: async () => '0', approvalFor: async () => null, quotes: async () => [] },
+    saveKey: async (id, secret) => { saved.push([id, secret]) },
+    newSessionId: () => 'S2',
+  })
+  const res = await svc2.handle('POST', '/api/session', { token: 'brand-new' })
+  assert.equal(res.status, 200)
+  assert.deepEqual(saved, [['p-new.x.testnet', 'ed25519:BRANDNEWKEY']])
+  // And the key must not come back to the caller.
+  assert.ok(!JSON.stringify(res.body).includes('BRANDNEWKEY'))
+  void svc, relayed
+})
+
+test('if the one-time key cannot be persisted the sign-in is refused', async () => {
+  // Better to refuse than to hand back a session that works until restart and
+  // then strands an account nothing can ever re-key.
+  const svc = (await import('../../backend/near/play.mjs')).createPlayService({
+    deployment: DEPLOYMENT,
+    keys: {},
+    onboarding: {
+      signIn: async () => ({ accountId: 'p-new.x.testnet', created: true, serverKey: 'ed25519:BRANDNEWKEY' }),
+      keyLimits: async () => LIMITS,
+    },
+    relayer: { relay: async () => ({}) },
+    reader: { nearBalance: async () => '1', materials: async () => [], heldBy: async () => [],
+              creditOf: async () => '0', approvalFor: async () => null, quotes: async () => [] },
+    saveKey: async () => { throw new Error('disk full') },
+    newSessionId: () => 'S3',
+  })
+  refuses(await svc.handle('POST', '/api/session', { token: 'brand-new' }), 'KEY_NOT_PERSISTED', 500)
+})

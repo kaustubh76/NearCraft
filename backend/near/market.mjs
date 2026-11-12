@@ -250,7 +250,21 @@ export function displayNear(yocto) {
 /// no imports at all and the same code runs in Node and in the browser. The
 /// alternative — a second copy of the read logic inside web/market.html — is the
 /// duplication that bit us once already with the onboarding bootstrap.
-async function viewCall(rpcUrl, { contractId, method, args }) {
+/// Which block a read is answered from.
+///
+/// `optimistic` is the latest block; `final` lags it by a few. That lag is not
+/// academic: a player who sells an item and then reads their holdings at
+/// `final` is shown the item still in their inventory and concludes the sale
+/// failed. Measured on a real node — immediately after a successful sell,
+/// optimistic reported the new balance and final still reported the old one
+/// three seconds later.
+///
+/// So reads default to `optimistic`, which is what someone who just acted
+/// needs to see. It is overridable for callers that would rather wait for
+/// finality than be fast.
+const DEFAULT_FINALITY = 'optimistic'
+
+async function viewCall(rpcUrl, { contractId, method, args }, finality = DEFAULT_FINALITY) {
   const bytes = new TextEncoder().encode(JSON.stringify(args))
   let binary = ''
   for (const b of bytes) binary += String.fromCharCode(b)
@@ -264,7 +278,7 @@ async function viewCall(rpcUrl, { contractId, method, args }) {
       method: 'query',
       params: {
         request_type: 'call_function',
-        finality: 'final',
+        finality,
         account_id: contractId,
         method_name: method,
         args_base64: btoa(binary),
@@ -308,18 +322,18 @@ async function queryNode(rpcUrl, params) {
 
 /// Read-only market client. Needs no key and no credentials, and runs in both
 /// Node and the browser.
-export function createMarketReader({ marketContract, itemsContract, rpcUrl = 'https://test.rpc.fastnear.com' }) {
+export function createMarketReader({ marketContract, itemsContract, rpcUrl = 'https://test.rpc.fastnear.com', finality = DEFAULT_FINALITY }) {
   return Object.freeze({
     rpcUrl,
     async quotes(item, count) {
-      return menuRows(await viewCall(rpcUrl, quotesRequest({ marketContract, item, count })))
+      return menuRows(await viewCall(rpcUrl, quotesRequest({ marketContract, item, count }), finality))
     },
     async merchants() {
       return viewCall(rpcUrl, {
         contractId: requireAccount(marketContract, 'MARKET_CONTRACT_MALFORMED'),
         method: 'merchants',
         args: {},
-      })
+      }, finality)
     },
     /// Every material the items contract knows about. Read from the chain rather
     /// than a hardcoded list, so a material minted later needs no code change.
@@ -328,7 +342,7 @@ export function createMarketReader({ marketContract, itemsContract, rpcUrl = 'ht
         contractId: requireAccount(itemsContract, 'ITEMS_CONTRACT_MALFORMED'),
         method: 'mt_tokens',
         args: { from_index: '0', limit: 64 },
-      })
+      }, finality)
       if (!Array.isArray(tokens)) throw new MarketRequestError('TOKENS_NOT_AN_ARRAY')
       return tokens.map((t) => t.token_id)
     },
@@ -337,7 +351,7 @@ export function createMarketReader({ marketContract, itemsContract, rpcUrl = 'ht
         contractId: requireAccount(itemsContract, 'ITEMS_CONTRACT_MALFORMED'),
         method: 'mt_batch_balance_of',
         args: { account_id: requireAccount(accountId, 'ACCOUNT_MALFORMED'), token_ids: tokenIds.map(requireItem) },
-      })
+      }, finality)
     },
 
     /// The spend budget the market holds for an account, in yoctoNEAR. This is
@@ -348,7 +362,7 @@ export function createMarketReader({ marketContract, itemsContract, rpcUrl = 'ht
         contractId: requireAccount(marketContract, 'MARKET_CONTRACT_MALFORMED'),
         method: 'credit_of',
         args: { account_id: requireAccount(accountId, 'ACCOUNT_MALFORMED') },
-      })
+      }, finality)
     },
 
     /// The approval id the market holds over one of an account's materials, or
@@ -360,7 +374,7 @@ export function createMarketReader({ marketContract, itemsContract, rpcUrl = 'ht
         contractId: requireAccount(itemsContract, 'ITEMS_CONTRACT_MALFORMED'),
         method: 'mt_token_approval',
         args: { token_id: requireItem(item), account_id: requireAccount(accountId, 'ACCOUNT_MALFORMED') },
-      })
+      }, finality)
       const grant = approval?.approved_account_ids?.[marketContract]
       // Left as the string the chain gave. `approval_id` is a U64, which NEAR
       // serialises as a JSON string, and the contract refuses an integer with
@@ -374,7 +388,7 @@ export function createMarketReader({ marketContract, itemsContract, rpcUrl = 'ht
     async nearBalance(accountId) {
       const state = await queryNode(rpcUrl, {
         request_type: 'view_account',
-        finality: 'final',
+        finality,
         account_id: requireAccount(accountId, 'ACCOUNT_MALFORMED'),
       })
       return String(state.amount)

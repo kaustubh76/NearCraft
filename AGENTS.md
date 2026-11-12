@@ -192,6 +192,14 @@ baseline project, where it was the thing that made the evidence worth reading.
   **SOURCE MOVED**, which is a different failure from DIFFERS: the bytes and the
   local wasm still agree, it is the *source* that has left them behind. The
   check skips `contracts/integration/`, which no contract build reads.
+- **`finality: 'final'` lags, and it will make a working write look broken.**
+  It has bitten twice. Once a redeploy script read the account at `final`
+  immediately after deploying and reported no change on a transaction that had
+  in fact succeeded. Then the play service sold an item and showed the player
+  still holding it — `optimistic` reported the new balance at once while
+  `final` was still reporting the old one three seconds later, measured on a
+  real node. Anything a person reads right after acting should use
+  `optimistic`; `backend/near/market.mjs` defaults to it and takes an override.
 - **Banning a phrasing does not stop a number rotting; checking it does.** A
   rule forbids "N Rust unit tests" and "N offline checks", and the README's
   status table duly rotted as "74 unit tests" and "12 tests" — matching neither.

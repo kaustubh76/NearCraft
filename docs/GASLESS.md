@@ -193,6 +193,32 @@ what it was issued, permanently, and there is no re-keying it.
 So the method list in the catalog is not a configuration detail. It is a
 decision taken once per player, for good, at the moment of onboarding.
 
+## You can now watch this happen instead of reading about it
+
+`npm run play` serves the market page with the service behind it. Sign in, buy,
+sell — and the panel shows your NEAR balance before and after every call. The
+delta is measured by the service either side of the call on the chain, not
+asserted by the page, and it reads 0.000000.
+
+That path is `backend/near/play.mjs`, which composes the same modules this
+document describes: the identity verifier, onboarding, and the relayer. It is
+**custodial** — the server holds the scoped key and submits for the player,
+which is precisely what makes "no seed phrase" true rather than a slogan — and
+the key it holds is bounded by the protocol, not by the server: named methods,
+one contract, no transfers, no new keys. `GET /api/me` reads those limits back
+off the chain on every call, so a player can check what is held for them.
+
+`npm run web` serves the same page with no credentials and no API, and the play
+panel simply does not appear. That is the version a judge can run from a clean
+clone.
+
+One honest limit: the live deployment cannot onboard a **new** player, because
+the root account is below the gas headroom needed to create one. The service
+says `ROOT_UNDERFUNDED` and names the faucet. The full new-player path —
+create, approve while a bootstrap key still exists, install the scoped key and
+delete the bootstrap one in the same transaction — is exercised against a real
+node in `tests/near/gasless.mjs`.
+
 ### And this paragraph was true while `deployment.json` said otherwise
 
 The paragraph above has been correct since it was written. The manifest beside

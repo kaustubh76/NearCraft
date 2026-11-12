@@ -26,6 +26,10 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { Sandbox, DEFAULT_ACCOUNT_ID, DEFAULT_PRIVATE_KEY } from 'near-sandbox'
 import { Account, JsonRpcProvider, KeyPair, actions, teraToGas } from 'near-api-js'
+import { createPlayService } from '../../backend/near/play.mjs'
+import { createOnboarding } from '../../backend/near/onboarding.mjs'
+import { createRelayer } from '../../backend/near/relayer.mjs'
+import { createMarketReader } from '../../backend/near/market.mjs'
 
 const near = (n) => BigInt(n) * 10n ** 24n
 
@@ -326,4 +330,122 @@ test('a player with no full-access key backs a merchant, and still pays nothing'
   assert.equal(backer.account_id, player.id, 'and recorded against the player who made it')
   assert.equal(backer.principal, stake.toString(), 'for the full amount')
   assert.equal(backer.repaid, '0', 'with nothing earned back before any trade')
+})
+
+test('the play service runs the whole loop on a real node, and the player pays nothing', async (t) => {
+  // The three tests above prove the PROTOCOL behaviour with hand-built calls.
+  // This one proves the thing a person actually touches: backend/near/play.mjs,
+  // composing the real onboarding, the real relayer and the real market
+  // reader, driven exactly as scripts/serve-play.mjs drives it.
+  //
+  // It also covers the one path live testnet cannot: creating a NEW player.
+  // That needs the root account to fund an account plus gas headroom, and the
+  // live root is below it — so onboarding's three-transaction bootstrap, the
+  // approval granted while a bootstrap key still exists, and the deletion of
+  // that key are only ever exercised here.
+  const sandbox = await Sandbox.start({})
+  t.after(() => sandbox.tearDown())
+
+  const provider = new JsonRpcProvider({ url: sandbox.rpcUrl })
+  const root = new Account(DEFAULT_ACCOUNT_ID, provider, DEFAULT_PRIVATE_KEY)
+  const balance = async (id) =>
+    BigInt((await provider.query({ request_type: 'view_account', finality: 'optimistic', account_id: id })).amount)
+
+  async function sub(name, funds) {
+    const key = KeyPair.fromRandom('ed25519')
+    await root.createSubAccount({
+      accountOrPrefix: name, publicKey: key.getPublicKey().toString(), nearToTransfer: funds,
+    })
+    return { id: `${name}.${DEFAULT_ACCOUNT_ID}`, key }
+  }
+
+  const items = await sub('items', near(10))
+  const market = await sub('market', near(20))
+  const merchant = await sub('ironmonger', near(2))
+  const relayerAcc = await sub('relayer', near(50))
+
+  const itemsAcc = new Account(items.id, provider, items.key.toString())
+  const marketAcc = new Account(market.id, provider, market.key.toString())
+  await itemsAcc.deployContract(await wasm('nearcraft_items'))
+  await marketAcc.deployContract(await wasm('nearcraft_market'))
+  await itemsAcc.callFunction({ contractId: items.id, methodName: 'new', args: { owner_id: market.id }, gas: teraToGas('30') })
+  await marketAcc.callFunction({ contractId: market.id, methodName: 'new', args: { owner_id: root.accountId, items_contract: items.id }, gas: teraToGas('30') })
+  await marketAcc.callFunction({ contractId: items.id, methodName: 'mt_mint', args: { token_id: 'iron_ingot', amount: '100000', receiver_id: market.id }, gas: teraToGas('60') })
+  await root.callFunction({ contractId: market.id, methodName: 'register_merchant', args: { merchant_id: merchant.id, name: 'Ironmonger', floor: '0' }, gas: teraToGas('30') })
+  await root.callFunction({ contractId: market.id, methodName: 'fund_merchant', args: { merchant_id: merchant.id }, deposit: near(10), gas: teraToGas('30') })
+  await root.callFunction({ contractId: market.id, methodName: 'list_item', args: { merchant_id: merchant.id, item: 'iron_ingot', base_price: (near(1) / 10n).toString(), stock: '1000' }, gas: teraToGas('30') })
+
+  // ------------------------------------------------- the service, assembled
+  const saved = []
+  const keys = {}
+  const service = createPlayService({
+    deployment: { network: 'sandbox', rpc: sandbox.rpcUrl, contracts: { market: market.id, items: items.id } },
+    keys,
+    verifierKind: 'seed',
+    onboarding: createOnboarding({
+      rootAccountId: DEFAULT_ACCOUNT_ID,
+      rootKey: DEFAULT_PRIVATE_KEY,
+      marketContract: market.id,
+      itemsContract: items.id,
+      sellableItems: ['iron_ingot'],
+      playerMethods: ['buy_with_credit', 'sell'],
+      verifyIdentity: async (token) => ({ provider: 'seed', subject: String(token) }),
+      rpcUrl: sandbox.rpcUrl,
+    }),
+    relayer: createRelayer({
+      relayerAccountId: relayerAcc.id,
+      relayerKey: relayerAcc.key.toString(),
+      marketContract: market.id,
+      permittedMethods: ['buy_with_credit', 'sell'],
+      rpcUrl: sandbox.rpcUrl,
+    }),
+    reader: createMarketReader({ marketContract: market.id, itemsContract: items.id, rpcUrl: sandbox.rpcUrl }),
+    saveKey: async (id, secret) => { saved.push(id); keys[`${id}#scoped`] = secret },
+  })
+
+  // ------------------------------------------------------------- signing in
+  const session = await service.handle('POST', '/api/session', { token: 'player-1' })
+  assert.equal(session.status, 200, JSON.stringify(session.body))
+  const sessionId = session.body.sessionId
+  const playerId = session.body.accountId
+
+  assert.equal(session.body.created, true, 'this run must have created the account')
+  assert.equal(session.body.fullAccessKeys, 0, 'onboarding must leave no full-access key behind')
+  assert.deepEqual(saved, [playerId], 'the one-time scoped key must be handed to the operator')
+  assert.ok(!JSON.stringify(session.body).includes('ed25519:'), 'no key may reach the caller')
+
+  await root.callFunction({ contractId: market.id, methodName: 'fund_credit', args: { account_id: playerId }, deposit: near(5), gas: teraToGas('30') })
+
+  // --------------------------------------------------------------- the loop
+  const quotes = await service.handle('GET', '/api/market', { item: 'iron_ingot', count: 2 })
+  assert.equal(quotes.status, 200)
+  assert.ok(quotes.body.merchants[0].reason, 'the merchant must explain its price')
+
+  const before = await balance(playerId)
+
+  const buy = await service.handle('POST', '/api/buy',
+    { sessionId, merchantId: merchant.id, item: 'iron_ingot', count: 2 })
+  assert.equal(buy.status, 200, JSON.stringify(buy.body))
+  assert.ok(buy.body.hash, 'a successful buy must name its transaction')
+
+  const sell = await service.handle('POST', '/api/sell',
+    { sessionId, merchantId: merchant.id, item: 'iron_ingot', count: 1 })
+  assert.equal(sell.status, 200, JSON.stringify(sell.body))
+
+  const after = await balance(playerId)
+  const me = await service.handle('GET', '/api/me', { sessionId })
+
+
+  console.log('\n--- the play service, end to end ---')
+  console.log(`  player   ${playerId}`)
+  console.log(`  bought 2, sold 1 -> holding ${me.body.holdings.iron_ingot}`)
+  console.log(`  player NEAR delta ${after - before} yoctoNEAR`)
+  console.log(`  buy reported ${buy.body.playerNearDelta}, sell reported ${sell.body.playerNearDelta}\n`)
+
+  // The headline claim, measured rather than asserted.
+  assert.equal(after - before, 0n, 'the player must not pay a single yoctoNEAR')
+  assert.equal(buy.body.playerNearDelta, '0', 'and the service must report that honestly')
+  assert.equal(sell.body.playerNearDelta, '0')
+  assert.equal(me.body.holdings.iron_ingot, '1', 'bought two, sold one')
+  assert.equal(me.body.fullAccessKeys, 0, 'still holding no full-access key after trading')
 })

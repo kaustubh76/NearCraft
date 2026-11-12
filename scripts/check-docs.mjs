@@ -230,15 +230,15 @@ for (const doc of [...DOCS, 'web/market.html']) {
 // written here, so adding `--test foo` updates the expected number instead of
 // silently making it stale. A count written down in two places is the problem;
 // this one is written down in none.
-async function countInRustFiles(dir, pattern, only = null) {
+async function countInFiles(dir, pattern, only = null, ext = '.rs') {
   let n = 0
   for (const entry of await readdir(new URL(dir, ROOT), { withFileTypes: true })) {
     if (entry.isDirectory()) {
-      n += await countInRustFiles(`${dir}${entry.name}/`, pattern, only)
+      n += await countInFiles(`${dir}${entry.name}/`, pattern, only, ext)
       continue
     }
-    if (!entry.name.endsWith('.rs')) continue
-    if (only && !only.includes(entry.name.replace(/\.rs$/, ''))) continue
+    if (!entry.name.endsWith(ext)) continue
+    if (only && !only.includes(entry.name.slice(0, -ext.length))) continue
     const text = await readFile(new URL(`${dir}${entry.name}`, ROOT), 'utf8')
     n += (text.match(pattern) ?? []).length
   }
@@ -257,11 +257,15 @@ const COUNTED_CLAIMS = [
   { what: 'sandbox integration tests', dir: 'contracts/integration/tests/', pattern: /#\[tokio::test\]/g,
     only: sandboxFiles,
     claim: /\*\*Sandbox integration tests\*\*[^\n]*?\b(\d+) tests\b/ },
+  // The page's own suite. Added the moment a number for it was written down,
+  // rather than waiting for this one to rot too.
+  { what: 'web/market.html tests', dir: 'tests/near/', pattern: /^test\(/gm, only: ['web'], ext: '.mjs',
+    claim: /`web\/market\.html`[^\n]*?\b(\d+) tests\b/ },
 ]
 
 const readmeText = await readFile(new URL('README.md', ROOT), 'utf8')
-for (const { what, dir, pattern, claim, only } of COUNTED_CLAIMS) {
-  const actual = await countInRustFiles(dir, pattern, only ?? null)
+for (const { what, dir, pattern, claim, only, ext } of COUNTED_CLAIMS) {
+  const actual = await countInFiles(dir, pattern, only ?? null, ext ?? '.rs')
   const m = readmeText.match(claim)
   if (!m) {
     // Not "no claim, no problem": the row was reworded and this check went

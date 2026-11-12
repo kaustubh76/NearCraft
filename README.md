@@ -30,7 +30,7 @@ column before the description.
 | **Sandbox integration tests** | **Built and passing.** A real local NEAR node via `near-workspaces`. 18 tests: 4 prove a restricted key's limits *at the protocol level*, 9 cover the cross-contract buy/sell/rollback paths, the economy, the money invariant and solvency, 3 the state migration (including bricking a contract with a plain redeploy and rescuing it), 1 that every view is callable *as a view*, and 1 that the node starts. These counts are checked by `npm run check:docs` against the tests that actually exist — they had rotted to 74 and 12. |
 | **Deployed to NEAR testnet** | **Yes.** `items.nearcraftmc.testnet`, `market.nearcraftmc.testnet`, `guard.nearcraftmc.testnet` — 5 merchants, 2 agents, 1 player. `npm run reads` and `npm run keys` query it with no credentials. |
 | The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls — **135 real transactions in 26.4s** on a real nearcore node — 5.1 trades a second, measured over three runs — buyers running concurrently. `npm run sim` |
-| `web/market.html` | **Built, and reads the live chain.** Every merchant's ask, bid, stock band and the contract's own reason string, read from the deployed contract over public RPC with no API key. Falls back to the retained simulation snapshot when offline, and says which it is showing. 8 tests. `npm run web` |
+| `web/market.html` | **Built, reads the live chain, and is playable.** Every merchant's ask, bid, stock band and the contract's own reason string, read from the deployed contract over public RPC with no API key. Falls back to the retained simulation snapshot when offline, and says which it is showing. With `npm run play` behind it the page also signs players in and trades: buy and sell on each row, and a strip showing your NEAR balance before and after every call. 13 tests. `npm run web` / `npm run play` |
 | **A real stake in a merchant on public testnet** | **Done.** [`CwWMeG5t…`](https://testnet.nearblocks.io/txns/CwWMeG5txLAobS7dozomcBqKBZturJ7iKiY21e3FDEUG) — 0.05 NEAR staked in the Ironmonger and recorded by the contract, then [`8s6e5vqw…`](https://testnet.nearblocks.io/txns/8s6e5vqwysZj8pMRubF8TkngzZ5erfr7EMdvUyr1pJYA), a gasless purchase whose margin repaid 0.005924 NEAR of it. `ledger_total` rose by exactly the stake and the purchase moved it by nothing. `npm run live:stake`, retained in `evidence/live/`. |
 | **A real agent transaction on public testnet** | **Done.** [`CJXc3vK8Yom…`](https://testnet.nearblocks.io/txns/CJXc3vK8YomMVAZn6j6R6FHKqtSF9t4Ev4Tbcq4eqnhZ) — an agent signing with a `buy_with_credit`-scoped key, after being parked for human approval. `npm run live:agent`, retained in `evidence/live/`. |
 | `npm run agent` — an agent shopping end to end | **Built and runnable.** An agent with a scoped key on a real node: an unknown merchant parked for a human, the same merchant clearing itself once trust accrued, and a prompt-injected objective **blocked** by the on-chain guard. |
@@ -60,7 +60,35 @@ npm run reads     # every merchant's ask, bid, stock band and the contract's own
 npm run keys      # every agent AND player key: receiver, method list, allowance, from the chain
 npm run verify:deployed   # the code on chain hashes to the wasm this repo builds
 npm run web       # the market page, reading those same contracts live in a browser
+npm run play      # the same page, playable: sign in and trade (needs .local/ keys)
 ```
+
+**`npm run play` is the whole loop in a browser.** Sign in with any string —
+the account id is derived from the login, so the same identity always lands on
+the same account — then buy and sell from the merchants, each beside the
+contract's own reason for its price. The panel shows your NEAR balance before
+and after every call, which is the gasless claim as a number on screen rather
+than a sentence here. It is **custodial**: the server holds the player's scoped
+key and submits for them, which is exactly what makes "no seed phrase" true,
+and the key it holds cannot transfer NEAR, cannot add another key, and can call
+only its named methods on one contract. `npm run web` serves the same page
+read-only with no credentials at all, and the play panel simply does not appear.
+
+Two honest limits on the live deployment, both of which the service names
+rather than failing obscurely:
+
+- It cannot onboard a **new** player. That needs the root account to fund an
+  account plus gas headroom, and the live root is below it, so sign-in answers
+  `ROOT_UNDERFUNDED` and names the faucet. Signing in as the existing player
+  works, and the full new-player path — create, approve while a bootstrap key
+  still exists, then install the scoped key and delete the bootstrap one in the
+  same transaction — runs against a real node in `tests/near/gasless.mjs`.
+- The demo player's **spend budget is finite**, and only the contract owner can
+  top it up, which needs that same root balance. When it runs out a buy comes
+  back `502 INNER_CALL_FAILED` carrying the contract's own words — *"insufficient
+  credit for this purchase"*. **Sell something first:** the player holds iron,
+  and selling pays credit back in. That is the economy working, not a bug, and
+  it is why the panel shows your credit beside your balance.
 
 **And the headline claim, measured on the public chain.** A player bought 2 iron
 and sold them back, holding one function-call key and no full-access key:
