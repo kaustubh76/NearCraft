@@ -59,6 +59,23 @@
   .err { background: var(--panel); border: 1px solid var(--warn); border-radius: 6px; padding: 16px; color: var(--warn) }
   code { font-family: var(--mono); font-size: 13px; background: var(--panel);
          border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px }
+
+  /* The play panel. Only rendered when an API is actually behind this page. */
+  .play { border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px;
+          margin: 0 0 18px; background: var(--panel) }
+  .play h2 { margin-top: 0 }
+  .play .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
+  .play input { font-family: var(--mono); font-size: 13px; padding: 6px 8px;
+                border: 1px solid var(--line); border-radius: 4px;
+                background: var(--bg); color: inherit; min-width: 210px }
+  button { font: inherit; font-size: 13px; padding: 5px 11px; cursor: pointer;
+           border: 1px solid var(--line); border-radius: 4px;
+           background: var(--bg); color: inherit }
+  button:hover:enabled { border-color: #888 }
+  button:disabled { opacity: .45; cursor: not-allowed }
+  .trade { display: flex; gap: 5px }
+  .note { font-size: 12px; color: var(--muted); margin: 7px 0 0 }
+  .zero { font-family: var(--mono); font-weight: 600 }
 </style>
 </head>
 <body>
@@ -68,6 +85,7 @@
     <p class="sub">Merchants are AI agents with their own NEAR accounts, their own stock and their own money. Every price below came from the contract, and so did every explanation.</p>
   </header>
   <div class="banner" id="banner">Loading…</div>
+  <div class="play" id="play" hidden></div>
   <main id="main"></main>
   <footer>
     Prices come from <code>contracts/market/src/pricing.rs</code> — one readable rule:
@@ -102,20 +120,139 @@ const stats = (pairs) => '<div class="stats">' + pairs.map(([n, k]) =>
 
 /// One material's quote table. Shared by the live and snapshot paths so the two
 /// render identically and neither can quietly present a nicer view than the other.
-function quoteTable(item, rows) {
+function quoteTable(item, rows, canTrade) {
+  // The trade column appears only when a signed-in session exists AND the row
+  // carries a merchant id — snapshot rows do not, so the offline view keeps
+  // rendering exactly as it always has.
+  const span = canTrade ? 7 : 6;
   let html = '<div class="material"><h3>' + esc(item) + '</h3><table><thead><tr>' +
     '<th>Merchant</th><th class="n">Ask</th><th class="n">Bid</th>' +
-    '<th class="n">Stock</th><th>Band</th><th class="n">Demand</th></tr></thead><tbody>';
+    '<th class="n">Stock</th><th>Band</th><th class="n">Demand</th>' +
+    (canTrade ? '<th>Trade</th>' : '') + '</tr></thead><tbody>';
   for (const q of rows) {
     html += '<tr><td>' + esc(q.merchantName) + '</td>' +
       '<td class="n">' + near(q.unitPrice) + '</td>' +
       '<td class="n">' + (q.bid ? near(q.bid) : '&mdash;') + '</td>' +
       '<td class="n">' + esc(q.stock) + '</td><td>' + esc(q.band) + '</td>' +
       '<td class="n">' + (q.demandBps == null ? '&mdash;' : (Number(q.demandBps) / 10000).toFixed(2) + '&times;') +
-      '</td></tr>' +
-      '<tr><td colspan="6" class="reason">' + esc(q.reason) + '</td></tr>';
+      '</td>' +
+      (canTrade
+        ? '<td><div class="trade">' +
+          '<button data-act="buy" data-m="' + esc(q.merchantId) + '" data-i="' + esc(item) + '">Buy 1</button>' +
+          // The contract decides whether a merchant is buying; the page must
+          // not offer a sell button that is going to fail.
+          '<button data-act="sell" data-m="' + esc(q.merchantId) + '" data-i="' + esc(item) + '"' +
+          (q.buying ? '' : ' disabled title="this merchant is not buying"') + '>Sell 1</button>' +
+          '</div></td>'
+        : '') +
+      '</tr>' +
+      '<tr><td colspan="' + span + '" class="reason">' + esc(q.reason) + '</td></tr>';
   }
   return html + '</tbody></table></div>';
+}
+
+// ------------------------------------------------------------------ play
+//
+// The panel below appears only when an API is actually behind this page
+// (`npm run play`). Under `npm run web` the probe fails and the page is exactly
+// what it has always been: read-only, credential-free, no buttons that lie.
+const PLAY = { health: null, sessionId: null, accountId: null, nearAtSignIn: null, refresh: null };
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: method === 'POST' ? JSON.stringify(body || {}) : undefined,
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const e = new Error(json.detail || json.error || ('HTTP ' + res.status));
+    e.code = json.error;
+    throw e;
+  }
+  return json;
+}
+
+function renderPlay(msg) {
+  const el = $('#play');
+  if (!el) return;
+  if (!PLAY.health) { el.hidden = true; return; }
+  el.hidden = false;
+
+  const login = PLAY.health.verifier === 'oidc'
+    ? 'Signed in through a real OIDC provider.'
+    : 'No OIDC provider is configured, so this demo accepts <strong>any string</strong> as a seeded identity. ' +
+      'The verifier itself is real and tested &mdash; point it at a provider with <code>OIDC_ISSUER</code>, ' +
+      '<code>OIDC_AUDIENCE</code> and <code>OIDC_JWKS_URI</code>.';
+
+  if (!PLAY.sessionId) {
+    el.innerHTML = '<h2>Play</h2>' +
+      '<div class="row">' +
+      '<input id="tok" value="player-1" aria-label="login token">' +
+      '<button id="signin">Sign in</button>' +
+      (msg ? '<span class="reason">' + esc(msg) + '</span>' : '') +
+      '</div>' +
+      '<p class="note">' + login + ' Your account id is derived from the login, so the same identity ' +
+      'always lands on the same account. You are never shown a key, because you never have one.</p>';
+    $('#signin').addEventListener('click', signIn);
+    return;
+  }
+
+  const me = PLAY.me || {};
+  const moved = (PLAY.nearAtSignIn != null && me.near != null)
+    ? (BigInt(me.near) - BigInt(PLAY.nearAtSignIn)) : null;
+  const held = Object.entries(me.holdings || {}).filter(([, v]) => v !== '0')
+    .map(([k, v]) => v + ' ' + k).join(', ') || 'nothing yet';
+
+  el.innerHTML = '<h2>Play</h2>' +
+    stats([
+      [near(me.credit || '0'), 'credit to spend'],
+      [near(me.near || '0'), 'your NEAR'],
+      [me.fullAccessKeys, 'full-access keys'],
+      [moved === null ? '—' : (moved < 0n ? '-' : '') + near(moved < 0n ? -moved : moved), 'NEAR you have spent on gas'],
+    ]) +
+    '<p class="note"><code>' + esc(PLAY.accountId) + '</code> &mdash; holding ' + esc(held) + '. ' +
+    'Your key may call <code>' + esc((me.permittedMethods || []).join(', ')) + '</code> on one contract and ' +
+    'nothing else; it cannot transfer NEAR and cannot add another key. That is the runtime enforcing it, ' +
+    'not this page. ' +
+    (moved === 0n ? '<span class="zero">Your NEAR balance has not moved at all &mdash; the relayer paid.</span>' : '') +
+    '</p>' +
+    (msg ? '<p class="note">' + esc(msg) + '</p>' : '');
+}
+
+async function signIn() {
+  const token = $('#tok').value.trim();
+  try {
+    const out = await api('POST', '/api/session', { token });
+    PLAY.sessionId = out.sessionId;
+    PLAY.accountId = out.accountId;
+    PLAY.me = await api('GET', '/api/me?sessionId=' + encodeURIComponent(out.sessionId));
+    PLAY.nearAtSignIn = PLAY.me.near;
+    renderPlay();
+    if (PLAY.refresh) await PLAY.refresh();
+  } catch (e) {
+    renderPlay('Could not sign in: ' + e.message);
+  }
+}
+
+async function trade(act, merchantId, item, button) {
+  const all = document.querySelectorAll('.trade button');
+  all.forEach((b) => { b.disabled = true; });
+  button.textContent = '…';
+  try {
+    const out = await api('POST', '/api/' + act, {
+      sessionId: PLAY.sessionId, merchantId: merchantId, item: item, count: 1,
+    });
+    PLAY.me = await api('GET', '/api/me?sessionId=' + encodeURIComponent(PLAY.sessionId));
+    // The delta is reported by the service, measured either side of the call on
+    // the chain. Printing it rather than claiming it is the whole point.
+    renderPlay(act + ' ok — ' + out.hash + ' — that call moved your balance by ' +
+      near(out.playerNearDelta.replace('-', '')) + ' NEAR.');
+    if (PLAY.refresh) await PLAY.refresh();
+  } catch (e) {
+    renderPlay('That ' + act + ' was refused: ' + (e.code ? e.code + ' — ' : '') + e.message);
+    all.forEach((b) => { b.disabled = false; });
+  }
 }
 
 // ------------------------------------------------------------------ live
@@ -158,11 +295,20 @@ async function renderLive(deployment, reader) {
       '</span></td></tr>').join('') + '</tbody></table>';
 
   html += '<h2>Quotes, cheapest first</h2>';
+  const canTrade = Boolean(PLAY.sessionId);
   for (const item of mats) {
     if (!quotesFor[item].length) continue;
-    html += quoteTable(item, quotesFor[item]);
+    html += quoteTable(item, quotesFor[item], canTrade);
   }
   $('#main').innerHTML = html;
+
+  // Delegated, so re-rendering the table does not leave stale listeners behind.
+  if (canTrade) {
+    $('#main').addEventListener('click', (ev) => {
+      const b = ev.target.closest('button[data-act]');
+      if (b) trade(b.dataset.act, b.dataset.m, b.dataset.i, b);
+    });
+  }
 }
 
 // -------------------------------------------------------------- snapshot
@@ -197,7 +343,7 @@ function renderSnapshot(d, why) {
         merchantName: q.merchant_name, unitPrice: q.unit_price, bid: q.merchant_bid ?? null,
         stock: q.stock, band: q.band, demandBps: q.demand_bps, reason: q.reason,
       }));
-    html += quoteTable(mat.item, rows);
+    html += quoteTable(mat.item, rows, false);
   }
 
   if ((d.strategies || []).length) {
@@ -214,6 +360,16 @@ function renderSnapshot(d, why) {
 // ------------------------------------------------------------------ boot
 
 (async () => {
+  // Is there an API behind this page? Under `npm run web` there is not, and
+  // that is a supported way to run it rather than a degraded one — so the probe
+  // failing must change nothing at all.
+  try {
+    PLAY.health = await api('GET', '/api/health');
+  } catch (e) {
+    PLAY.health = null;
+  }
+  renderPlay();
+
   let liveError = 'The live read failed.';
   try {
     const deployment = await fetch('../deployment.json').then((r) => {
@@ -221,11 +377,15 @@ function renderSnapshot(d, why) {
       return r.json();
     });
     const { createMarketReader } = await import('../backend/near/market.mjs');
-    await renderLive(deployment, createMarketReader({
+    const reader = createMarketReader({
       marketContract: deployment.contracts.market,
       itemsContract: deployment.contracts.items,
       rpcUrl: deployment.rpc,
-    }));
+    });
+    // Signing in and trading both re-read the chain, so the stock and prices a
+    // player sees after a trade are the contract's, not this page's guess.
+    PLAY.refresh = () => renderLive(deployment, reader);
+    await renderLive(deployment, reader);
     return;
   } catch (e) {
     liveError = 'The live read failed (' + e.message + ').';

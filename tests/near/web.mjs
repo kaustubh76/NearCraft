@@ -48,11 +48,19 @@ const QUOTES = {
 
 const encode = (value) => ({ result: { result: [...new TextEncoder().encode(JSON.stringify(value)) ] } })
 
-/// A DOM just large enough for this page: two elements with settable content.
+/// A DOM just large enough for this page: elements with settable content, an
+/// `hidden` flag for the play panel, and listener registration that records
+/// rather than dispatches — the page only needs to be able to call it.
 function shimDocument() {
-  const el = () => ({ innerHTML: '', set textContent(t) { this.innerHTML = t }, get textContent() { return this.innerHTML } })
-  const nodes = { '#banner': el(), '#main': el() }
-  return { querySelector: (s) => nodes[s], nodes }
+  const el = () => ({
+    innerHTML: '', hidden: false, listeners: [],
+    set textContent(t) { this.innerHTML = t },
+    get textContent() { return this.innerHTML },
+    addEventListener(type, fn) { this.listeners.push([type, fn]) },
+    value: '',
+  })
+  const nodes = { '#banner': el(), '#main': el(), '#play': el(), '#tok': el(), '#signin': el() }
+  return { querySelector: (s) => nodes[s], nodes, querySelectorAll: () => [] }
 }
 
 /// Run the page's own script with a given fetch, and wait for it to settle.
@@ -81,7 +89,11 @@ async function renderPage(fetchStub) {
     globalThis.fetch = realFetch
   }
   assert.ok(document.nodes['#main'].innerHTML, 'the page rendered nothing at all')
-  return { banner: document.nodes['#banner'].innerHTML, main: document.nodes['#main'].innerHTML }
+  return {
+    banner: document.nodes['#banner'].innerHTML,
+    main: document.nodes['#main'].innerHTML,
+    play: document.nodes['#play'],
+  }
 }
 
 /// A fetch that answers like a healthy deployment.
@@ -203,4 +215,54 @@ test('the static server cannot be talked out of the repository root', async () =
   }
   // The query string must not become part of the path.
   assert.equal(resolveFile(ROOT, '/deployment.json?v=2'), `${ROOT}deployment.json`)
+})
+
+// ---------------------------------------------------------- the play panel
+//
+// The page is served two ways on purpose: `npm run web` is read-only and needs
+// no credentials, `npm run play` mounts the API. The panel must appear in the
+// second case and change NOTHING in the first, because the read-only view is
+// what a judge runs from a clean clone.
+
+/// A fetch that also answers the API probe, as `npm run play` would.
+function playableFetch(health = { playable: true, verifier: 'seed', custodial: true }) {
+  const base = liveFetch()
+  return async (url, init) => {
+    if (String(url).includes('/api/health')) return { ok: true, json: async () => health }
+    return base(url, init)
+  }
+}
+
+test('with no API behind it the page is unchanged and the panel stays hidden', async () => {
+  const { play, main } = await renderPage(liveFetch())
+  assert.equal(play.hidden, true, 'the play panel must not appear without an API')
+  assert.ok(!main.includes('data-act="buy"'), 'no trade buttons without an API')
+  assert.ok(!main.includes('<th>Trade</th>'), 'no trade column without an API')
+})
+
+test('with an API behind it the panel offers a sign-in', async () => {
+  const { play } = await renderPage(playableFetch())
+  assert.equal(play.hidden, false)
+  assert.match(play.innerHTML, /Sign in/)
+})
+
+test('a seeded login is described as one, not dressed up as OIDC', async () => {
+  // Saying "signed in with Google" when any string is accepted would be the
+  // exact overclaim this project keeps removing from its own documents.
+  const { play } = await renderPage(playableFetch())
+  assert.match(play.innerHTML, /any string/i)
+  assert.match(play.innerHTML, /No OIDC provider is configured/i)
+})
+
+test('a real OIDC provider is described as one', async () => {
+  const { play } = await renderPage(playableFetch({ playable: true, verifier: 'oidc', custodial: true }))
+  assert.match(play.innerHTML, /real OIDC provider/i)
+  assert.ok(!/any string/i.test(play.innerHTML), 'must not call a real provider a seeded one')
+})
+
+test('trade buttons need a session, not merely an API', async () => {
+  // The panel is visible but nobody has signed in, so the quote table must not
+  // offer buttons that would be refused.
+  const { main } = await renderPage(playableFetch())
+  assert.ok(!main.includes('data-act="buy"'), 'buttons must wait for a session')
 })
