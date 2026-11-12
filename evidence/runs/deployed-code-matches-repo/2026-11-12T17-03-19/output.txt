@@ -1,0 +1,21 @@
+
+Is the deployed code the code in this repo?
+rpc https://test.rpc.fastnear.com
+
+  items    items.nearcraftmc.testnet        MATCH    9qJB1YKG99RWC4aSrFAe5ZtHi3yyrNJuv9wAymH14Neu
+                                                     built reproducibly from 4da447eb17c279c4ba4d1f3f07a9ec4e2561baac
+                                                     and its build inputs are unchanged since that commit
+  market   market.nearcraftmc.testnet       MATCH    ComurSizwvoRiSvivNECXEjvV8bswZH7eB9aV9VwCW4Q
+                                                     built reproducibly from 4da447eb17c279c4ba4d1f3f07a9ec4e2561baac
+                                                     and its build inputs are unchanged since that commit
+  guard    guard.nearcraftmc.testnet        MATCH    CgdXoW7cUMChaeLK1hioST8xHg8RwqDF4q1YzZi28Vtu
+                                                     built reproducibly from 4da447eb17c279c4ba4d1f3f07a9ec4e2561baac
+                                                     and its build inputs are unchanged since that commit
+
+all 3 deployed contract(s) hash to the wasm this repo builds, and their
+build inputs are unchanged since the commit each one names — verified with no credentials
+
+The chain says all of it was built from commit 4da447eb17c279c4ba4d1f3f07a9ec4e2561baac. To reproduce the
+bytes yourself — the commit matters, because a reproducible build embeds it:
+  git checkout 4da447eb17c279c4ba4d1f3f07a9ec4e2561baac && npm run build:reproducible && npm run verify:deployed
+

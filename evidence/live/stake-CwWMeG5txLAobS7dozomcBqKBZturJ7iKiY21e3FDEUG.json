@@ -1,0 +1,41 @@
+{
+  "note": "A real stake in a merchant on public NEAR testnet, recorded in the contract and repaid out of the margin on a real gasless purchase. The stake is signed with a full-access operator key because invest is payable; the scoped-key path is invest_with_credit, which the live player cannot call because its key predates that method and can never be changed.",
+  "recorded_at": "2026-11-12T17:00:22.294Z",
+  "network": "testnet",
+  "rpc": "https://test.rpc.fastnear.com",
+  "economy_scale": 0.01,
+  "investor": "worker-1.nearcraftmc.testnet",
+  "player": "p-1d6a3c5d.nearcraftmc.testnet",
+  "relayer": "relayer.nearcraftmc.testnet",
+  "market": "market.nearcraftmc.testnet",
+  "merchant": "ironmonger.nearcraftmc.testnet",
+  "item": "iron_ingot",
+  "count": 3,
+  "stake_yocto": "50000000000000000000000",
+  "shelf_had_recorded_basis": true,
+  "basis_before_yocto": "12903000000000000000000",
+  "transactions": {
+    "stake": {
+      "hash": "CwWMeG5txLAobS7dozomcBqKBZturJ7iKiY21e3FDEUG",
+      "explorer": "https://testnet.nearblocks.io/txns/CwWMeG5txLAobS7dozomcBqKBZturJ7iKiY21e3FDEUG"
+    },
+    "buy": {
+      "hash": "8s6e5vqwysZj8pMRubF8TkngzZ5erfr7EMdvUyr1pJYA",
+      "explorer": "https://testnet.nearblocks.io/txns/8s6e5vqwysZj8pMRubF8TkngzZ5erfr7EMdvUyr1pJYA"
+    }
+  },
+  "backer_before": null,
+  "backer_after": {
+    "account_id": "worker-1.nearcraftmc.testnet",
+    "principal": "50000000000000000000000",
+    "repaid": "5924396484375000000000"
+  },
+  "ledger_total_before_yocto": "899092800000000000000000",
+  "ledger_total_after_yocto": "949092800000000000000000",
+  "treasury_before_yocto": "265616000000000000000000",
+  "treasury_after_yocto": "321691603515625000000000",
+  "checks_failed": 0,
+  "stake_block_height": 277390939,
+  "invest_returned": "false — the merchant was not closed, so nothing reopened. The contract reports that rather than claiming success.",
+  "hash_recovery_note": "This run first recorded the stake hash as null: Account.callFunction returns the parsed return value, not the transaction outcome, so transactionHash() of it was null while every assertion still passed. The hash was recovered from the chain by walking back from the relayed buy block, and re-verified with an RPC tx query — signer, receiver, method, deposit and contract log all match. scripts/live-stake.mjs now uses callFunctionRaw and throws if a hash is ever missing again."
+}

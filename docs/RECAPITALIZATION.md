@@ -1,6 +1,12 @@
 # Reopening a closed merchant
 
-**Status: built, including the stake accounting this document deferred.**
+**Status: built, including the stake accounting this document deferred — and now
+run on public testnet.** A stake of 0.05 NEAR was recorded in the Ironmonger
+([`CwWMeG5t…`](https://testnet.nearblocks.io/txns/CwWMeG5txLAobS7dozomcBqKBZturJ7iKiY21e3FDEUG)),
+and the next gasless purchase repaid 0.005924 NEAR of it out of the merchant's
+margin ([`8s6e5vqw…`](https://testnet.nearblocks.io/txns/8s6e5vqwysZj8pMRubF8TkngzZ5erfr7EMdvUyr1pJYA)).
+`npm run live:stake` reproduces it. See "What the live run showed" at the end,
+which includes the one number that came out wrong and why.
 
 The three reasons for deferring it are answered under "Why it was deferred"
 below, with the two places the design was **superseded by something better**
@@ -173,4 +179,52 @@ demonstrates — and to say plainly that the other half is not there.
   deposit that lands in a treasury, and a payout is a credit. That is a reason
   to be glad the formula was corrected before the accounting was built on it.
 
-Until the first two exist, the stake design stays a design note.
+~~Until the first two exist, the stake design stays a design note.~~ **All
+three now exist**, so that sentence was retired rather than left to rot: the
+first is done, the second superseded by a stronger property, the third built.
+
+## What the live run showed
+
+`npm run live:stake` ran this on public testnet. `worker-1` staked 0.05 NEAR in
+the Ironmonger, then the live player made an ordinary gasless purchase from the
+same merchant.
+
+| | |
+|---|---|
+| stake | [`CwWMeG5t…`](https://testnet.nearblocks.io/txns/CwWMeG5txLAobS7dozomcBqKBZturJ7iKiY21e3FDEUG) — `invest`, 0.05 NEAR, returned `false` |
+| purchase | [`8s6e5vqw…`](https://testnet.nearblocks.io/txns/8s6e5vqwysZj8pMRubF8TkngzZ5erfr7EMdvUyr1pJYA) — 3 iron_ingot, relayed, player paid no gas |
+| `ledger_total` | 0.899092 → 0.949092 NEAR: **exactly** the stake, and unmoved by the purchase |
+| market balance | 3.383910 → 3.433910 NEAR: the same 0.05, so solvency held with 2.48 NEAR of headroom |
+| `backer_of` | principal 0.050000, repaid 0.005924, still owed 0.044075 |
+
+Three things that run is worth having done, beyond "it works":
+
+**`invest` returned `false`, and that is the right answer.** The Ironmonger was
+not closed, so nothing reopened. The contract reports what happened instead of
+reporting success — which is the behaviour this document asked for and the kind
+that only a live run with an open merchant would exercise.
+
+**The repayment lands as credit inside the market, not as NEAR in a wallet.**
+`worker-1`'s credit went from 0.05 to 0.055924. It is withdrawable through
+`withdraw`, which has its own rollback callback; it is not a transfer, so
+nothing about the ledger identity moves.
+
+**The margin was larger than the design intends, and the reason matters.** The
+player paid 0.012 NEAR; the recorded cost of goods was 0.000151; so the margin
+came out at 0.011848 and the backer took half. But `basis` only exists for units
+the market bought **after** the C2 migration, and `cost_of_goods` returns 0 for
+an unrecorded basis — so an *unknown* cost is indistinguishable from a *free*
+one. Thirteen of the fourteen live shelves have no basis at all; the one used
+here has a real but tiny one, covering only the handful of units the player had
+sold back into a shelf of 256. The weighted average is therefore dominated by
+stock whose cost was never written down.
+
+That is the documented consequence of recording starting at migration, now
+measured rather than predicted. It is bounded — a payout cannot exceed what is
+owed, nor the treasury above its floor, and the money invariant is unaffected
+because the payout moves treasury to credit inside the ledger. It is not a leak.
+It is an overstatement, and the honest figure for a merchant stocked entirely
+after C2 would be smaller. Collapsing "cost unknown" into "cost zero" is the
+approximation this document warned "quietly stops adding up"; it was not changed
+36 hours before a deadline, and `npm run live:stake` prints the cost it used so
+the number is never presented without it.

@@ -1,6 +1,6 @@
 {
   "note": "Written by npm run evidence. Each run keeps its own directory; failures are retained alongside passes and are never edited out.",
-  "recorded_at": "2026-11-12T11:30:25.650Z",
+  "recorded_at": "2026-11-12T17:03:19.817Z",
   "host": {
     "platform": "darwin",
     "arch": "arm64",
@@ -15,7 +15,7 @@
   "boundaries": [
     "Most of these run locally, against a nearcore sandbox. The two topics named live-testnet-* are real, credential-free reads of the deployed contracts on public NEAR testnet.",
     "Those live reads are VIEW calls only. No check in this script sends a transaction, so no record below is evidence of live write behaviour.",
-    "Live write behaviour is evidenced separately, by the retained records in evidence/live/ — each names real transaction hashes on public testnet that anyone can open on an explorer. Those come from npm run live:agent (an agent purchase under a scoped key, screened and human-approved) and npm run live:player (a player with NO full-access key buying and selling while its balance moves by exactly zero). Both are deliberately outside this script because they spend real testnet balance.",
+    "Live write behaviour is evidenced separately, by the retained records in evidence/live/ — each names real transaction hashes on public testnet that anyone can open on an explorer. Those come from npm run live:agent (an agent purchase under a scoped key, screened and human-approved), npm run live:player (a player with NO full-access key buying and selling while its balance moves by exactly zero), and npm run live:stake (a real stake in a merchant, recorded by the contract and repaid out of the margin on a real gasless purchase). Both are deliberately outside this script because they spend real testnet balance.",
     "The live deployment runs at a reduced economy scale (see economy_scale in deployment.json); its figures are not the full-size economy the sandbox runs.",
     "No Minecraft gameplay is recorded; the plugin is not exercised by any check here.",
     "A passing check establishes what its own output shows and nothing wider."
@@ -98,93 +98,105 @@
       "what": "worker-1.nearcraftmc.testnet bought 2x iron_ingot from ironmonger.nearcraftmc.testnet",
       "explorer": "https://testnet.nearblocks.io/txns/CJXc3vK8YomMVAZn6j6R6FHKqtSF9t4Ev4Tbcq4eqnhZ",
       "path": "evidence/live/purchase-CJXc3vK8YomMVAZn6j6R6FHKqtSF9t4Ev4Tbcq4eqnhZ.json"
+    },
+    {
+      "transactions": {
+        "stake": "CwWMeG5txLAobS7dozomcBqKBZturJ7iKiY21e3FDEUG",
+        "buy": "8s6e5vqwysZj8pMRubF8TkngzZ5erfr7EMdvUyr1pJYA"
+      },
+      "what": "p-1d6a3c5d.nearcraftmc.testnet bought and sold 3x iron_ingot holding undefined full-access keys, paying undefined yocto; relayer paid undefined yocto",
+      "explorer": [
+        "https://testnet.nearblocks.io/txns/CwWMeG5txLAobS7dozomcBqKBZturJ7iKiY21e3FDEUG",
+        "https://testnet.nearblocks.io/txns/8s6e5vqwysZj8pMRubF8TkngzZ5erfr7EMdvUyr1pJYA"
+      ],
+      "path": "evidence/live/stake-CwWMeG5txLAobS7dozomcBqKBZturJ7iKiY21e3FDEUG.json"
     }
   ],
   "runs": [
     {
       "topic": "unit-tests",
       "status": "pass",
-      "path": "evidence/runs/unit-tests/2026-11-12T11-30-25/"
+      "path": "evidence/runs/unit-tests/2026-11-12T17-03-19/"
     },
     {
       "topic": "policy-and-injection",
       "status": "pass",
-      "path": "evidence/runs/policy-and-injection/2026-11-12T11-30-25/"
+      "path": "evidence/runs/policy-and-injection/2026-11-12T17-03-19/"
     },
     {
       "topic": "live-testnet-reads",
       "status": "pass",
-      "path": "evidence/runs/live-testnet-reads/2026-11-12T11-30-25/"
+      "path": "evidence/runs/live-testnet-reads/2026-11-12T17-03-19/"
     },
     {
       "topic": "live-testnet-keys",
       "status": "pass",
-      "path": "evidence/runs/live-testnet-keys/2026-11-12T11-30-25/"
+      "path": "evidence/runs/live-testnet-keys/2026-11-12T17-03-19/"
     },
     {
       "topic": "deployed-code-matches-repo",
       "status": "pass",
-      "path": "evidence/runs/deployed-code-matches-repo/2026-11-12T11-30-25/"
+      "path": "evidence/runs/deployed-code-matches-repo/2026-11-12T17-03-19/"
     },
     {
       "topic": "agent-run",
       "status": "pass",
-      "path": "evidence/runs/agent-run/2026-11-12T11-30-25/"
+      "path": "evidence/runs/agent-run/2026-11-12T17-03-19/"
     },
     {
       "topic": "gasless-play",
       "status": "pass",
-      "path": "evidence/runs/gasless-play/2026-11-12T11-30-25/"
+      "path": "evidence/runs/gasless-play/2026-11-12T17-03-19/"
     },
     {
       "topic": "identity-verification",
       "status": "pass",
-      "path": "evidence/runs/identity-verification/2026-11-12T11-30-25/"
+      "path": "evidence/runs/identity-verification/2026-11-12T17-03-19/"
     },
     {
       "topic": "counterparty-and-approval",
       "status": "pass",
-      "path": "evidence/runs/counterparty-and-approval/2026-11-12T11-30-25/"
+      "path": "evidence/runs/counterparty-and-approval/2026-11-12T17-03-19/"
     },
     {
       "topic": "baseline-integrity",
       "status": "pass",
-      "path": "evidence/runs/baseline-integrity/2026-11-12T11-30-25/"
+      "path": "evidence/runs/baseline-integrity/2026-11-12T17-03-19/"
     },
     {
       "topic": "nep245-conformance",
       "status": "pass",
-      "path": "evidence/runs/nep245-conformance/2026-11-12T11-30-25/"
+      "path": "evidence/runs/nep245-conformance/2026-11-12T17-03-19/"
     },
     {
       "topic": "view-methods-callable",
       "status": "pass",
-      "path": "evidence/runs/view-methods-callable/2026-11-12T11-30-25/"
+      "path": "evidence/runs/view-methods-callable/2026-11-12T17-03-19/"
     },
     {
       "topic": "access-key-limits",
       "status": "pass",
-      "path": "evidence/runs/access-key-limits/2026-11-12T11-30-25/"
+      "path": "evidence/runs/access-key-limits/2026-11-12T17-03-19/"
     },
     {
       "topic": "money-invariant",
       "status": "pass",
-      "path": "evidence/runs/money-invariant/2026-11-12T11-30-25/"
+      "path": "evidence/runs/money-invariant/2026-11-12T17-03-19/"
     },
     {
       "topic": "solvency",
       "status": "pass",
-      "path": "evidence/runs/solvency/2026-11-12T11-30-25/"
+      "path": "evidence/runs/solvency/2026-11-12T17-03-19/"
     },
     {
       "topic": "state-migration",
       "status": "pass",
-      "path": "evidence/runs/state-migration/2026-11-12T11-30-25/"
+      "path": "evidence/runs/state-migration/2026-11-12T17-03-19/"
     },
     {
       "topic": "cross-contract-economy",
       "status": "pass",
-      "path": "evidence/runs/cross-contract-economy/2026-11-12T11-30-25/"
+      "path": "evidence/runs/cross-contract-economy/2026-11-12T17-03-19/"
     }
   ]
 }
