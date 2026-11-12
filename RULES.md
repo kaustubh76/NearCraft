@@ -121,18 +121,22 @@ server.
       |                      clearing price, fill list, non-revealers       |
 ```
 
-## The simulation
+## The simulation — designed here, never built
 
-`npm run sim` runs rounds with twenty buyers and five sellers on scripted
-strategies and **no model calls at all** — the strategies are a few lines of
-arithmetic each, so the mechanism is what is being tested, not a language
-model's taste. Strategies: `undercut` (shade below last clearing price),
-`hold` (quote cost plus a fixed margin), `starve` (refuse below a floor),
-`mimic` (copy last round's winner), `noise` (uniform random inside a band).
+**Nothing in this section runs.** It is retained as the design it was, because
+deleting it would hide that the round mechanism was scoped and then dropped.
 
-The run prints every round's commits, reveals, clearing price and fills, and
-ends with per-agent profit. It is the same artifact the `games` track's
-fast-forward mode uses, pointed at rounds instead of shelf prices.
+The intent was: `npm run sim` running rounds with twenty buyers and five sellers
+on scripted strategies and no model calls — `undercut` (shade below last
+clearing price), `hold` (quote cost plus a fixed margin), `starve` (refuse below
+a floor), `mimic` (copy last round's winner), `noise` (uniform random inside a
+band) — printing each round's commits, reveals, clearing price and fills.
+
+What `npm run sim` **actually** runs is
+`contracts/integration/tests/simulation.rs`: shelf-price trading against a real
+local nearcore node, with a different strategy set and no rounds, commits or
+reveals anywhere in it. There is no sealed-bid coordinator in
+`contracts/market/`, so the `swarms` track is not entered.
 
 ## Known limits
 

@@ -8,7 +8,7 @@
 // are mechanically checkable, so they get checked rather than re-read.
 //
 // Deliberately offline and dependency-free.
-import { readFile, access } from 'node:fs/promises'
+import { readFile, readdir, access } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = new URL('../', import.meta.url)
@@ -19,6 +19,18 @@ const DOCS = ['README.md', 'AGENTS.md', 'GAME_LOOP.md', 'RULES.md', 'BASELINE.md
 const failures = []
 const fail = (doc, what) => failures.push(`${doc}: ${what}`)
 const exists = async (rel) => access(new URL(rel, ROOT)).then(() => true, () => false)
+
+/// Is this mention of `path` a DENIAL that it exists, rather than a claim?
+///
+/// Mirrors the quotation escape hatch rule 5 uses. A document that says "there
+/// is no `plugin/` directory" is doing the right thing, and a path rule that
+/// punished it would push the honest wording out of the docs — which is the
+/// opposite of the point. Keep the window tight so a denial has to sit beside
+/// the mention, not merely somewhere in the file.
+const DENIAL = /there is no|does not exist|is not ported|was never|never built|no such|no part of it|not vendored|no Java in this repos/i
+function deniesExistence(text, index) {
+  return DENIAL.test(text.slice(Math.max(0, index - 300), index + 300))
+}
 
 /// Resolve a link the way a reader's browser would: relative to the document it
 /// appears in, not to the repository root. Getting this wrong made this very
@@ -52,12 +64,47 @@ for (const doc of DOCS) {
   }
 
   // 3. Every backticked path that looks like a repository file must exist.
-  for (const m of text.matchAll(/`((?:contracts|backend|scripts|tests|web|config|evidence|docs)\/[A-Za-z0-9._/-]+)`/g)) {
+  //
+  // This used to whitelist eight directory names, and that whitelist was the
+  // entire reason a dangling `sim/fastforward.mjs` claim survived every run:
+  // `sim/` was simply not in the list, so the rule never looked. Any
+  // slash-containing backticked token is now a candidate. Measured against
+  // these docs when the whitelist was dropped: one real failure, zero false
+  // positives.
+  for (const m of text.matchAll(/`([A-Za-z0-9_.-]+\/[A-Za-z0-9._/-]+)`/g)) {
     const path = m[1].replace(/[.,]$/, '')
     // Globs and directories-with-wildcards are descriptive, not paths.
     if (path.includes('*')) continue
     linksChecked++
-    if (!(await exists(path))) fail(doc, `names \`${path}\`, which does not exist`)
+    if (!(await exists(path)) && !deniesExistence(text, m.index)) {
+      fail(doc, `names \`${path}\`, which does not exist`)
+    }
+  }
+
+  // 6. A directory the docs describe must exist AND contain something.
+  //
+  // Rules 2 and 3 only ever asked "does this path exist". Two directories,
+  // `sim/` and `plugin/`, existed and were empty while the README's
+  // architecture block described their contents — a claim about work that was
+  // not there, which is the exact failure this whole script exists to prevent.
+  //
+  // Two shapes are matched, because the architecture block is a fenced code
+  // block and no backtick rule can see inside it: a backticked token ending in
+  // `/`, and a line that starts with `dir/` followed by two or more spaces and
+  // a description.
+  for (const m of [
+    ...text.matchAll(/`([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9._-]+)*\/)`/g),
+    ...text.matchAll(/^([a-z][A-Za-z0-9_.-]*\/)\s{2,}\S/gm),
+  ]) {
+    const dir = m[1]
+    linksChecked++
+    if (deniesExistence(text, m.index)) continue
+    if (!(await exists(dir))) { fail(doc, `describes the directory ${dir}, which does not exist`); continue }
+    try {
+      if ((await readdir(new URL(dir, ROOT))).length === 0) {
+        fail(doc, `describes the contents of ${dir}, which is empty`)
+      }
+    } catch { /* not a directory; rules 2 and 3 already cover files */ }
   }
 }
 
@@ -80,6 +127,19 @@ const RETIRED_CLAIMS = [
     why: 'npm run sim runs against a local sandbox, not the deployment' },
   { pattern: /simulation snapshot, not live chain data[\s\S]{0,200}Nothing is deployed/i,
     why: 'the contracts are deployed and the page reads them live' },
+  // Retired by the claims audit. Each of these was in the docs and false.
+  { pattern: /the diff is the new part/i,
+    why: 'no Java is vendored here, so there is no plugin diff to point at' },
+  { pattern: /and the sealed-bid round coordinator/i,
+    why: 'the coordinator was never built and the swarms track is not entered' },
+  { pattern: /read-only live market and round page/i,
+    why: 'web/market.html has no round UI' },
+  { pattern: /Approval Management extension, which did not fit/i,
+    why: 'Approval Management is implemented and is what the player sell path uses' },
+  { pattern: /which is why a scoped key cannot sell/i,
+    why: 'a scoped key sells through the non-payable market.sell under an approval' },
+  { pattern: /61 Rust unit tests/i,
+    why: 'there are 90, across three contracts' },
 ]
 for (const doc of [...DOCS, 'web/market.html']) {
   if (!(await exists(doc))) continue
@@ -90,7 +150,7 @@ for (const doc of [...DOCS, 'web/market.html']) {
     // own correction.
     if (!pattern.test(text)) continue
     const near = text.slice(Math.max(0, text.search(pattern) - 400), text.search(pattern) + 600)
-    if (/not true|was false|corrections|declined|rather than quietly/i.test(near)) continue
+    if (/not true|was false|was wrong|corrections?|declined|rather than quietly|an earlier version|there was no such|no such file|never written|never built/i.test(near)) continue
     fail(doc, `makes a claim we retired: ${why}`)
   }
 }

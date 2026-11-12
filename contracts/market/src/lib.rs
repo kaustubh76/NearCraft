@@ -10,8 +10,11 @@
 //! sit against this contract's account in the items contract. Each merchant's
 //! *earnings* are attributed to its own account and withdrawable only by it.
 //! So merchants have their own accounts and their own treasuries, but they do
-//! not independently hold their stock on-chain — that would need the NEP-245
-//! Approval Management extension, which did not fit the hackathon window.
+//! not independently hold their stock on-chain. That is a deliberate custody
+//! split, not a missing feature: NEP-245 Approval Management **is** implemented
+//! in `contracts/items` and is what the player sell path uses, but moving every
+//! merchant's shelf into its own account is a larger change than the window
+//! allowed and nothing needs it.
 //!
 //! Money is plain NEAR. Proceeds are credited as a withdrawable balance rather
 //! than pushed, because a failed push would cost someone their goods.

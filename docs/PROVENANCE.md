@@ -13,10 +13,11 @@ These are recorded in EthCraft's own documentation as its public locations:
 - Hosted read-only demo of that component —
   `https://ethcraft-arkiv.quiet-buddy-9104.chatgpt.site`
 
-**Before submitting, open each of these and confirm it resolves publicly.** They
-are taken from the prior project's documentation rather than verified here, and
-a provenance link a judge cannot open is worse than no link at all. If one is
-private or dead, say so in this file instead of leaving it listed.
+**Checked on 12 November 2026: all three resolve publicly (HTTP 200).** They
+are recorded in the prior project's own documentation, and this is a check that
+they are reachable, not an audit of what they contain. A provenance link a judge
+cannot open is worse than no link at all, so if one later goes private or dead,
+say so here instead of leaving it listed.
 
 ## Prior chain deployment, for context only
 

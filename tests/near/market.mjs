@@ -68,7 +68,7 @@ test('a sale routes through the items contract, not the market', () => {
     receiver_id: MARKET,
     token_id: 'iron_ingot',
     amount: '12',          // NEP-245 amounts are strings
-    approval: null,        // Approval Management is not implemented; must be null
+    approval: null,        // the push path carries no approval; market.sell uses one
     memo: null,
     msg: MERCHANT,         // the market reads this to know who is buying
   })

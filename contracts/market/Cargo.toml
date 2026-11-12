@@ -1,6 +1,6 @@
 [package]
 name = "nearcraft-market"
-description = "NearCraft merchants: stock-and-demand pricing, treasuries, settlement, bulk rounds."
+description = "NearCraft merchants: stock-and-demand pricing, treasuries, buy/sell settlement."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

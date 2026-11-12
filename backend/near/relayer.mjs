@@ -14,9 +14,11 @@
 //   * **The inner action cannot carry a deposit.** nearcore answers "Deposit is
 //     not allowed with function call". The function-call key's no-deposit rule
 //     applies to the delegate's inner action too, which is why players buy from
-//     a credit balance rather than by attaching NEAR — and why selling is
-//     blocked, since NEP-245 mandates 1 yoctoNEAR on `mt_transfer_call`. See
-//     docs/GASLESS.md.
+//     a credit balance rather than by attaching NEAR. It is also why selling
+//     cannot go through `mt_transfer_call`, which NEP-245 requires 1 yoctoNEAR
+//     for: a player sells through `market.sell` instead, which is non-payable
+//     and pulls the materials under a NEP-245 approval, attaching that yocto
+//     from the market's own balance. Selling works. See docs/GASLESS.md.
 //
 // An API seam worth knowing: `createSignedMetaTransaction` resolves to
 // `{delegateHash, signedDelegate}`, while `relayMetaTransaction` wants the bare

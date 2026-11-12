@@ -22,11 +22,11 @@ column before the description.
 | `GAME_LOOP.md` — the game loop on paper | **Done.** Required by the `games` prompt before any code. |
 | `RULES.md` — round rules + sequence diagram | **Done.** Required by the `swarms` prompt before any code. |
 | `BASELINE.md` + hash-verified baseline import | **Done, machine-checked.** `npm run verify:baseline` |
-| `contracts/items` — NEP-245 materials | **Built and tested.** 19 unit tests. NEP-245 core 10/10 + Enumeration 2/2, verified against the compiled ABI. 204.7 KB wasm. |
-| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 42 unit tests. |
+| `contracts/items` — NEP-245 materials | **Built and tested.** 29 unit tests. NEP-245 core 10/10 + Enumeration 2/2, verified against the compiled ABI. 204.7 KB wasm. |
+| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 48 unit tests (including the pricing rule). |
 | `contracts/guard` — the shared blocklist, on-chain | **Built and tested.** 13 unit tests. Public, attributed by the runtime, not deletable by us. |
-| `backend/near/counterparty.mjs` — allow/warn/block | **Built and tested.** 17 tests. Pure scoring, no API key, no indexer. |
-| `backend/near` — signer, policy, warn→human approval | **Built and tested.** 53 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
+| `backend/near/counterparty.mjs` — allow/warn/block | **Built and tested.** 23 tests. Pure scoring, no API key, no indexer. |
+| `backend/near` — signer, policy, warn→human approval | **Built and tested.** 59 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
 | **Sandbox integration tests** | **Built and passing.** A real local NEAR node via `near-workspaces`. 12 tests: 4 prove a restricted key's limits *at the protocol level*, 6 cover the cross-contract buy/sell/rollback paths, 1 runs the economy, 1 proves the node starts. |
 | **Deployed to NEAR testnet** | **Yes.** `items.nearcraftmc.testnet`, `market.nearcraftmc.testnet`, `guard.nearcraftmc.testnet` — 5 merchants, 2 agents, 1 player. `npm run reads` and `npm run keys` query it with no credentials. |
 | The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls — **135 real transactions in 23.7s** on a real nearcore node, buyers running concurrently. `npm run sim` |
@@ -145,7 +145,7 @@ Those files were reusable across a chain change for one structural reason: the
 agent loop contains no chain code at all and reaches settlement through exactly
 one HTTP call. That call is the thing being rewritten.
 
-**Window work — judged.** Everything in `contracts/`, `backend/near/`, `sim/`,
+**Window work — judged.** Everything in `contracts/`, `backend/near/`,
 `web/`, `tests/near/`, plus `GAME_LOOP.md`, `RULES.md`, `BASELINE.md` and this
 file. Per hackathon rule Q-002, only this is judged; per Q-005, the baseline is
 disclosed rather than hidden.
@@ -189,8 +189,8 @@ Needs Rust and Node 22+, nothing else — not even the wasm target, because
 near-sdk unit tests build for the host. All three checks pass right now:
 
 ```sh
-npm run test:contracts    # 61 Rust unit tests across both contracts
-npm run test:near         # 15 policy + prompt-injection tests
+npm run test:contracts    # 90 Rust unit tests across all three contracts
+npm run test:near         # 82 offline tests: policy, injection, counterparty, market, web
 npm run verify:baseline   # 11 vendored files, SHA-256 unchanged
 ```
 
@@ -469,17 +469,23 @@ precisely so a third ticket could not eat the primary track's remaining time.
 ```
 NEAR testnet
 ├── items.nearcraftmc.testnet      NEP-245: every material is one token id in one contract
-├── market.nearcraftmc.testnet     merchant inventories, pricing, treasuries, round coordinator
+├── market.nearcraftmc.testnet     merchant inventories, pricing, treasuries, buy/sell settlement
+├── guard.nearcraftmc.testnet      the public blocklist other agents report to, with evidence
 ├── ironmonger.nearcraftmc.testnet merchant agents — one named account each
-└── worker-1.nearcraftmc.testnet   player-hired agents — holds a function-call key, nothing more
+├── worker-1.nearcraftmc.testnet   player-hired agents — holds a function-call key, nothing more
+└── player-1.nearcraftmc.testnet   a player — one scoped key, no full-access key at all
 
 backend/
 ├── baseline/   vendored unchanged: agent loop, tool registry + validator, model router, spend ledgers
 └── near/       new: function-call-key signer, policy refusal, market/items wrappers, relayer
 
-sim/            scripted economy, no model calls — the reproducibility backbone
-plugin/         Paper plugin: in-game menus and item delivery, settlement swapped to NEAR
+contracts/integration/tests/
+                a real local nearcore node: access-key limits, the cross-contract
+                economy, and the scripted no-model-calls simulation
 ```
+
+There is no `plugin/` directory. The Minecraft settlement path is not ported —
+see the note above for why, and for what that costs the `games` track.
 
 The root account is `nearcraftmc.testnet` rather than `nearcraft.testnet`
 because the latter is already registered by a third party.

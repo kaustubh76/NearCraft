@@ -15,7 +15,7 @@ this hackathon: the prior repository contains **zero** NEAR code — no
 `near-sdk`, no `near-api-js`, no `.near` account, no Rust at all. Verified by
 grep across every `.md`, `.json`, `.ts`, `.js`, `.java` and `.py` file in it.
 
-Everything in `contracts/`, `backend/near/`, `sim/`, `web/` and `tests/near/`
+Everything in `contracts/`, `backend/near/`, `web/` and `tests/near/`
 is new. Everything in `backend/baseline/` is not.
 
 ## Vendored unchanged — baseline, not judged
@@ -48,24 +48,31 @@ loop with durable job state and crash-safe effect fencing; a sixteen-tool
 registry with a strict receiving validator; a seven-rule model router with
 context compaction; two reserve-then-reconcile spend ledgers.
 
-The Minecraft plugin in `plugin/` is also derived from EthCraft's Paper plugin —
-the menu and item-delivery code is prior work, and only the settlement calls
-inside it are new. It is listed separately here because it is a partial port
-rather than a byte-identical copy, and the diff is the new part.
+**EthCraft's Paper plugin is not vendored here, and no part of it was ported.**
+An earlier version of this file described it as "a partial port rather than a
+byte-identical copy, and the diff is the new part" — there was no such diff,
+because there is no Java in this repository at all. The in-game menus and item
+delivery remain prior work sitting in the EthCraft repo; repointing their
+settlement calls at NEAR is unbuilt, and `README.md` states what that costs.
 
 ## Written in the window — the judged work
 
 - `contracts/items/` — NEP-245 multi-token for materials. New.
 - `contracts/market/` — merchant registry, stock-and-demand pricing, treasuries,
-  closed-when-broke, and the sealed-bid round coordinator. New.
+  closed-when-broke. New. (No sealed-bid round coordinator: it was designed in
+  `RULES.md` and never built, so the `swarms` track is not entered.)
 - `backend/near/` — the function-call-key signer and the policy layer that
   refuses an out-of-policy call before signing; market and items wrappers; the
   counterparty allow/warn/block check; the NEP-366 relayer. New. This replaces
   EthCraft's `agent-shop.mjs`, which was the single HTTP endpoint the agent loop
   used to reach money.
-- `sim/fastforward.mjs` — scripted, no model calls, twenty buyers and five
-  sellers against the deployed testnet contracts. New.
-- `web/market.html` — read-only live market and round page. New.
+- `contracts/integration/tests/simulation.rs` — the scripted economy: twenty
+  buyers, five merchants, no model calls, against a real local nearcore node.
+  New. (An earlier version of this file promised this as `sim/fastforward.mjs`
+  "against the deployed testnet contracts". It is Rust, it runs against a
+  sandbox, and there is no `sim/` directory.)
+- `web/market.html` — read-only market page, reading the deployed contracts live
+  over public RPC with a retained sandbox snapshot as its offline fallback. New.
 - `tests/near/` — policy refusal, prompt-injection refusal, pricing. New.
 - `GAME_LOOP.md`, `RULES.md`, this file, `README.md`. New.
 

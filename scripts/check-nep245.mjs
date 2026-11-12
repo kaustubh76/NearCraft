@@ -30,8 +30,19 @@ const NEP245_APPROVAL = [
 ]
 
 /// Modifiers that are load-bearing rather than cosmetic.
-const REQUIRED_MODIFIERS = {
-  items: {
+///
+/// A list of pairs rather than an object literal, and that is the whole point.
+/// This was written as an object and the key `market` was declared **twice** —
+/// in a JS object literal the second declaration wins silently, so
+/// `on_materials_pulled: ['private']` and `sell: []` were dropped and never
+/// checked. `sell: []` is the assertion that keeps the player sell path
+/// non-payable, which is the only reason a scoped key can sell at all; the
+/// check reported "modifiers correct" for weeks without ever looking at it.
+///
+/// A list makes a duplicate detectable, and the guard below refuses to run with
+/// one rather than quietly dropping half the rules.
+const MODIFIER_RULES = [
+  ['items', {
     // The spec requires exactly 1 yoctoNEAR on every transfer.
     mt_transfer: ['payable'], mt_batch_transfer: ['payable'],
     mt_transfer_call: ['payable'], mt_batch_transfer_call: ['payable'],
@@ -39,23 +50,31 @@ const REQUIRED_MODIFIERS = {
     mt_resolve_transfer: ['private'],
     // Approvals cost storage, and revocation must prove intent.
     mt_approve: ['payable'], mt_revoke: ['payable'], mt_revoke_all: ['payable'],
-  },
-  market: {
+  }],
+  ['market', {
+    // A rollback callable by anyone would let a caller unwind someone's
+    // purchase; the same for the sale-side unwind.
     on_items_delivered: ['private'],
     on_materials_pulled: ['private'],
-    // THE one that matters: a function-call key cannot attach NEAR, so both
-    // the agent purchase path and the player sell path must stay non-payable.
+    // THE one that matters: a function-call access key cannot attach NEAR, so
+    // both the agent purchase path and the player sell path must stay
+    // non-payable. If either becomes payable, agents silently stop being able
+    // to shop and a key-less player silently stops being able to sell.
     buy_with_credit: [],
     sell: [],
-  },
-  market: {
-    // A rollback callable by anyone would let a caller unwind someone's purchase.
-    on_items_delivered: ['private'],
-    // THE one that matters for the agent design: a function-call access key
-    // cannot attach NEAR, so the agent's purchase path must NOT be payable.
-    // If this ever becomes payable, agents silently stop being able to shop.
-    buy_with_credit: [],
-  },
+  }],
+]
+
+const REQUIRED_MODIFIERS = new Map()
+for (const [contract, expectations] of MODIFIER_RULES) {
+  if (REQUIRED_MODIFIERS.has(contract)) {
+    throw new Error(
+      `check-nep245: "${contract}" is declared twice in MODIFIER_RULES. Merge the ` +
+      'blocks — otherwise one of them is silently dropped and the rules in it are ' +
+      'never checked, which is exactly how sell: [] went unenforced.'
+    )
+  }
+  REQUIRED_MODIFIERS.set(contract, expectations)
 }
 
 const problems = []
@@ -99,7 +118,7 @@ if (unexpected.length) {
 
 // -------------------------------------------------------------- modifiers
 
-for (const [contract, expectations] of Object.entries(REQUIRED_MODIFIERS)) {
+for (const [contract, expectations] of REQUIRED_MODIFIERS) {
   const have = fns(contract)
   for (const [method, required] of Object.entries(expectations)) {
     const f = have.get(method)

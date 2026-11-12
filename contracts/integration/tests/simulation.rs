@@ -14,9 +14,14 @@
 //! It does **not** advance a week of block height. `worker.fast_forward()` in the
 //! sandbox produces blocks rather than jumping, and a week is 604,800 of them —
 //! measured as far too slow to be part of a test. Demand decay, the one
-//! time-dependent mechanic, is therefore demonstrated separately in `decay.rs`
-//! with a block delta small enough to actually run. Saying "a week of wall-clock
-//! time" would be a claim this does not support.
+//! time-dependent mechanic, is exercised by the unit tests in
+//! `contracts/market/src/pricing.rs`, which drive `decay_demand` with a
+//! synthetic `elapsed_ns` — so the arithmetic is proved but **not** against
+//! real sandbox block time. Saying "a week of wall-clock time" would be a claim
+//! this does not support.
+//!
+//! (An earlier version of this comment pointed at a `decay.rs` in this
+//! directory. No such file was ever written.)
 
 mod common;
 

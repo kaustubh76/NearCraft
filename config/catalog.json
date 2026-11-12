@@ -1,5 +1,5 @@
 {
-  "note": "The genesis state of the NearCraft economy. Deploy reads this; the simulation and the plugin read the deployed contracts, never this file.",
+  "note": "The genesis state of the NearCraft economy. Deploy reads this. Nothing else does: the web page reads the deployed contracts over RPC, and the simulation builds its own sandbox economy rather than reading either. There is no Minecraft plugin in this repository.",
   "merchants": [
     {
       "prefix": "ironmonger",

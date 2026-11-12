@@ -1,6 +1,6 @@
 {
   "note": "Written by npm run evidence. Each run keeps its own directory; failures are retained alongside passes and are never edited out.",
-  "recorded_at": "2026-11-11T17:31:49.185Z",
+  "recorded_at": "2026-11-12T04:59:08.222Z",
   "host": {
     "platform": "darwin",
     "arch": "arm64",
@@ -32,57 +32,57 @@
     {
       "topic": "unit-tests",
       "status": "pass",
-      "path": "evidence/runs/unit-tests/2026-11-11T17-31-49/"
+      "path": "evidence/runs/unit-tests/2026-11-12T04-59-08/"
     },
     {
       "topic": "policy-and-injection",
       "status": "pass",
-      "path": "evidence/runs/policy-and-injection/2026-11-11T17-31-49/"
+      "path": "evidence/runs/policy-and-injection/2026-11-12T04-59-08/"
     },
     {
       "topic": "live-testnet-reads",
       "status": "pass",
-      "path": "evidence/runs/live-testnet-reads/2026-11-11T17-31-49/"
+      "path": "evidence/runs/live-testnet-reads/2026-11-12T04-59-08/"
     },
     {
       "topic": "live-testnet-keys",
       "status": "pass",
-      "path": "evidence/runs/live-testnet-keys/2026-11-11T17-31-49/"
+      "path": "evidence/runs/live-testnet-keys/2026-11-12T04-59-08/"
     },
     {
       "topic": "agent-run",
       "status": "pass",
-      "path": "evidence/runs/agent-run/2026-11-11T17-31-49/"
+      "path": "evidence/runs/agent-run/2026-11-12T04-59-08/"
     },
     {
       "topic": "gasless-play",
       "status": "pass",
-      "path": "evidence/runs/gasless-play/2026-11-11T17-31-49/"
+      "path": "evidence/runs/gasless-play/2026-11-12T04-59-08/"
     },
     {
       "topic": "counterparty-and-approval",
       "status": "pass",
-      "path": "evidence/runs/counterparty-and-approval/2026-11-11T17-31-49/"
+      "path": "evidence/runs/counterparty-and-approval/2026-11-12T04-59-08/"
     },
     {
       "topic": "baseline-integrity",
       "status": "pass",
-      "path": "evidence/runs/baseline-integrity/2026-11-11T17-31-49/"
+      "path": "evidence/runs/baseline-integrity/2026-11-12T04-59-08/"
     },
     {
       "topic": "nep245-conformance",
       "status": "pass",
-      "path": "evidence/runs/nep245-conformance/2026-11-11T17-31-49/"
+      "path": "evidence/runs/nep245-conformance/2026-11-12T04-59-08/"
     },
     {
       "topic": "access-key-limits",
       "status": "pass",
-      "path": "evidence/runs/access-key-limits/2026-11-11T17-31-49/"
+      "path": "evidence/runs/access-key-limits/2026-11-12T04-59-08/"
     },
     {
       "topic": "cross-contract-economy",
       "status": "pass",
-      "path": "evidence/runs/cross-contract-economy/2026-11-11T17-31-49/"
+      "path": "evidence/runs/cross-contract-economy/2026-11-12T04-59-08/"
     }
   ]
 }
