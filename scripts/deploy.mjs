@@ -288,7 +288,20 @@ log('\nmerchants')
 const registered = new Map((await p.callFunction({ contractId: n.market, method: 'merchants', args: {} }).catch(() => [])).map(([id, m]) => [id, m]))
 for (const merchant of cat.merchants) {
   const id = n.sub(merchant.prefix)
-  await ensureAccount(id, toYocto('0.05'))
+  // 0.3 NEAR of gas headroom, not 0.05 — the same three-pots trap that stopped
+  // a freshly deployed agent transacting at all, hit again here. A merchant's
+  // *treasury* lives in the market contract, but `withdraw_treasury` is a call
+  // the merchant signs for itself, and one 60 TGas call needs ~0.061 NEAR of
+  // prepaid-gas headroom from its own ACCOUNT balance. At 0.05 no merchant on
+  // the live deployment could withdraw its own money. Found by trying it.
+  //
+  // 0.1 rather than the agents' 0.3: prepaid gas is RESERVED and then refunded,
+  // so this is a standing headroom requirement rather than a spend, and one
+  // call's worth is enough for any number of calls. Agents get more because
+  // they transact in bursts. Frugal on purpose — the root faucet account is
+  // finite and topping five merchants up at 0.3 exhausted it.
+  await ensureAccount(id, toYocto('0.1'))
+  await topUpBalance(id, toYocto('0.1'))
   if (registered.has(id)) { log(`  known    ${id}`); continue }
   await call(rootAccountId(), n.market, 'register_merchant', {
     merchant_id: id, name: merchant.name, floor: econ(merchant.floor_near).toString(),

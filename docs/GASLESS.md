@@ -176,3 +176,19 @@ it falls out of relaying — but it is worth stating, because the hazard is real
 for anything that signs for itself.
 
 `npm run keys` reports remaining headroom in calls and fails below fifty.
+
+## A player's key is immutable for life, and that cuts both ways
+
+Onboarding installs the scoped key and deletes the bootstrap full-access key in
+the same transaction, so a player account has no key that could add another one.
+That is the property that makes "no seed phrase" true, and it also means **no
+method can ever be added to an existing player's key.**
+
+It has already bitten once, mildly. `invest_with_credit` was added after
+`p-1d6a3c5d.nearcraftmc.testnet` was onboarded, so that player's key carries
+`[buy_with_credit, sell]` and cannot call it. Players onboarded from now on get
+all three, because `config/catalog.json` lists them — but the existing one keeps
+what it was issued, permanently, and there is no re-keying it.
+
+So the method list in the catalog is not a configuration detail. It is a
+decision taken once per player, for good, at the moment of onboarding.

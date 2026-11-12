@@ -66,6 +66,10 @@ const MODIFIER_RULES = [
     // to shop and a key-less player silently stops being able to sell.
     buy_with_credit: [],
     sell: [],
+    // Same reason: a scoped key cannot attach NEAR, so the credit paths must
+    // never become payable or they stop being reachable by a player.
+    invest_with_credit: [],
+    restock: [],
   }],
 ]
 

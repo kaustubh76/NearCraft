@@ -67,8 +67,10 @@ the first:
 - **A merchant you drained is closed.** If you sold a merchant so much iron
   that its treasury hit the floor, it is shut when you come back, with a sign
   saying so. The market remembers you. (Reopening a closed merchant — players
-  funding it for a share of its margin — is designed in `docs/RECAPITALIZATION.md`
-  and is explicitly *not* built in the hackathon window. See the README.)
+  funding it is built — `market.invest`, and `invest_with_credit` so a scoped
+  key can do it too. What a funder gets back is the shop reopening, not a
+  dividend; a *share of the margin* is the richer design in
+  `docs/RECAPITALIZATION.md` and is still not built.)
 - **Your worker's allowance ran down.** Agents are not free and not unbounded.
   You decide whether to top one up. This is a budget decision, which is the
   point: an agent with a wallet is only interesting if the wallet has limits.

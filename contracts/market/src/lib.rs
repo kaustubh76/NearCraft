@@ -193,8 +193,86 @@ impl Market {
     #[payable]
     pub fn fund_merchant(&mut self, merchant_id: AccountId) {
         self.assert_owner();
+        self.add_to_treasury(merchant_id, env::attached_deposit().as_yoctonear());
+    }
+
+    /// Put money into a merchant so it can trade again. Anyone may call this.
+    ///
+    /// The `games` prompt's own description of the economy ends: "If a merchant
+    /// goes broke, it closes its shop **until someone invests in it**." This is
+    /// that sentence. A merchant goes broke by buying more from players than it
+    /// sells — its treasury falls to its floor and it stops posting bids — and
+    /// anyone can reopen it by funding it.
+    ///
+    /// **What the investor gets back is the shop, not a dividend**, and that is
+    /// a real incentive rather than altruism: a closed merchant will not buy
+    /// from you. If the only merchant that deals in iron is broke, the player
+    /// with iron to sell is exactly the person who wants it funded. The
+    /// mechanic works because the interest is self-interest.
+    ///
+    /// A richer version — a tracked stake repaid out of the merchant's future
+    /// margin — is designed in `docs/RECAPITALIZATION.md` and **is not built**.
+    /// It needs per-stakeholder accounting and a cost basis per shelf, which is
+    /// new contract state; this needs none, which is why it exists today. The
+    /// note says which is which.
+    ///
+    /// Deliberately not restricted to closed merchants. A merchant one yocto
+    /// above its floor is broke in every practical sense, and refusing money to
+    /// it on a technicality would be a worse rule than accepting it.
+    #[payable]
+    pub fn invest(&mut self, merchant_id: AccountId) -> bool {
+        let amount = env::attached_deposit().as_yoctonear();
+        require!(amount > 0, "attach something to invest");
+        let was_closed = self.is_closed(merchant_id.clone());
+        self.add_to_treasury(merchant_id.clone(), amount);
+        let reopened = was_closed && !self.is_closed(merchant_id.clone());
+
+        env::log_str(&format!(
+            "{} invested {} NEAR in {merchant_id}{}",
+            env::predecessor_account_id(),
+            near_str(amount),
+            if reopened {
+                ", which reopened its shop"
+            } else if was_closed {
+                ", which is not yet enough to reopen its shop"
+            } else {
+                ""
+            }
+        ));
+        reopened
+    }
+
+    /// Invest from a credited budget — the only path a scoped key can take.
+    ///
+    /// `invest` is `#[payable]`, and a function-call access key cannot attach
+    /// NEAR at all. So without this method the mechanic the `games` prompt
+    /// describes would be unreachable for exactly the players it is for: the
+    /// ones holding a single scoped key and no seed phrase. The same reason
+    /// `buy_with_credit` exists beside `buy`, and `sell` is non-payable.
+    pub fn invest_with_credit(&mut self, merchant_id: AccountId, amount: U128) -> bool {
+        require!(amount.0 > 0, "invest something");
+        let who = env::predecessor_account_id();
+        let budget = self.credits.get(&who).copied().unwrap_or(U128(0)).0;
+        require!(budget >= amount.0, "insufficient credit to invest that much");
+
+        let was_closed = self.is_closed(merchant_id.clone());
+        self.credits.insert(who.clone(), U128(budget - amount.0));
+        self.add_to_treasury(merchant_id.clone(), amount.0);
+        let reopened = was_closed && !self.is_closed(merchant_id.clone());
+
+        env::log_str(&format!(
+            "{who} invested {} NEAR of credit in {merchant_id}{}",
+            near_str(amount.0),
+            if reopened { ", which reopened its shop" } else { "" }
+        ));
+        reopened
+    }
+
+    /// The one place a treasury grows from outside. Shared so the owner's
+    /// genesis funding and a player's rescue cannot drift apart.
+    fn add_to_treasury(&mut self, merchant_id: AccountId, amount: u128) {
         let mut merchant = self.merchants.get(&merchant_id).cloned().expect("unknown merchant");
-        merchant.treasury = U128(merchant.treasury.0 + env::attached_deposit().as_yoctonear());
+        merchant.treasury = U128(merchant.treasury.0 + amount);
         self.merchants.insert(merchant_id, merchant);
     }
 
@@ -1022,6 +1100,131 @@ mod tests {
     }
 
     /// The whole purchase unwinds if the NEP-245 delivery fails.
+    // -------------------------------------------------------------- investing
+
+    /// A merchant flooded until its treasury sits at its floor: closed to
+    /// buying, which is the state the prompt describes.
+    fn broke_market() -> Market {
+        ctx(owner(), 0);
+        let mut m = Market::new(owner(), items());
+        m.register_merchant(ironmonger(), "Ironmonger".into(), U128(BASE));
+        m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(256));
+        // Treasury at the floor exactly: nothing spare, so no bid.
+        ctx(owner(), BASE);
+        m.fund_merchant(ironmonger());
+        m
+    }
+
+    #[test]
+    fn a_player_can_reopen_a_broke_merchant() {
+        let mut m = broke_market();
+        assert!(m.is_closed(ironmonger()), "it starts closed, with no spare to bid with");
+        assert_eq!(m.quote(ironmonger(), IRON.to_string(), 1).merchant_bid, None);
+
+        // Anyone — this is a player, not the owner. That is the whole point.
+        ctx(player(), BASE * 10);
+        let reopened = m.invest(ironmonger());
+
+        assert!(reopened, "invest reports that it reopened the shop");
+        assert!(!m.is_closed(ironmonger()), "and it is open");
+        assert!(
+            m.quote(ironmonger(), IRON.to_string(), 1).merchant_bid.is_some(),
+            "a reopened merchant posts a bid again, which is what a seller cares about"
+        );
+        assert!(get_logs().iter().any(|l| l.contains("which reopened its shop")));
+    }
+
+    #[test]
+    fn investing_too_little_says_so_rather_than_claiming_success() {
+        let mut m = broke_market();
+        ctx(player(), 1); // one yoctoNEAR: nowhere near a unit's bid
+        let reopened = m.invest(ironmonger());
+        assert!(!reopened, "it did not reopen, and must not pretend otherwise");
+        assert!(m.is_closed(ironmonger()));
+        assert!(get_logs().iter().any(|l| l.contains("not yet enough to reopen")));
+    }
+
+    #[test]
+    fn investing_credits_the_treasury_exactly() {
+        let mut m = broke_market();
+        let before = m.merchant_treasury_for(ironmonger());
+        ctx(player(), BASE * 3);
+        let _ = m.invest(ironmonger());
+        assert_eq!(
+            m.merchant_treasury_for(ironmonger()) - before,
+            BASE * 3,
+            "every yocto attached reaches the treasury"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "attach something to invest")]
+    fn investing_nothing_is_refused() {
+        let mut m = broke_market();
+        ctx(player(), 0);
+        let _ = m.invest(ironmonger());
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown merchant")]
+    fn investing_in_a_merchant_that_does_not_exist_is_refused() {
+        let mut m = broke_market();
+        ctx(player(), BASE);
+        let _ = m.invest("nobody.test.near".parse().unwrap());
+    }
+
+    #[test]
+    fn the_owners_genesis_funding_still_works_and_shares_one_implementation() {
+        // fund_merchant and invest differ in who may call and why, never in what
+        // they do to the books — they go through the same internal.
+        let mut m = broke_market();
+        let before = m.merchant_treasury_for(ironmonger());
+        ctx(owner(), BASE * 2);
+        m.fund_merchant(ironmonger());
+        assert_eq!(m.merchant_treasury_for(ironmonger()) - before, BASE * 2);
+    }
+
+    #[test]
+    fn a_scoped_key_player_can_invest_from_credit() {
+        let mut m = broke_market();
+        // Fund the player's budget the way deploy does.
+        ctx(player(), BASE * 10);
+        m.fund_credit(player());
+
+        assert!(m.is_closed(ironmonger()));
+        // Non-payable: no deposit attached, which is the only thing a
+        // function-call key can do.
+        ctx(player(), 0);
+        let reopened = m.invest_with_credit(ironmonger(), U128(BASE * 5));
+
+        assert!(reopened, "the shop reopened");
+        assert_eq!(m.credit_of(player()), U128(BASE * 5), "the budget paid for it");
+        assert_eq!(m.merchant_treasury_for(ironmonger()), BASE + BASE * 5);
+    }
+
+    #[test]
+    #[should_panic(expected = "insufficient credit to invest")]
+    fn investing_more_credit_than_you_have_is_refused() {
+        let mut m = broke_market();
+        ctx(player(), BASE);
+        m.fund_credit(player());
+        ctx(player(), 0);
+        let _ = m.invest_with_credit(ironmonger(), U128(BASE * 100));
+    }
+
+    #[test]
+    fn investing_from_credit_leaves_the_ledger_total_unchanged() {
+        // Credit out, treasury in: a pure internal transfer, like restocking.
+        let mut m = broke_market();
+        ctx(player(), BASE * 4);
+        m.fund_credit(player());
+        let total_before = m.credit_of(player()).0 + m.merchant_treasury_for(ironmonger());
+        ctx(player(), 0);
+        let _ = m.invest_with_credit(ironmonger(), U128(BASE * 2));
+        let total_after = m.credit_of(player()).0 + m.merchant_treasury_for(ironmonger());
+        assert_eq!(total_before, total_after);
+    }
+
     // ------------------------------------------------------------- restocking
 
     /// A market whose iron shelf is thin enough to restock.

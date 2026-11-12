@@ -1,0 +1,20 @@
+{
+  "note": "The games prompt ends \"it closes its shop until someone invests in it\". Demonstrated on public NEAR testnet: a merchant withdrew its spare treasury down to its floor and reported closed, then an investment reopened it.",
+  "recorded_at": "2026-11-12T06:56:37.841Z",
+  "network": "testnet",
+  "rpc": "https://test.rpc.fastnear.com",
+  "merchant": "chandler.nearcraftmc.testnet",
+  "closed_after_withdraw": true,
+  "closed_after_invest": false,
+  "invested_yocto": "10000000000000000000000",
+  "transactions": {
+    "withdraw_treasury": {
+      "hash": "8P6DQLSJzxTZq2TJGUGstDhKGQYJ4M2bworn3JWw4pmc",
+      "explorer": "https://testnet.nearblocks.io/txns/8P6DQLSJzxTZq2TJGUGstDhKGQYJ4M2bworn3JWw4pmc"
+    },
+    "invest": {
+      "hash": "AvTEkD3Hm9DkF4uVKwPzJxKujm1usNnFTmdmY548XhLz",
+      "explorer": "https://testnet.nearblocks.io/txns/AvTEkD3Hm9DkF4uVKwPzJxKujm1usNnFTmdmY548XhLz"
+    }
+  }
+}

@@ -2,7 +2,7 @@
   "note": "Written by npm run deploy. Public ids only — no secret material.",
   "network": "testnet",
   "rpc": "https://test.rpc.fastnear.com",
-  "deployed_at": "2026-11-12T06:46:05.313Z",
+  "deployed_at": "2026-11-12T06:56:07.664Z",
   "economy_scale": 0.01,
   "root": "nearcraftmc.testnet",
   "contracts": {
@@ -47,7 +47,8 @@
       "account_id": "p-1d6a3c5d.nearcraftmc.testnet",
       "permitted_methods": [
         "buy_with_credit",
-        "sell"
+        "sell",
+        "invest_with_credit"
       ]
     }
   ],

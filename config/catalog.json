@@ -125,10 +125,11 @@
     "fund_near": "3"
   },
   "players": {
-    "note": "Players are onboarded through backend/near/onboarding.mjs: an account derived from a verified identity, a one-time NEP-245 approval granted while a bootstrap full-access key exists, then that key deleted in the same transaction that installs the scoped one. Seeded demo players use a `seed:` provider so their ids derive exactly as a real login's would. See docs/GASLESS.md.",
+    "note": "Players are onboarded through backend/near/onboarding.mjs: an account derived from a verified identity, a one-time NEP-245 approval granted while a bootstrap full-access key exists, then that key deleted in the same transaction that installs the scoped one. Seeded demo players use a `seed:` provider so their ids derive exactly as a real login's would. See docs/GASLESS.md. A player key is immutable for life: onboarding deletes the bootstrap full-access key, so no method can ever be added to an existing player. Players onboarded before invest_with_credit existed keep the two methods they were issued.",
     "methods": [
       "buy_with_credit",
-      "sell"
+      "sell",
+      "invest_with_credit"
     ],
     "sellable_items": [
       "iron_ingot",

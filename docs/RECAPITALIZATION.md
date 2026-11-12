@@ -1,9 +1,21 @@
 # Reopening a closed merchant
 
-**Status: designed, not built.** Nothing in `contracts/market` implements any of
-this, and the `games` track is not entered on it. This document exists because
-`GAME_LOOP.md` promises the design, and a promise of a design should point at
-one.
+**Status: the mechanic is built; the stake accounting is not.**
+
+`market.invest(merchant_id)` and `market.invest_with_credit(merchant_id, amount)`
+are implemented, permissionless and tested, so the sentence the `games` prompt
+actually writes — "it closes its shop until someone invests in it" — now holds:
+anyone can reopen a broke merchant, and `invest` returns whether it reopened.
+
+What an investor gets back is **the shop, not a dividend**, and that is a real
+incentive rather than charity: a closed merchant will not buy from you, so the
+player holding iron is exactly the person who wants the ironmonger funded.
+
+**What is still only designed is everything below:** a tracked stake repaid out
+of the merchant's future margin. That needs per-stakeholder accounting and a
+cost basis per shelf — new contract state, and therefore a state migration the
+contracts have no mechanism for yet. The rest of this document is that design,
+and it is still accurate as a design.
 
 ## Why a merchant closes
 

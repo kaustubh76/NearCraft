@@ -24,7 +24,7 @@ const stamp = started.toISOString().replace(/[:.]/g, '-').slice(0, 19)
 /// failing one are different facts.
 const CHECKS = [
   { topic: 'unit-tests', cmd: 'npm', args: ['run', '--silent', 'test:contracts'],
-    proves: '106 Rust unit tests across all three contracts. Offline, no wasm target, no network.' },
+    proves: '115 Rust unit tests across all three contracts. Offline, no wasm target, no network.' },
   { topic: 'policy-and-injection', cmd: 'node', args: ['--test', 'tests/near/policy.mjs', 'tests/near/injection.mjs', 'tests/near/market.mjs'],
     proves: 'The policy layer refuses out-of-policy agent calls, a prompt-injected agent is blocked across two layers AND recognised as paying a known-bad account, and the plugin HTTP contract is well-formed. Offline.' },
   { topic: 'live-testnet-reads', cmd: 'npm', args: ['run', '--silent', 'reads'],
@@ -127,12 +127,20 @@ async function liveTransactions() {
       // Two record shapes: the agent purchase carries one `transaction_hash`,
       // the player proof carries a `transactions` map (a buy and a sell). Index
       // both rather than silently emitting undefined for one of them.
+      // Records carry one `transaction_hash` or a `transactions` map, and each
+      // kind describes itself differently. Derive a description where the
+      // fields are there, and otherwise fall back to the record's own note —
+      // the first version of this assumed one shape and would have indexed a
+      // later one as a row of `undefined`.
       if (r.transactions) {
+        const described = r.player
+          ? `${r.player} bought and sold ${r.count}x ${r.item} holding ${r.player_full_access_keys} full-access keys, paying ${r.player_near_delta_yocto === '0' ? 'nothing' : `${r.player_near_delta_yocto} yocto`}; relayer paid ${r.relayer_paid_yocto} yocto`
+          : (r.note ?? `${Object.keys(r.transactions).join(' then ')} on ${r.merchant ?? 'the market'}`)
         return {
           transactions: Object.fromEntries(
             Object.entries(r.transactions).map(([k, v]) => [k, v.hash]),
           ),
-          what: `${r.player} bought and sold ${r.count}x ${r.item} holding ${r.player_full_access_keys} full-access keys, paying ${r.player_near_delta_yocto === '0' ? 'nothing' : r.player_near_delta_yocto + ' yocto'}; relayer paid ${r.relayer_paid_yocto} yocto`,
+          what: described,
           explorer: Object.values(r.transactions).map((v) => v.explorer),
           path: `evidence/live/${f}`,
         }

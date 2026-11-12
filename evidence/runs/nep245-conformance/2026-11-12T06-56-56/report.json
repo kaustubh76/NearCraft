@@ -1,0 +1,12 @@
+{
+  "topic": "nep245-conformance",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 191,
+  "command": "npm run --silent check:nep245",
+  "cwd": ".",
+  "proves": "NEP-245 core 10/10, Enumeration 2/2 and Approval Management 5/5 present, Metadata absent as documented, and security-relevant modifiers correct — including that market.sell and buy_with_credit carry NO modifiers, since a function-call key cannot attach NEAR. Read off the ABI cargo-near emitted, not off our source comments.",
+  "output_sha256": "2e594f386261472e1b7fe7ffece7f4ffe4521eca1f66fbf52cf61bad54ad72ff",
+  "output_bytes": 290,
+  "recorded_at": "2026-11-12T06:57:32.953Z"
+}
