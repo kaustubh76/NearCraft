@@ -1,0 +1,12 @@
+{
+  "topic": "access-key-limits",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 27736,
+  "command": "cargo test -p nearcraft-integration --test keys -- --nocapture",
+  "cwd": "contracts",
+  "proves": "A function-call access key scoped to one method, signed with THAT key against a real nearcore node. The protocol refuses everything else and names its own refusals.",
+  "output_sha256": "b8f8eac3fc9d7b5fbf92c6aafa1e4ffd3a77c7167c2d878de6d30c6f840b7bc5",
+  "output_bytes": 2474,
+  "recorded_at": "2026-11-12T06:35:58.604Z"
+}

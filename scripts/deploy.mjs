@@ -413,7 +413,9 @@ log('\nplayers — onboarded through backend/near/onboarding.mjs')
 // Seeded demo players use a `seed:` identity provider, so their account ids are
 // derived exactly as a real login's would be. The verifier below is local and
 // trivial on purpose: a real deployment swaps in OIDC/OAuth behind the same
-// interface, which is the only part of onboarding that is stubbed.
+// interface. Real OIDC verification lives in backend/near/oidc.mjs; this script
+// uses the trivial one because seeded demo players have no provider to verify
+// against, not because verification is unimplemented.
 const onboarding = createOnboarding({
   rootAccountId: rootAccountId(),
   rootKey: process.env.NEAR_ROOT_KEY,

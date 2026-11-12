@@ -1,0 +1,12 @@
+{
+  "topic": "live-testnet-keys",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 1373,
+  "command": "npm run --silent keys",
+  "cwd": ".",
+  "proves": "Each live agent key's receiver_id, method_names and allowance, read back from the chain rather than asserted, plus the spend budgets and a count of the disclosed operator keys. Exits non-zero if any agent key is unrestricted, if the chain carries a scoped key the manifest does not record, if the manifest records one the chain does not have, or IF THERE IS NOTHING TO AUDIT — that last case shipped: the manifest said agents: [] and this check reported success having examined zero accounts.",
+  "output_sha256": "5b1a5a69c4c60b739c44243d72dece212c92f3ae765f433ea54d205a7d3f5a4d",
+  "output_bytes": 2054,
+  "recorded_at": "2026-11-12T06:34:58.764Z"
+}

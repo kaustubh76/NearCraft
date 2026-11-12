@@ -11,8 +11,10 @@ Everything below was **measured in a local nearcore sandbox**, not inferred.
 ## How a player gets an account
 
 1. **Verify the identity.** `verifyIdentity(token) → {provider, subject}`,
-   injected. **This is the only stubbed piece** — a real deployment swaps in
-   OIDC/OAuth verification behind the same interface. Tests use a fake.
+   injected. Implemented for real in `backend/near/oidc.mjs` — JWKS fetch, JWT
+   signature verification, and `iss`/`aud`/`exp`/`nbf`/`sub` checks, with 25
+   offline tests. The injected seam stays, because the seeded demo players use a
+   `seed:` provider and because a test must be able to supply a fake.
 2. **Derive the account, deterministically.**
    `p-<first 8 hex of sha256("provider:subject")>.<root>`. The same login always
    lands on the same account, so there is no mapping table to lose or leak, and
@@ -148,9 +150,11 @@ JSON, which is NEAR's normal convention for 64-bit values.
   paying nothing. The relayer's balance falls in both cases. Approvals are
   granted once during onboarding and the bootstrap key is destroyed in the same
   transaction that installs the scoped one.
-- **Not established:** any real OAuth flow — token verification is stubbed
-  behind `verifyIdentity`, and that is the one genuinely external dependency
-  left. No testnet deployment. No Minecraft client is involved in any of it.
+- **Not established:** a login against a real provider. The verifier is built
+  and tested (`backend/near/oidc.mjs`, 25 offline tests), but no provider client
+  id is configured, so nothing here has verified a token Google actually issued.
+  That is configuration rather than code, and it is the last external
+  dependency. No Minecraft client is involved in any of it either.
 
 ## A side effect worth naming: relaying prevents lock-out
 

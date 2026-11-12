@@ -7,7 +7,8 @@
 //
 //   1. **Verify the identity.** Pluggable: `verifyIdentity(token)` returns
 //      `{provider, subject}`. Tests inject a fake. A real deployment swaps in
-//      OIDC/OAuth verification — the only stubbed piece in this file.
+//      OIDC/OAuth verification. Implemented in `oidc.mjs`; the seam stays so a
+//      test can inject a fake and so seeded demo players can use `seed:`.
 //   2. **Derive the account.** Deterministic from the identity, so the same
 //      login always lands on the same account and there is no mapping table to
 //      lose, migrate or leak.

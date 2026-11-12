@@ -35,6 +35,7 @@ column before the description.
 | `npm run agent` — an agent shopping end to end | **Built and runnable.** An agent with a scoped key on a real node: an unknown merchant parked for a human, the same merchant clearing itself once trust accrued, and a prompt-injected objective **blocked** by the on-chain guard. |
 | `AGENTS.md` | **Written.** Repo instructions and the claims policy, for the AI judges the organisers named. |
 | `evidence/` | **Built.** `npm run evidence` retains each check's real output with its exit code and an output hash. Failures are kept, not edited out. |
+| Social / email login | **Built and tested.** [`backend/near/oidc.mjs`](backend/near/oidc.mjs) — JWKS fetch, JWT signature verification, `iss`/`aud`/`exp`/`nbf`/`sub` checks. 25 offline tests including `alg: none`, the HMAC confusion attack, a swapped payload and a token minted for another application. **Not configured against a real provider**, so the demo onboards seeded identities. |
 | Gasless play — no seed phrase, no popup, no gas prompt | **Built and measured on public testnet.** `npm run live:player`: a player holding **no full-access key at all** buys and sells on NEAR testnet and its balance moves by **exactly 0** — the relayer pays. Reproduced twice, hashes retained in `evidence/live/`. Also `npm run test:gasless` on a local node, plus 15 offline tests. [docs/GASLESS.md](docs/GASLESS.md) |
 | Payout rollbacks | **Built and tested.** `withdraw` and `withdraw_treasury` used to zero the ledger and then fire a bare transfer with no callback: a failed payout debited the claimant and delivered nothing, and the market silently kept money it no longer accounted for. Both now roll back. 3 unit tests. |
 | NEP-245 Approval Management | **Built and tested.** 10 unit tests. Implemented because without it a key-less player could buy but never sell. |
@@ -118,10 +119,21 @@ installs the scoped one** — so a player holds no full-access key, and
 `tests/near/gasless.mjs` asserts that before it transacts. Both halves of the
 loop then work for free: the player **buys and sells** while the relayer pays.
 
-What is **stubbed** is identity-token verification itself, behind a pluggable
-`verifyIdentity` interface — the one genuinely external dependency. So we do not
-call this "social login"; the mechanism behind a social login is built and
-measured, and the provider integration is not.
+**Identity-token verification is now real too**, in
+[`backend/near/oidc.mjs`](backend/near/oidc.mjs): it fetches the provider's
+JWKS, verifies the JWT signature, and checks `iss`, `aud`, `exp`, `nbf`/`iat`
+and `sub`. 25 tests, all offline — the suite generates its own RS256 keypair,
+mints real tokens and serves a JWKS from a stubbed fetch, so it needs no
+provider and no network. The attacks are the point: `alg: none` is refused, an
+HMAC `alg` signed with the public key is refused before the signature is even
+checked, a swapped payload is refused, and a perfectly valid token minted for a
+**different** application is refused. No new dependency — Node's `crypto` does
+JWKS import and verification on its own.
+
+What is left is not code: nobody has configured a real provider's client id, so
+the deployed demo still onboards seeded `seed:` identities. The verifier is
+built and tested; pointing it at Google or Apple is an operator step, and until
+someone does that we have no screenshot of a real login to show.
 
 **On the Minecraft integration:** the game world, its menus and its item
 delivery are baseline — they exist and they work, on Unichain. What is *not*
@@ -222,7 +234,7 @@ near-sdk unit tests build for the host. All three checks pass right now:
 
 ```sh
 npm run test:contracts    # 93 Rust unit tests across all three contracts
-npm run test:near         # 82 offline tests: policy, injection, counterparty, market, web
+npm run test:near         # 107 offline tests: policy, injection, counterparty, market, web, OIDC
 npm run verify:baseline   # 11 vendored files, SHA-256 unchanged
 ```
 
@@ -503,7 +515,7 @@ npm run keys      # reads method_names + allowance back from the chain
 
 | Track | How |
 |---|---|
-| **`games`** | Requirement by requirement, with the gaps named. **(1)** Materials as NEP-245 multi-tokens, one contract holding every item type — core 10/10, Enumeration 2/2, Approval Management 5/5, read off the compiled ABI. **(2)** No seed phrase, no wallet popup, no gas prompt: measured, a player holding **no full-access key at all** both buys and sells for free. The one stubbed piece is OAuth token verification, behind `verifyIdentity` — so the mechanism is real and the login is not, and we say which half is which. **(3)** The price rule in one readable file, [`contracts/market/src/pricing.rs`](contracts/market/src/pricing.rs), and the merchant's own reason string rendered beside every quote — on the live web page today; **the in-game tooltip needs the Minecraft host, which is not up**. **(4)** Fast-forward: 135 real transactions in 23.7s. **That is not "a week in a minute"** — the arithmetic is worked out above and the claim declined. The loop is specified in [GAME_LOOP.md](GAME_LOOP.md), written before any code. |
+| **`games`** | Requirement by requirement, with the gaps named. **(1)** Materials as NEP-245 multi-tokens, one contract holding every item type — core 10/10, Enumeration 2/2, Approval Management 5/5, read off the compiled ABI. **(2)** No seed phrase, no wallet popup, no gas prompt: measured, a player holding **no full-access key at all** both buys and sells for free. Identity verification is real too — [`backend/near/oidc.mjs`](backend/near/oidc.mjs) does JWKS fetch, JWT signature verification and `iss`/`aud`/`exp`/`sub` checks, with 25 offline tests covering `alg: none`, the HMAC confusion attack, a swapped payload and a token minted for another application. What is missing is not code but configuration: no real provider client id is set, so the deployed demo onboards seeded identities. **(3)** The price rule in one readable file, [`contracts/market/src/pricing.rs`](contracts/market/src/pricing.rs), and the merchant's own reason string rendered beside every quote — on the live web page today; **the in-game tooltip needs the Minecraft host, which is not up**. **(4)** Fast-forward: 135 real transactions in 23.7s. **That is not "a week in a minute"** — the arithmetic is worked out above and the claim declined. The loop is specified in [GAME_LOOP.md](GAME_LOOP.md), written before any code. |
 | **`security`** | All three requirements. **(1)** A counterparty check returning `allow`/`warn`/`block` with reasons, scoring the four named signals — account activity, is-a-contract and code-changed, prior interactions, and an on-chain shared blocklist other agents report to with evidence. The wrapper refuses to sign on `block` and **parks the call for a human on `warn`**. **(2)** Agents sign with a function-call access key scoped to one contract with an explicit method list and allowance, never a full-access key — its limits are explained below, proved at the protocol level in the sandbox, and read back off the live chain by `npm run keys`. The agent *account* does also carry an operator key, which that command discloses and counts; the section below says exactly who holds it and why players are treated differently. **(3)** The attack demo: a prompt-injected agent tries to pay a known-bad account, is stopped, and the log is printed. Signals and their data sources are written up in [docs/SECURITY_SIGNALS.md](docs/SECURITY_SIGNALS.md), which was written before the code, as the prompt asks. |
 
 **Two tracks are entered: `games` and `security`.**
@@ -564,7 +576,7 @@ The player's account id is not a name someone chose. It is derived from the
 login — `p-<first 8 hex of sha256("provider:subject")>` — so the same identity
 always lands on the same account and no mapping table is needed. `p-1d6a3c5d`
 is `seed:player-1`, the demo identity. See [docs/GASLESS.md](docs/GASLESS.md);
-the only stubbed part of that flow is verifying the identity token itself.
+verifying the identity token is implemented in [`backend/near/oidc.mjs`](backend/near/oidc.mjs); what the demo lacks is a configured provider client id, not the code.
 
 A `player-1.nearcraftmc.testnet` account also exists on testnet. It is a
 leftover: an earlier deploy created players inline with literal names, before

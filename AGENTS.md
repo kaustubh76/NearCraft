@@ -18,10 +18,10 @@ key or a Minecraft server.
 
 ```sh
 npm install
-npm test                     # 186 offline checks, ~5s
+npm test                     # 211 offline checks, ~6s
 ```
 
-That is 93 Rust unit tests (`contracts/`), 82 Node tests (`tests/near/`) and the
+That is 93 Rust unit tests (`contracts/`), 107 Node tests (`tests/near/`) and the
 11 baseline hash checks. Then, after building the wasm:
 
 ```sh
@@ -86,7 +86,11 @@ baseline project, where it was the thing that made the evidence worth reading.
 - **Distinguish measured from asserted.** "The relayer pays" is a claim about
   money; it is asserted as `assert.equal(after - before, 0n)` against a real
   node, not described in prose. If something is not measured, say that.
-- **Never upgrade a disclosed gap.** OAuth token verification is stubbed. The
+- **Never upgrade a disclosed gap.** OAuth verification used to be the example
+  here; it is now implemented in `backend/near/oidc.mjs`, so the statements about
+  it were changed in the same commit that built it — which is the rule working,
+  not an exception to it. What remains disclosed: no provider client id is
+  configured, so no real token has been verified. The
   Minecraft settlement path is not ported. `games` requirement 4 is not "a week
   in a minute". These are stated in `README.md` and must stay stated.
 - **Keep failures.** `evidence/runs/` records a failing check exactly like a
