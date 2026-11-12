@@ -6,6 +6,26 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# Reproducible build, per NEP-330. This is what makes the deployed code
+# verifiable by someone who does not have this machine: the bytes become a
+# function of the committed source plus a pinned container, and
+# `contract_source_metadata` reports the digest, the commit and the command, so
+# SourceScan and NearBlocks can check it.
+#
+# The image/digest pair is the one cargo-near 0.23.0 ships in its own project
+# template, so the pin cannot drift from the installed tool. The tag is
+# descriptive only; the digest identifies the image.
+#
+# NOTE: this container pins rust 1.99.1, while `npm run build:contracts` uses
+# whatever rustc is local. The two therefore produce DIFFERENT bytes from the
+# same source, which is expected and is why only the reproducible artifact is
+# deployed.
+[package.metadata.near.reproducible_build]
+image = "sourcescan/cargo-near:0.22.0-rust-1.99.1"
+image_digest = "sha256:c9655eaf7436b90c87ea8b25739f91063032c5c30ba24cfeafe72c142943b5bb"
+passed_env = []
+container_build_command = ["cargo", "near", "build", "non-reproducible-wasm", "--locked"]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
