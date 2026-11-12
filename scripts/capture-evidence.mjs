@@ -122,6 +122,19 @@ async function liveTransactions() {
     const files = (await readdir(dir)).filter((f) => f.endsWith('.json')).sort()
     return Promise.all(files.map(async (f) => {
       const r = JSON.parse(await readFile(new URL(f, dir), 'utf8'))
+      // Two record shapes: the agent purchase carries one `transaction_hash`,
+      // the player proof carries a `transactions` map (a buy and a sell). Index
+      // both rather than silently emitting undefined for one of them.
+      if (r.transactions) {
+        return {
+          transactions: Object.fromEntries(
+            Object.entries(r.transactions).map(([k, v]) => [k, v.hash]),
+          ),
+          what: `${r.player} bought and sold ${r.count}x ${r.item} holding ${r.player_full_access_keys} full-access keys, paying ${r.player_near_delta_yocto === '0' ? 'nothing' : r.player_near_delta_yocto + ' yocto'}; relayer paid ${r.relayer_paid_yocto} yocto`,
+          explorer: Object.values(r.transactions).map((v) => v.explorer),
+          path: `evidence/live/${f}`,
+        }
+      }
       return {
         transaction_hash: r.transaction_hash,
         what: `${r.agent} bought ${r.count}x ${r.item} from ${r.merchant}`,
@@ -150,7 +163,7 @@ const summary = {
   boundaries: [
     'Most of these run locally, against a nearcore sandbox. The two topics named live-testnet-* are real, credential-free reads of the deployed contracts on public NEAR testnet.',
     'Those live reads are VIEW calls only. No check in this script sends a transaction, so no record below is evidence of live write behaviour.',
-    'Live write behaviour is evidenced separately, by the retained records in evidence/live/ — each names a real transaction hash on public testnet that anyone can open on an explorer. Those were produced by npm run live:agent, which is deliberately not part of this script because it spends real testnet balance.',
+    'Live write behaviour is evidenced separately, by the retained records in evidence/live/ — each names real transaction hashes on public testnet that anyone can open on an explorer. Those come from npm run live:agent (an agent purchase under a scoped key, screened and human-approved) and npm run live:player (a player with NO full-access key buying and selling while its balance moves by exactly zero). Both are deliberately outside this script because they spend real testnet balance.',
     'The live deployment runs at a reduced economy scale (see economy_scale in deployment.json); its figures are not the full-size economy the sandbox runs.',
     'No Minecraft gameplay is recorded; the plugin is not exercised by any check here.',
     'A passing check establishes what its own output shows and nothing wider.',

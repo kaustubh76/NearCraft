@@ -25,7 +25,8 @@
     "test:deploy": "node scripts/deploy-dryrun.mjs",
     "live:agent": "node scripts/live-agent.mjs",
     "web": "node scripts/serve-web.mjs",
-    "check:docs": "node scripts/check-docs.mjs"
+    "check:docs": "node scripts/check-docs.mjs",
+    "live:player": "node scripts/live-player.mjs"
   },
   "license": "MIT",
   "dependencies": {

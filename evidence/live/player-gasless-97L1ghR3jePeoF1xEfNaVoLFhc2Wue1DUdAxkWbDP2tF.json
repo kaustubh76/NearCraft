@@ -1,0 +1,35 @@
+{
+  "note": "A real player buying and selling on public NEAR testnet while holding NO full-access key, paying nothing. Gas was paid by the relayer via NEP-366 meta transactions.",
+  "recorded_at": "2026-11-12T05:23:45.969Z",
+  "network": "testnet",
+  "rpc": "https://test.rpc.fastnear.com",
+  "economy_scale": 0.01,
+  "player": "p-1d6a3c5d.nearcraftmc.testnet",
+  "relayer": "relayer.nearcraftmc.testnet",
+  "market": "market.nearcraftmc.testnet",
+  "merchant": "ironmonger.nearcraftmc.testnet",
+  "item": "iron_ingot",
+  "count": 2,
+  "player_full_access_keys": 0,
+  "player_scoped_keys": 1,
+  "transactions": {
+    "buy": {
+      "hash": "97L1ghR3jePeoF1xEfNaVoLFhc2Wue1DUdAxkWbDP2tF",
+      "explorer": "https://testnet.nearblocks.io/txns/97L1ghR3jePeoF1xEfNaVoLFhc2Wue1DUdAxkWbDP2tF"
+    },
+    "sell": {
+      "hash": "DeC4e8QtdVet2ywbv4GqBcJLx3x4ZsDDzGgYzJdujxDs",
+      "explorer": "https://testnet.nearblocks.io/txns/DeC4e8QtdVet2ywbv4GqBcJLx3x4ZsDDzGgYzJdujxDs"
+    }
+  },
+  "player_near_delta_yocto": "0",
+  "relayer_paid_yocto": "1511396813953400000000",
+  "balances": {
+    "held_before": "0",
+    "held_after": "0",
+    "credit_before": "20000000000000000000000",
+    "credit_after": "18476800000000000000000",
+    "player_near_before": "89437934625337200000000",
+    "player_near_after": "89437934625337200000000"
+  }
+}

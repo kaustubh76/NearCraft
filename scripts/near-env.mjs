@@ -25,6 +25,7 @@ export function names(root = rootAccountId()) {
     items: `items.${root}`,
     market: `market.${root}`,
     guard: `guard.${root}`,
+    relayer: `relayer.${root}`,
     sub: (prefix) => `${prefix}.${root}`,
   }
 }

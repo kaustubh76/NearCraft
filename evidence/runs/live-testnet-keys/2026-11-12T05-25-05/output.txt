@@ -1,0 +1,8 @@
+
+Agent access keys, as the protocol reports them
+
+Spend budgets (the second bound, enforced by the market contract)
+
+
+all agent keys are correctly scoped
+

@@ -46,9 +46,10 @@ npm run reads                # every merchant's ask, bid, band and reason, from 
 npm run keys                 # each agent key's receiver, methods and allowance
 npm run web                  # the market page, reading those contracts live in a browser
 npm run live:agent           # ← SPENDS real testnet balance. Needs .local/ keys.
+npm run live:player          # ← SPENDS real testnet balance. The gasless proof, on chain.
 ```
 
-`npm run live:agent` is the only command here that sends a transaction. It is
+`npm run live:agent` and `npm run live:player` are the only commands here that send transactions. It is
 kept out of `npm run evidence` for that reason; its retained records live in
 `evidence/live/`, each naming a transaction hash anyone can open on an explorer.
 

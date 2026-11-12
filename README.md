@@ -35,7 +35,7 @@ column before the description.
 | `npm run agent` — an agent shopping end to end | **Built and runnable.** An agent with a scoped key on a real node: an unknown merchant parked for a human, the same merchant clearing itself once trust accrued, and a prompt-injected objective **blocked** by the on-chain guard. |
 | `AGENTS.md` | **Written.** Repo instructions and the claims policy, for the AI judges the organisers named. |
 | `evidence/` | **Built.** `npm run evidence` retains each check's real output with its exit code and an output hash. Failures are kept, not edited out. |
-| Gasless play — no seed phrase, no popup, no gas prompt | **Built and measured.** `npm run test:gasless`: a player holding **no full-access key at all** both buys and sells on a real nearcore node without paying. 15 more offline tests. [docs/GASLESS.md](docs/GASLESS.md) |
+| Gasless play — no seed phrase, no popup, no gas prompt | **Built and measured on public testnet.** `npm run live:player`: a player holding **no full-access key at all** buys and sells on NEAR testnet and its balance moves by **exactly 0** — the relayer pays. Reproduced twice, hashes retained in `evidence/live/`. Also `npm run test:gasless` on a local node, plus 15 offline tests. [docs/GASLESS.md](docs/GASLESS.md) |
 | NEP-245 Approval Management | **Built and tested.** 10 unit tests. Implemented because without it a key-less player could buy but never sell. |
 | Minecraft plugin settlement path | **Not built**, and not startable here — no Java runtime on this machine and the Paper jar lives on the operator host. The note below also corrects our own earlier estimate of the work. |
 | Sealed-bid rounds (`swarms`) | **Not built, and that track is not entered.** See below. |
@@ -55,8 +55,26 @@ npm run keys      # each agent key's receiver, method list and allowance, from t
 npm run web       # the market page, reading those same contracts live in a browser
 ```
 
-**And a real transaction to open.** An agent bought 2 iron from Ironmonger on
-public testnet, signing with a key scoped to `buy_with_credit`:
+**And the headline claim, measured on the public chain.** A player bought 2 iron
+and sold them back, holding one function-call key and no full-access key:
+
+```
+player   p-1d6a3c5d.nearcraftmc.testnet      1 scoped key, 0 full-access
+balance  0.089437 NEAR  ->  0.089437 NEAR    moved by exactly 0
+relayer  paid 0.001513 NEAR for both calls
+
+buy   4EZNk7HbNb17pBneKRtZrV8XgzmS4jU95VgGriXBh5wQ
+sell  q7hdf2y7jkBoZSoLNeMtSyoZMDMxb9rPKLuPHTDvYAz
+```
+
+`npm run live:player`, reproduced twice with the same result. The script checks
+the no-full-access-key property against the protocol **first**, because if that
+were false nothing else would matter. It does not report per-call gas: measured
+either side of a single call, before nearcore credits the unused gas back, the
+two figures summed to 0.076 NEAR on a run that actually cost 0.0015.
+
+**And a real agent transaction to open.** An agent bought 2 iron from Ironmonger
+on public testnet, signing with a key scoped to `buy_with_credit`:
 
 ```
 CJXc3vK8YomMVAZn6j6R6FHKqtSF9t4Ev4Tbcq4eqnhZ

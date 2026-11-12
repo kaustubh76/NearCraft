@@ -145,5 +145,14 @@
     "seed_subjects": [
       "player-1"
     ]
+  },
+  "relayer": {
+    "prefix": "relayer",
+    "gas_near": "0.3",
+    "permitted_methods": [
+      "buy_with_credit",
+      "sell"
+    ],
+    "note": "Pays gas so a player never sees a gas prompt (NEP-366 meta transactions). Funded for GAS ONLY \u2014 it holds no spend budget and signs nothing of its own. gas_near is real NEAR and is NOT scaled by NEAR_ECONOMY_SCALE: 0.05 is below one 60 TGas call's prepaid cost, which is the three-pots trap in AGENTS.md. permitted_methods is the relayer's OWN allowlist \u2014 a relayer that submits anything is an open faucet for whoever asks."
   }
 }

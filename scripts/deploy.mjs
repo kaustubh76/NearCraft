@@ -118,16 +118,33 @@ async function exists(accountId) {
   }
 }
 
+/// Returns true if it created the account, false if it was already there.
 async function ensureAccount(accountId, fundYocto) {
   if (await exists(accountId)) {
     log(`  exists   ${accountId}`)
-    return
+    return false
   }
   const secret = keyFor(accountId)
   const publicKey = KeyPair.fromString(secret).getPublicKey().toString()
   // `nearToTransfer` is yoctoNEAR despite its name — verified against the v7 source.
   await root.createSubAccount({ accountOrPrefix: accountId, publicKey, nearToTransfer: fundYocto })
   log(`  created  ${accountId}  (${fromYocto(fundYocto)} NEAR)`)
+  return true
+}
+
+/// Top an account's NEAR balance up to a floor. Distinct from `topUpCredit`,
+/// which funds a spend budget inside the market contract — these are two of the
+/// three separate pots described in AGENTS.md, and conflating them is how a
+/// freshly deployed agent ended up unable to transact at all.
+async function topUpBalance(accountId, floorYocto) {
+  const state = await p.query({ request_type: 'view_account', finality: 'optimistic', account_id: accountId })
+  const have = BigInt(state.amount)
+  if (have >= floorYocto) {
+    log(`  gas      ${accountId} already at ${fromYocto(have)} NEAR`)
+    return
+  }
+  await root.transfer({ receiverId: accountId, amount: floorYocto - have })
+  log(`  gas      ${accountId}  +${fromYocto(floorYocto - have)} -> ${fromYocto(floorYocto)} NEAR`)
 }
 
 function as(accountId) {
@@ -387,6 +404,29 @@ await saveKeys(keys)
 
 // ------------------------------------------------------------------ manifest
 
+// ---------------------------------------------------------------- relayer
+
+// Without this, "no gas prompt" is a sandbox claim only: the relayer module was
+// built and proved in tests, but no relayer account was ever deployed, so the
+// headline games-track property had no live footprint at all.
+let relayerId = null
+if (cat.relayer) {
+  log('\nrelayer — pays gas so a player never sees a gas prompt (NEP-366)')
+  relayerId = n.relayer
+  // Only top up an account that already existed: a freshly created one was
+  // funded with exactly the floor, and querying it at this block height fails
+  // because account creation is not final yet.
+  const relayerIsNew = await ensureAccount(relayerId, toYocto(cat.relayer.gas_near))
+  if (!relayerIsNew) await topUpBalance(relayerId, toYocto(cat.relayer.gas_near))
+  await saveKeys(keys)
+  // It holds a FULL-ACCESS key, deliberately and unavoidably: a SignedDelegate
+  // is not a function call, so a scoped key cannot submit one. That is why it
+  // is funded for gas only and carries no spend budget — there is nothing for a
+  // stolen relayer key to buy.
+  log(`  relays   [${cat.relayer.permitted_methods}] for players`)
+  log('  bounds   gas only, no spend budget; its own allowlist, so it is not an open faucet')
+}
+
 const manifest = {
   note: 'Written by npm run deploy. Public ids only — no secret material.',
   network: 'testnet',
@@ -398,6 +438,13 @@ const manifest = {
   merchants: cat.merchants.map((m) => ({ account_id: n.sub(m.prefix), name: m.name })),
   materials: cat.materials.map((m) => m.token_id),
   players,
+  relayer: relayerId
+    ? {
+        account_id: relayerId,
+        relays: cat.relayer.permitted_methods,
+        note: 'Pays gas for player calls. Funded for gas only, no spend budget. Holds a full-access key because a SignedDelegate action is not a function call, so a scoped key cannot submit one.',
+      }
+    : null,
   agents: Object.entries(agentKeys).map(([account_id, k]) => ({
     account_id,
     function_call_public_key: k.publicKey,
