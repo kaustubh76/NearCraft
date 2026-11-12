@@ -31,8 +31,34 @@ const WASM = {
 /// treasuries to floors to budgets — is preserved exactly and the market
 /// behaves identically; only the units shrink. Contract account funding is NOT
 /// scaled, because storage staking is a fixed cost in real NEAR.
-const SCALE = Number(process.env.NEAR_ECONOMY_SCALE ?? '1')
+///
+/// The scale is sticky. When a deployment.json already exists, its recorded
+/// `economy_scale` is the default, because re-running deploy against a live
+/// economy at a *different* scale is never what anyone means: every figure is a
+/// top-up to a target, so a scale of 1 over a 0.01 deployment tries to inflate
+/// the whole economy a hundredfold. That is not idempotent, and `npm run
+/// deploy` is documented as idempotent. It was caught by a re-run dying with
+/// `NotEnoughBalance` for 5.02 NEAR of credit top-up — which only failed safely
+/// because the root account was poor. With a funded root it would have
+/// quietly rewritten the live economy and invalidated the README's figures.
+///
+/// An explicit NEAR_ECONOMY_SCALE still wins, so changing scale on purpose is
+/// possible — it just has to be on purpose.
+const priorScale = await (async () => {
+  try {
+    const prior = JSON.parse(await readFile(new URL('../deployment.json', import.meta.url), 'utf8'))
+    return typeof prior.economy_scale === 'number' && prior.economy_scale > 0 ? prior.economy_scale : null
+  } catch {
+    return null // no prior deployment; a first run is unconstrained
+  }
+})()
+
+const SCALE = Number(process.env.NEAR_ECONOMY_SCALE ?? priorScale ?? '1')
 if (!(SCALE > 0)) throw new Error('NEAR_ECONOMY_SCALE must be a positive number')
+if (priorScale !== null && SCALE !== priorScale) {
+  log(`  NOTE: deployment.json records economy_scale ${priorScale}, and this run uses ${SCALE}.`)
+  log('        Every economy figure is a top-up to a target, so changing scale rewrites them.')
+}
 
 const p = provider()
 const root = rootAccount()

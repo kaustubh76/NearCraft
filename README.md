@@ -473,7 +473,7 @@ NEAR testnet
 ├── guard.nearcraftmc.testnet      the public blocklist other agents report to, with evidence
 ├── ironmonger.nearcraftmc.testnet merchant agents — one named account each
 ├── worker-1.nearcraftmc.testnet   player-hired agents — holds a function-call key, nothing more
-└── player-1.nearcraftmc.testnet   a player — one scoped key, no full-access key at all
+└── p-1d6a3c5d.nearcraftmc.testnet a player — one scoped key, no full-access key at all
 
 backend/
 ├── baseline/   vendored unchanged: agent loop, tool registry + validator, model router, spend ledgers
@@ -486,6 +486,17 @@ contracts/integration/tests/
 
 There is no `plugin/` directory. The Minecraft settlement path is not ported —
 see the note above for why, and for what that costs the `games` track.
+
+The player's account id is not a name someone chose. It is derived from the
+login — `p-<first 8 hex of sha256("provider:subject")>` — so the same identity
+always lands on the same account and no mapping table is needed. `p-1d6a3c5d`
+is `seed:player-1`, the demo identity. See [docs/GASLESS.md](docs/GASLESS.md);
+the only stubbed part of that flow is verifying the identity token itself.
+
+A `player-1.nearcraftmc.testnet` account also exists on testnet. It is a
+leftover: an earlier deploy created players inline with literal names, before
+that logic was de-duplicated into `backend/near/onboarding.mjs`. Nothing refers
+to it and it is not in `deployment.json`.
 
 The root account is `nearcraftmc.testnet` rather than `nearcraft.testnet`
 because the latter is already registered by a third party.

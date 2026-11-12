@@ -1,8 +1,8 @@
 {
-  "note": "Written by npm run deploy. Public ids and PUBLIC keys only \u2014 no secret material. Amounts reflect economy_scale; see the README.",
+  "note": "Written by npm run deploy. Public ids only — no secret material.",
   "network": "testnet",
   "rpc": "https://test.rpc.fastnear.com",
-  "deployed_at": "2026-11-11T16:11:12.642Z",
+  "deployed_at": "2026-11-12T05:17:16.608Z",
   "economy_scale": 0.01,
   "root": "nearcraftmc.testnet",
   "contracts": {
@@ -44,29 +44,12 @@
   ],
   "players": [
     {
-      "account_id": "player-1.nearcraftmc.testnet",
+      "account_id": "p-1d6a3c5d.nearcraftmc.testnet",
       "permitted_methods": [
         "buy_with_credit",
         "sell"
       ]
     }
   ],
-  "agents": [
-    {
-      "account_id": "worker-1.nearcraftmc.testnet",
-      "permitted_methods": [
-        "buy_with_credit"
-      ],
-      "scoped_to": "market.nearcraftmc.testnet",
-      "function_call_public_key": "ed25519:D9D4Eo6EmNSBPk66Uee6FMv6gqSSpgf9Y6Nv7V1X4NBJ"
-    },
-    {
-      "account_id": "worker-2.nearcraftmc.testnet",
-      "permitted_methods": [
-        "buy_with_credit"
-      ],
-      "scoped_to": "market.nearcraftmc.testnet",
-      "function_call_public_key": "ed25519:2orZSEsAFb1wXEzP9xEALgXCidMsBBPk2kiNKWQQitjz"
-    }
-  ]
+  "agents": []
 }
