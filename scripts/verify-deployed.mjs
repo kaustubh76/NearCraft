@@ -6,6 +6,13 @@
 // is computable from a public view_account call and the local build. Anyone can
 // run this against the public RPC and get the same answer we do.
 //
+// That hash comparison alone answers a NARROWER question than the one above:
+// "does the chain run the wasm sitting on this disk?" It says nothing about
+// whether that wasm was built from the source now in the repository. Edit a
+// contract, skip the rebuild, and every hash still matched — demonstrated, not
+// feared. So each contract is also asked which commit it was built from, and
+// its build inputs at that commit are compared against the working tree.
+//
 // Why it exists: `items` was found running bytes that the repo does not build,
 // and nothing here could see it. That is the A3 bug class — a fix that never
 // reached the chain — and the only clue at the time was a deploy log line that
@@ -22,8 +29,54 @@
 
 import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { baseEncode } from 'near-api-js'
 import { names, provider, rootAccountId } from './near-env.mjs'
+
+const repoRoot = fileURLToPath(new URL('..', import.meta.url))
+
+const git = (args) =>
+  execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+
+/// The paths whose contents end up inside `<name>`'s wasm. The workspace
+/// manifest and lockfile are shared, so a change to either moves all three.
+///
+/// `contracts/integration/` is deliberately absent: it is a dev-only crate that
+/// no contract build reads, and flagging it would make this check cry wolf
+/// every time a sandbox test changed — which is how a check stops being read.
+const buildInputs = (name) => [
+  `contracts/${name}/src`,
+  `contracts/${name}/Cargo.toml`,
+  'contracts/Cargo.toml',
+  'contracts/Cargo.lock',
+]
+
+/// Has the source that builds `<name>` moved since `<rev>`?
+///
+/// Returns a list of changed paths, or `null` when the question cannot be
+/// answered here — no git, or a clone that does not contain that commit. A
+/// check that cannot run must say so rather than pass.
+function sourceDrift(rev, name) {
+  try {
+    git(['rev-parse', '--git-dir'])
+    git(['cat-file', '-e', `${rev}^{commit}`])
+  } catch {
+    return null
+  }
+  try {
+    // `git diff <rev> -- <paths>` compares that commit against the WORKING
+    // TREE, so this catches both commits made since and edits not yet
+    // committed. Untracked files are invisible to it, hence the second call.
+    const changed = git(['diff', '--name-only', rev, '--', ...buildInputs(name)])
+    const untracked = git([
+      'ls-files', '--others', '--exclude-standard', '--', `contracts/${name}/src`,
+    ])
+    return [...changed.split('\n'), ...untracked.split('\n')].filter(Boolean)
+  } catch {
+    return null
+  }
+}
 
 /// An account with no contract reports this sentinel rather than a hash.
 const NO_CODE = '11111111111111111111111111111111'
@@ -113,6 +166,28 @@ for (const [name, wasmUrl] of Object.entries(WASM)) {
     console.log(`  ${' '.repeat(8)} ${' '.repeat(32)}          ${
       info ? `built reproducibly from ${rev ?? 'an unnamed revision'}` : 'no build_info — built outside a pinned container'
     }`)
+
+    // The second question, and the one the hash cannot answer: the bytes match
+    // a build, but is that build THIS source? The contract names the commit it
+    // was built from, so git can settle it without rebuilding anything.
+    const pad = `  ${' '.repeat(8)} ${' '.repeat(32)}          `
+    if (!rev) {
+      console.log(`${pad}source check skipped — the contract names no commit`)
+    } else {
+      const drift = sourceDrift(rev, name)
+      if (drift === null) {
+        console.log(`${pad}source check unavailable — no git, or ${rev.slice(0, 7)} is not in this clone`)
+      } else if (drift.length === 0) {
+        console.log(`${pad}and its build inputs are unchanged since that commit`)
+      } else {
+        problems.push(
+          `${name}: the deployed bytes were built from ${rev.slice(0, 7)}, but ` +
+          `${drift.length} of its build input(s) have changed since — ${drift.join(', ')}`,
+        )
+        console.log(`${pad}SOURCE MOVED since that commit:`)
+        for (const f of drift) console.log(`${pad}  ${f}`)
+      }
+    }
   } else {
     problems.push(`${name}: the chain runs ${live}, this repo builds ${expected}`)
     console.log(`  ${name.padEnd(8)} ${accountId.padEnd(32)} DIFFERS  ${live}`)
@@ -126,6 +201,10 @@ if (problems.length) {
   console.error(`\nthe chain is not running this repo's code (${problems.length}):`)
   for (const x of problems) console.error(`  ${x}`)
   console.error(
+    '\nSOURCE MOVED is not DIFFERS. The deployed bytes still match the wasm on\n' +
+    'this disk — but that wasm was built from a commit whose contract source is\n' +
+    'no longer what this repository contains, so the chain is not running this\n' +
+    'code. Rebuild and redeploy, or check out the commit the contract names.\n' +
     '\nWhat DIFFERS means depends on which build you compared with.\n' +
     '\n`cargo near build reproducible-wasm` IS byte-stable: it builds the\n' +
     'committed commit inside a digest-pinned container, so a mismatch there\n' +
@@ -142,8 +221,9 @@ if (problems.length) {
 }
 
 console.log(
-  `\nall ${checked} deployed contract(s) hash to the wasm this repo builds, ` +
-  'verified with no credentials'
+  `\nall ${checked} deployed contract(s) hash to the wasm this repo builds, and ` +
+  'their\nbuild inputs are unchanged since the commit each one names — verified ' +
+  'with no credentials'
 )
 if (revs.size === 1) {
   const [rev] = revs

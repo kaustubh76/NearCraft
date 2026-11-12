@@ -138,6 +138,23 @@ That is also what lets SourceScan and NearBlocks verify a contract, and it is
 the strongest form of the `security` track's claim: the code you audited is the
 code running, and you do not have to take our word for either half.
 
+**A hash match alone is not that claim, which is why the commit is checked too.**
+Comparing hashes answers "does the chain run the wasm on this disk?" — it says
+nothing about whether that wasm was built from the source now in the repository.
+Edit a contract, skip the rebuild, and all three hashes still matched; that was
+demonstrated rather than feared. So `npm run verify:deployed` also asks each
+contract which commit it was built from and compares that commit's build inputs
+— `contracts/<name>/src`, its `Cargo.toml`, and the workspace manifest and
+lockfile — against the working tree. Unchanged, it says so. Changed, it reports
+**SOURCE MOVED** and exits non-zero, which is a different failure from DIFFERS
+and gets a different explanation. It needs no rebuild, no credentials, and no
+Docker.
+
+This is also why `build_info` naming an earlier commit than `HEAD` is correct
+rather than drift: the bytes are pinned to the commit that built them and should
+not follow `HEAD`. The claim that matters is that the *contract source* has not
+moved since then, and that is now checked on every run instead of asserted once.
+
 `npm run build:contracts` is deliberately still the non-reproducible one, since
 it needs no Docker — which is what keeps `npm test` working on a clean clone
 with no credentials. The two therefore produce **different bytes from the same

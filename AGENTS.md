@@ -184,6 +184,18 @@ baseline project, where it was the thing that made the evidence worth reading.
   tree.** So commit and push before building, or you will ship bytes that do not
   match the source anyone else can fetch — and the mismatch is invisible,
   because the artifact is perfectly self-consistent.
+- **A green `verify:deployed` used to be compatible with an edited contract.**
+  It hashes the wasm in `contracts/target/`, so editing a contract and not
+  rebuilding left all three printing MATCH — the A3 bug class living inside the
+  script written to catch it. It now also compares each contract's build inputs
+  at the commit the contract itself names against your working tree, and reports
+  **SOURCE MOVED**, which is a different failure from DIFFERS: the bytes and the
+  local wasm still agree, it is the *source* that has left them behind. The
+  check skips `contracts/integration/`, which no contract build reads.
+- **`build_info` naming an older commit than `HEAD` is not drift.** The bytes
+  are pinned to the commit that built them, so they should not track `HEAD`.
+  Do not redeploy to make the two match; the question worth asking is whether
+  the contract source has changed since, and `verify:deployed` answers it.
 - **That ~0.061 NEAR is NOT `prepaid_gas × gas_price`, and the arithmetic will
   mislead you.** At the live gas price of 1e8 yocto/gas, 60 TGas multiplies out
   to 0.006 NEAR — ten times less than what nearcore actually demands. It
