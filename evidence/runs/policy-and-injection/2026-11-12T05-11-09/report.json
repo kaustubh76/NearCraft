@@ -1,0 +1,12 @@
+{
+  "topic": "policy-and-injection",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 144,
+  "command": "node --test tests/near/policy.mjs tests/near/injection.mjs tests/near/market.mjs",
+  "cwd": ".",
+  "proves": "The policy layer refuses out-of-policy agent calls, a prompt-injected agent is blocked across two layers AND recognised as paying a known-bad account, and the plugin HTTP contract is well-formed. Offline.",
+  "output_sha256": "badd471454934634290f953f07a86f7e2bdfa4d4a4e18d5b7410e066572f2d4e",
+  "output_bytes": 3481,
+  "recorded_at": "2026-11-12T05:11:12.222Z"
+}

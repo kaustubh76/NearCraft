@@ -23,7 +23,7 @@
 //! the player's materials on their behalf and selling costs the player nothing.
 //! See `docs/GASLESS.md` for the measurement that forced this.
 //!
-//! ## Two spec ambiguities, decided and disclosed
+//! ## Three spec ambiguities, decided and disclosed
 //!
 //! 1. `approval_id` is typed `number` in the method signatures but `string` in
 //!    the `Approval` struct. We use `U64` — a string over JSON — which is
@@ -35,6 +35,16 @@
 //!    very use case above. We **decrement by the amount transferred** and
 //!    remove the entry when it reaches zero. The `Approval.amount` field exists
 //!    precisely so there is something to decrement.
+//! 3. `mt_is_approved`'s signature names **no owner**, which is not answerable
+//!    for a multi-token: approvals are keyed per `(owner, token)`, so the
+//!    question has no meaning until you say whose approval. We take `owner_id`
+//!    as an extra, required argument. The alternative — reading
+//!    `env::predecessor_account_id()` — is what the first implementation did,
+//!    and it made the method a view that **no client could call at all**,
+//!    because nearcore forbids that host function in a view context. Its unit
+//!    tests passed the whole time. `contracts/integration/tests/views.rs` now
+//!    calls every view method as a real view so that class of bug cannot
+//!    return.
 
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
 use near_sdk::json_types::{U128, U64};
@@ -470,13 +480,32 @@ impl Items {
     }
 
     /// Whether `approved_account_id` may move at least `amounts` of each token
-    /// id for the caller — optionally pinned to specific approval ids.
+    /// id **on behalf of `owner_id`** — optionally pinned to specific approval
+    /// ids.
+    ///
+    /// `owner_id` is a parameter, and that is a deliberate deviation from the
+    /// NEP-245 signature, which names no owner. The third ambiguity we have had
+    /// to decide (see the module header for the other two).
+    ///
+    /// The spec's signature is not answerable for a *multi*-token: balances and
+    /// approvals are keyed per `(owner, token)`, so "is this approved?" has no
+    /// meaning until you say whose approval. This method originally resolved
+    /// that by reading `env::predecessor_account_id()` — which made it a view
+    /// that **no client could call**, because nearcore forbids that host
+    /// function in a view context and answers `HostError(ProhibitedInView)`.
+    /// Its own unit tests passed throughout, since `testing_env!` always
+    /// supplies a predecessor.
+    ///
+    /// Taking the owner explicitly also makes this consistent with its sibling
+    /// `mt_token_approval`, which has always done so, and which is why that one
+    /// worked as a view all along.
     pub fn mt_is_approved(
         &self,
         token_ids: Vec<String>,
         approved_account_id: AccountId,
         amounts: Vec<U128>,
         approval_ids: Option<Vec<U64>>,
+        owner_id: AccountId,
     ) -> bool {
         if token_ids.len() != amounts.len() {
             return false;
@@ -486,7 +515,6 @@ impl Items {
                 return false;
             }
         }
-        let owner_id = env::predecessor_account_id();
         token_ids.iter().enumerate().all(|(i, token_id)| {
             match self.find_approval(&owner_id, &approved_account_id, token_id) {
                 Some((amount, id)) => {
@@ -938,14 +966,23 @@ mod tests {
             .approved_account_ids[&market()].approval_id;
 
         setup(accounts(1), 0);
-        assert!(c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(40)], None));
-        assert!(c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(1)], Some(vec![id])));
-        assert!(!c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(41)], None), "over the amount");
-        assert!(!c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(1)], Some(vec![U64(id.0 + 99)])), "wrong id");
-        assert!(!c.mt_is_approved(vec![IRON.to_string()], accounts(4), vec![U128(1)], None), "never approved");
+        assert!(c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(40)], None, accounts(1)));
+        assert!(c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(1)], Some(vec![id]), accounts(1)));
+        assert!(!c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(41)], None, accounts(1)), "over the amount");
+        assert!(!c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(1)], Some(vec![U64(id.0 + 99)]), accounts(1)), "wrong id");
+        assert!(!c.mt_is_approved(vec![IRON.to_string()], accounts(4), vec![U128(1)], None, accounts(1)), "never approved");
         // Mismatched argument lengths are false rather than a panic: this is a
         // view a caller may probe with, not a state change.
-        assert!(!c.mt_is_approved(vec![IRON.to_string()], market(), vec![], None));
+        assert!(!c.mt_is_approved(vec![IRON.to_string()], market(), vec![], None, accounts(1)));
+
+        // The owner argument is load-bearing, not decoration. accounts(0) never
+        // approved anything, and asking about it must say so rather than
+        // quietly answering for whoever happens to be calling — which is what
+        // the predecessor-reading version did, and why it could not be a view.
+        assert!(
+            !c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(1)], None, accounts(0)),
+            "a different owner's approvals must not be reported as this owner's"
+        );
     }
 
     #[test]

@@ -1,0 +1,69 @@
+
+NearCraft market — market.nearcraftmc.testnet
+rpc https://test.rpc.fastnear.com
+
+merchants
+  Ironmonger     ironmonger.nearcraftmc.testnet     treasury      0.258 NEAR  floor 0.01  open
+  Timberwright   timberwright.nearcraftmc.testnet   treasury       0.25 NEAR  floor 0.01  open
+  Stonecutter    stonecutter.nearcraftmc.testnet    treasury       0.15 NEAR  floor 0.01  open
+  Glassblower    glassblower.nearcraftmc.testnet    treasury       0.08 NEAR  floor 0.005  open
+  Chandler       chandler.nearcraftmc.testnet       treasury       0.04 NEAR  floor 0.005  open
+
+quotes (8 units)
+
+  iron_ingot
+    Ironmonger     ask      0.4  bid     — (closed)  stock   256 (normally stocked)  demand 1.00x
+      Ironmonger holds 256 (normally stocked) but will not buy more: it has 0.248 NEAR left to spend and one costs 0.320.
+    Stonecutter    ask      0.6  bid     — (closed)  stock    64 (thin)  demand 1.00x
+      Stonecutter holds 64 (thin) but will not buy more: it has 0.140 NEAR left to spend and one costs 0.480.
+
+  oak_log
+    Timberwright   ask    0.075  bid      0.06 NEAR  stock  1024 (well stocked)  demand 1.00x
+      Timberwright holds 1024 (well stocked); demand is quiet.
+    Chandler       ask      0.1  bid     — (closed)  stock   128 (normally stocked)  demand 1.00x
+      Chandler holds 128 (normally stocked) but will not buy more: it has 0.035 NEAR left to spend and one costs 0.080.
+
+  stone
+    Stonecutter    ask     0.03  bid     0.024 NEAR  stock  2048 (glutted)  demand 1.00x
+      Stonecutter holds 2048 (glutted); demand is quiet.
+    Ironmonger     ask     0.05  bid      0.04 NEAR  stock   256 (normally stocked)  demand 1.00x
+      Ironmonger holds 256 (normally stocked); demand is quiet.
+
+  glass
+    Glassblower    ask    0.375  bid     — (closed)  stock    96 (thin)  demand 1.00x
+      Glassblower holds 96 (thin) but will not buy more: it has 0.075 NEAR left to spend and one costs 0.300.
+
+  coal
+    Ironmonger     ask   0.1125  bid      0.09 NEAR  stock   512 (well stocked)  demand 1.00x
+      Ironmonger holds 512 (well stocked); demand is quiet.
+    Chandler       ask     0.15  bid     — (closed)  stock   256 (normally stocked)  demand 1.00x
+      Chandler holds 256 (normally stocked) but will not buy more: it has 0.035 NEAR left to spend and one costs 0.120.
+
+  copper_ingot
+    Ironmonger     ask      0.3  bid      0.24 NEAR  stock   128 (normally stocked)  demand 1.00x
+      Ironmonger holds 128 (normally stocked); demand is quiet.
+    Glassblower    ask     0.45  bid     — (closed)  stock    32 (thin)  demand 1.00x
+      Glassblower holds 32 (thin) but will not buy more: it has 0.075 NEAR left to spend and one costs 0.360.
+
+  oak_planks
+    Timberwright   ask     0.09  bid     0.072 NEAR  stock   512 (well stocked)  demand 1.00x
+      Timberwright holds 512 (well stocked); demand is quiet.
+
+  redstone
+    Chandler       ask      0.9  bid     — (closed)  stock    48 (thin)  demand 1.00x
+      Chandler holds 48 (thin) but will not buy more: it has 0.035 NEAR left to spend and one costs 0.720.
+    Ironmonger     ask      1.2  bid     — (closed)  stock    24 (nearly gone)  demand 1.00x
+      Ironmonger holds 24 (nearly gone) but will not buy more: it has 0.248 NEAR left to spend and one costs 0.960.
+
+market-held NEP-245 balances (the shop floor pool)
+  iron_ingot        19998
+  oak_log           40000
+  stone             60000
+  glass             10000
+  coal              30000
+  copper_ingot      15000
+  oak_planks        25000
+  redstone           8000
+
+NEP-245 catalogue: 8 token ids in one contract (items.nearcraftmc.testnet)
+

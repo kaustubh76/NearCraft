@@ -1,0 +1,12 @@
+{
+  "topic": "view-methods-callable",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 6991,
+  "command": "cargo test -p nearcraft-integration --test views -- --nocapture",
+  "cwd": "contracts",
+  "proves": "All 26 view methods across the three contracts can actually be entered as view calls on a real node. nearcore forbids some host functions in a view context, and a &self method that reaches for one compiles, passes every unit test, and then fails for every real client with ProhibitedInView — mt_is_approved shipped with exactly that bug and no test here caught it. A view that panics on its arguments is recorded as reached; only an unenterable view fails this check.",
+  "output_sha256": "1555eb10fdf86868d8bfd351dc352f40fa026a48998e9576df62284cdf93d483",
+  "output_bytes": 2328,
+  "recorded_at": "2026-11-12T05:11:48.958Z"
+}

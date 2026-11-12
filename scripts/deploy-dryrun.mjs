@@ -69,17 +69,22 @@ try {
   }
   console.log(`sandbox at ${sandbox.rpcUrl}, root ${DEFAULT_ACCOUNT_ID}`)
 
-  for (const [label, script] of [
+  for (const [label, script, extra] of [
     ['npm run deploy — the real bootstrap', 'scripts/deploy.mjs'],
     // Deploy is meant to be idempotent, and a fresh sandbox never exercises
     // that: every step takes its create branch. A second pass is the only way
     // to test the resume path — which is how an off-by-a-word regex in the
     // "already initialised" guard survived until a live re-run hit it.
     ['npm run deploy AGAIN — the idempotent resume path', 'scripts/deploy.mjs'],
+    // And a third pass with NEAR_REDEPLOY=1, because the resume path above
+    // takes the "has code, skip it" branch — so until this existed, the
+    // redeploy path had never run anywhere, sandbox or testnet. A contract fix
+    // that cannot be shipped is not a fix.
+    ['npm run deploy with NEAR_REDEPLOY=1 — replacing live code', 'scripts/deploy.mjs', { NEAR_REDEPLOY: '1' }],
     ['npm run reads — every merchant quote and reason', 'scripts/reads.mjs'],
     ['npm run keys — agent key limits, read back from the chain', 'scripts/keys.mjs'],
   ]) {
-    const code = await run(label, [script], env)
+    const code = await run(label, [script], { ...env, ...(extra ?? {}) })
     if (code !== 0) {
       console.error(`\n  FAILED: ${script} exited ${code}`)
       failures++

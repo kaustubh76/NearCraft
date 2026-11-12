@@ -167,9 +167,46 @@ await ensureAccount(n.market, await stakeFor(WASM.market, '0.5'))
 await ensureAccount(n.guard, await stakeFor(WASM.guard, '0.3'))
 await saveKeys(keys)
 
-for (const [accountId, wasm] of [[n.items, WASM.items], [n.market, WASM.market], [n.guard, WASM.guard]]) {
-  if (!(await deployed(accountId))) await deploy(accountId, wasm)
-  else log(`  has code ${accountId}`)
+// Redeploying is opt-in, and until now it was impossible. This loop only ever
+// deployed when a contract had NO code, logging "has code" otherwise — so a
+// contract fix silently never reached the chain, and the only clue was a line
+// that looked like success. The default stays "deploy only if absent", because
+// that is what makes a resumed first run idempotent.
+//
+// IMPORTANT: this is a bare `deployContract`. It is safe for a change that only
+// adds or alters METHODS, because borsh state is positional and untouched. A
+// change that adds or reorders a field in a contract's state struct will make
+// every method and every view panic with "Cannot deserialize the contract
+// state", and recovering needs a migrate method deployed in the same
+// transaction. No contract here has one yet.
+// `NEAR_REDEPLOY=1` replaces all three; `NEAR_REDEPLOY=items,market` replaces
+// only those named. Targeting matters: redeploying a contract whose code has
+// not changed costs gas and buys nothing, and on a 1.5 NEAR root account that
+// is not free.
+const redeployRaw = process.env.NEAR_REDEPLOY ?? ''
+const redeployAll = redeployRaw === '1'
+const redeployNamed = new Set(redeployRaw.split(',').map((x) => x.trim()).filter((x) => x && x !== '1'))
+const wantsRedeploy = (name) => redeployAll || redeployNamed.has(name)
+
+for (const [name, accountId, wasm] of [
+  ['items', n.items, WASM.items],
+  ['market', n.market, WASM.market],
+  ['guard', n.guard, WASM.guard],
+]) {
+  if (!(await deployed(accountId))) {
+    await deploy(accountId, wasm)
+  } else if (wantsRedeploy(name)) {
+    log(`  replacing code on ${accountId}  (NEAR_REDEPLOY names ${name})`)
+    await deploy(accountId, wasm)
+  } else {
+    log(`  has code ${accountId}  (NEAR_REDEPLOY=${name} to replace it)`)
+  }
+}
+
+const unknownRedeploy = [...redeployNamed].filter((x) => !['items', 'market', 'guard'].includes(x))
+if (unknownRedeploy.length) {
+  // A typo here would otherwise look exactly like a successful no-op.
+  throw new Error(`NEAR_REDEPLOY names unknown contract(s): ${unknownRedeploy.join(', ')}`)
 }
 
 log('\ninitialise')

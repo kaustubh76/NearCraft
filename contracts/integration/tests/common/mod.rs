@@ -27,7 +27,7 @@ pub struct World {
     pub ironmonger: Account,
 }
 
-fn wasm(name: &str) -> anyhow::Result<Vec<u8>> {
+pub fn wasm(name: &str) -> anyhow::Result<Vec<u8>> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../target/near")
         .join(name)
