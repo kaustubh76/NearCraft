@@ -1,0 +1,12 @@
+{
+  "topic": "counterparty-and-approval",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 270,
+  "command": "node --test tests/near/counterparty.mjs tests/near/human-approval.mjs tests/near/onboarding.mjs tests/near/relayer.mjs",
+  "cwd": ".",
+  "proves": "allow/warn/block scoring over the four named signals, including that reports alone can never reach block however many there are, that an unknown counterparty warns and is never allowed, and that a warn parks the call for a human whose approval cannot override a later block. Offline.",
+  "output_sha256": "1bd0ec5e649a835244783eda1a959f1c7a85ea69da0d8a7e4dd1d26013b3cb28",
+  "output_bytes": 3502,
+  "recorded_at": "2026-11-12T06:09:06.840Z"
+}
