@@ -29,7 +29,7 @@ column before the description.
 | `backend/near` — signer, policy, warn→human approval | **Built and tested.** 59 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
 | **Sandbox integration tests** | **Built and passing.** A real local NEAR node via `near-workspaces`. 12 tests: 4 prove a restricted key's limits *at the protocol level*, 6 cover the cross-contract buy/sell/rollback paths, 1 runs the economy, 1 proves the node starts. |
 | **Deployed to NEAR testnet** | **Yes.** `items.nearcraftmc.testnet`, `market.nearcraftmc.testnet`, `guard.nearcraftmc.testnet` — 5 merchants, 2 agents, 1 player. `npm run reads` and `npm run keys` query it with no credentials. |
-| The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls — **135 real transactions in 23.7s** on a real nearcore node, buyers running concurrently. `npm run sim` |
+| The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls — **135 real transactions in 26.4s** on a real nearcore node — 5.1 trades a second, measured over three runs — buyers running concurrently. `npm run sim` |
 | `web/market.html` | **Built, and reads the live chain.** Every merchant's ask, bid, stock band and the contract's own reason string, read from the deployed contract over public RPC with no API key. Falls back to the retained simulation snapshot when offline, and says which it is showing. 8 tests. `npm run web` |
 | **A real agent transaction on public testnet** | **Done.** [`CJXc3vK8Yom…`](https://testnet.nearblocks.io/txns/CJXc3vK8YomMVAZn6j6R6FHKqtSF9t4Ev4Tbcq4eqnhZ) — an agent signing with a `buy_with_credit`-scoped key, after being parked for human approval. `npm run live:agent`, retained in `evidence/live/`. |
 | `npm run agent` — an agent shopping end to end | **Built and runnable.** An agent with a scoped key on a real node: an unknown merchant parked for a human, the same merchant clearing itself once trust accrued, and a prompt-injected objective **blocked** by the on-chain guard. |
@@ -570,22 +570,23 @@ gameplay is exercised by any of them.
 npm run sim
 ```
 
-Twenty buyers across six scripted strategies, five merchants, eight materials,
-eight rounds, **no model calls** — plain arithmetic, so what is being tested is
-the market and not a language model's taste. A representative run, in about 24
-seconds:
+Twenty buyers across six scripted strategies, five merchants, four materials
+over eight shelves, eight rounds, **no model calls** — plain arithmetic, so what
+is being tested is the market and not a language model's taste. A run, in about
+26 seconds:
 
 ```
-round   trades   sales  refused     volume    closed  cheapest iron / oak
-    3       16       3        3     29.852         0  0.506 / 0.100
-    6       17       5        0     62.457         1  0.592 / 0.100
-    8       10       3        0     82.590         1  0.614 / 0.100
-110 purchases, 25 sell-backs, 17 refused on a stale quote, 82.590 NEAR of volume,
-1 merchant(s) closed (first in round 6), in 23.7s of wall clock
+round   trades   sales   refused   restocks     volume    closed  cheapest iron / oak
+    1       12       3         8          0     10.070         0  0.448 / 0.084
+    3       16       3         3          0     29.852         0  0.506 / 0.100
+    6       17       5         0          0     62.457         1  0.592 / 0.100
+    8       10       4         0          0     82.590         1  0.614 / 0.100
+110 purchases, 25 sell-backs, 0 merchant restocks, 17 refused on a stale quote,
+82.590 NEAR of volume, 1 merchant(s) closed (first in round 6), in 26.4s of wall clock
 
-bargain   x4  spent    3.702  earned   0.648  holding   52 units
-dumper    x3  spent   18.677  earned  19.543  holding    0 units
-greedy    x4  spent   25.566  earned   4.756  holding  120 units
+bargain   x4  spent    3.252  earned    0.571  holding   48 units
+dumper    x3  spent   18.557  earned   19.471  holding    0 units
+greedy    x4  spent   25.286  earned    4.172  holding  120 units
 ```
 
 Iron rose from 0.448 to 0.614 NEAR because buyers drained the shelves, and
@@ -621,9 +622,22 @@ undercapitalised, or that you flooded on purpose.
 trading in about a minute. Here is exactly what we do and do not deliver.
 
 What this compresses is *trading volume and price discovery*: **135 real
-transactions on a real nearcore node in 23.7 seconds — 5.7 trades per second.**
-That is 4.7× what it was, and the gain came from running each buyer's turn
-concurrently rather than serially, plus dropping `max_gas()`. Prepaid gas is
+transactions on a real nearcore node in 26.4 seconds — 5.1 trades per second.**
+Measured three times, 25.8s / 26.4s / 27.0s, because one sample of a wall clock
+is not a measurement.
+
+**That rate has come down, and the cost is ours rather than the chain's.** It
+was 5.7 a second — 23.7s for the identical 135 transactions — before cost basis
+and the margin split went in. Those added state writes to the hottest path in
+the contract: every purchase now also consumes the sold goods' basis, and may
+pay a backer out of the treasury. **Roughly 11% slower, which is outside the
+spread above**, so it is a real cost and not noise. Worth saying plainly, since
+the feature that bought it is the one that makes an investment a stake rather
+than a donation.
+
+The concurrency gain that got the rate here in the first place was 4.7× when it
+was measured, and came from running each buyer's turn concurrently rather than
+serially, plus dropping `max_gas()`. Prepaid gas is
 what reserves room in a chunk and nearcore's per-chunk limit is 1000 TGas, so
 300 TGas per call had been capping a block at three trades no matter how many
 buyers were ready; the two paths now prepay measured ceilings of 100 and 150
@@ -638,16 +652,20 @@ time-dependent mechanic and is exercised separately.
 rather than an adjective. Take the cadence in `GAME_LOOP.md` — a player makes a
 trading decision every few minutes — and say each of five merchants serves one
 trade every ten minutes across eight active hours: that is about **1,680 trades
-a week**. At the measured 5.7 trades per second that is **roughly five minutes,
-not one**.
+a week**. At the measured 5.1 trades per second that is **roughly five and a
+half minutes, not one**.
 
 **A correction to the reason this file used to give.** It said the shortfall was
 because "merchants do not restock", and that restocking was the missing piece.
 Merchants now restock — permissionlessly, out of their own treasuries — and it
 changed the figure by nothing, because that was never the binding constraint.
-Measured: across eight rounds the simulation poked all 25 shelves after every
-round and performed **zero** restocks, because no shelf ever fell below the
-trigger of 32 units. The fixture's shelves start at 64 to 2048.
+Measured, and re-measured since: across eight rounds the simulation pokes every
+one of its **eight** shelves after every round — 64 pokes — and performs
+**zero** restocks, because no shelf ever falls below the trigger of 32 units.
+The fixture's shelves start at 64 to 2048. (This file, and the comment in
+`simulation.rs` it was copied from, both said 25 shelves. Neither had counted:
+the fixture has four materials across eight shelves, and 25 is what you get from
+imagining five merchants times five materials.)
 
 Trades fall from 17 a round to 10 for a different reason, which the run shows
 plainly: the *price* rises. Iron goes 0.448 to 0.614 NEAR as the demand
@@ -655,10 +673,11 @@ multiplier climbs, and the bargain-hunting strategies stop buying once the unit
 price passes base. That is the price rule working, not the market running out of
 goods — and no amount of restocking addresses it.
 
-So: a week of trading in about five minutes, under a stated definition, and the
-limit is throughput rather than stock. Not a week in a minute. We would rather
-print the rate
-we measured than round it up.
+So: a week of trading in about five and a half minutes, under a stated
+definition, and the limit is throughput rather than stock. **Still not a week in
+a minute**, and now slightly further from it than before, because we chose a
+correct margin split over a faster one. We would rather print the rate we
+measured, three times, than round it up.
 
 ### Needs a live testnet deployment (the bonus, not the proof)
 
@@ -674,7 +693,7 @@ npm run keys      # reads method_names + allowance back from the chain
 
 | Track | How |
 |---|---|
-| **`games`** | Requirement by requirement, with the gaps named. **(1)** Materials as NEP-245 multi-tokens, one contract holding every item type — core 10/10, Enumeration 2/2, Approval Management 5/5, read off the compiled ABI. **(2)** No seed phrase, no wallet popup, no gas prompt: **measured on public testnet**, a player holding no full-access key buys and sells while its balance moves by exactly 0. Identity verification is real too ([`oidc.mjs`](backend/near/oidc.mjs), 25 offline tests); what is missing is a configured provider client id, which is operator configuration rather than code. **(3)** The price rule in one readable file, [`pricing.rs`](contracts/market/src/pricing.rs), and the merchant's own reason string rendered beside every quote — on the live web page today; **the in-game tooltip needs the Minecraft host, which is not up**. **(4)** Fast-forward: 135 real transactions in 23.7s. **That is still not "a week in a minute"** — the arithmetic is worked out above, and the limit turned out to be throughput rather than stock. Plus the two things the prompt's own description asks for: a broke merchant **reopens when someone invests in it** (shown on chain), and merchants **restock themselves**, so the economy evolves without a dev patch. The loop is specified in [GAME_LOOP.md](GAME_LOOP.md), written before any code. |
+| **`games`** | Requirement by requirement, with the gaps named. **(1)** Materials as NEP-245 multi-tokens, one contract holding every item type — core 10/10, Enumeration 2/2, Approval Management 5/5, read off the compiled ABI. **(2)** No seed phrase, no wallet popup, no gas prompt: **measured on public testnet**, a player holding no full-access key buys and sells while its balance moves by exactly 0. Identity verification is real too ([`oidc.mjs`](backend/near/oidc.mjs), 25 offline tests); what is missing is a configured provider client id, which is operator configuration rather than code. **(3)** The price rule in one readable file, [`pricing.rs`](contracts/market/src/pricing.rs), and the merchant's own reason string rendered beside every quote — on the live web page today; **the in-game tooltip needs the Minecraft host, which is not up**. **(4)** Fast-forward: 135 real transactions in 26.4s, 5.1 a second, measured three times. **That is still not "a week in a minute"** — and it got 11% slower when cost basis and the margin split went in, which is reported rather than quietly re-measured away — the arithmetic is worked out above, and the limit turned out to be throughput rather than stock. Plus the two things the prompt's own description asks for: a broke merchant **reopens when someone invests in it** (shown on chain), and merchants **restock themselves**, so the economy evolves without a dev patch. The loop is specified in [GAME_LOOP.md](GAME_LOOP.md), written before any code. |
 | **`security`** | All three requirements. **(1)** A counterparty check returning `allow`/`warn`/`block` with reasons, scoring the four named signals — account activity, is-a-contract and code-changed, prior interactions, and an on-chain shared blocklist other agents report to with evidence. The wrapper refuses to sign on `block` and **parks the call for a human on `warn`**. **(2)** Agents sign with a function-call access key scoped to one contract with an explicit method list and allowance, never a full-access key — its limits are explained below, proved at the protocol level in the sandbox, and read back off the live chain by `npm run keys`. The agent *account* does also carry an operator key, which that command discloses and counts; the section below says exactly who holds it and why players are treated differently. **(3)** The attack demo: a prompt-injected agent tries to pay a known-bad account, is stopped, and the log is printed. Signals and their data sources are written up in [docs/SECURITY_SIGNALS.md](docs/SECURITY_SIGNALS.md), which was written before the code, as the prompt asks. |
 
 **Two tracks are entered: `games` and `security`.**

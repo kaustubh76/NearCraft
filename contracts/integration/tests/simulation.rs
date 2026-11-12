@@ -396,8 +396,13 @@ async fn a_scripted_economy_moves_without_a_single_model_call() -> anyhow::Resul
         // patch. Here one buyer sweeps every shelf after each round; a thin one
         // refills itself out of its own treasury, a well-stocked one refuses.
         //
-        // Concurrent, because it is 25 independent view-and-poke pairs and the
-        // round above already established that buyers do not collide.
+        // Concurrent, because the pairs are independent and the round above
+        // already established that buyers do not collide. There are
+        // MERCHANTS-summed-over-shelves of them — eight, with this fixture.
+        // This comment used to say 25, and the README repeated it; the number
+        // was never counted, and 25 is what you get from imagining five
+        // merchants times five materials rather than reading the fixture, which
+        // has four materials and eight shelves.
         let sweeps = MERCHANTS.iter().flat_map(|(name, _, shelves)| {
             shelves.iter().map(move |(item, _)| (*name, *item))
         }).map(|(name, item)| {

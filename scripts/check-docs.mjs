@@ -184,6 +184,10 @@ const RETIRED_CLAIMS = [
     why: 'the tracked stake is built and its migration has run on testnet' },
   { pattern: /no contract here has (a migrate method|one) yet/i,
     why: 'market.migrate() exists and has run on public testnet' },
+  { pattern: /poked all 25 shelves|all 25 shelves/i,
+    why: 'the simulation fixture has four materials across EIGHT shelves; 25 was never counted, it was five merchants times five materials imagined' },
+  { pattern: /5\.7 trades per second/i,
+    why: 'the rate is 5.1 a second since cost basis and the margin split added writes to the buy path — re-measure with npm run sim rather than reusing a figure' },
 ]
 for (const doc of [...DOCS, 'web/market.html']) {
   if (!(await exists(doc))) continue

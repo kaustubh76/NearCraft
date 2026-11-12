@@ -1,6 +1,6 @@
 {
   "buyers": 20,
-  "generated_at_unix": 1794465734,
+  "generated_at_unix": 1794481290,
   "materials": [
     {
       "item": "iron_ingot",
@@ -146,7 +146,7 @@
       "account_id": "timberwright.test.near",
       "closed": false,
       "name": "timberwright",
-      "treasury": "40799360000000000000000000"
+      "treasury": "40652000000000000000000000"
     },
     {
       "account_id": "stonecutter.test.near",
@@ -169,53 +169,53 @@
   ],
   "network": "local sandbox (near-workspaces)",
   "note": "Output of `npm run sim` against a local nearcore sandbox. Not live chain data.",
-  "purchases": 112,
+  "purchases": 110,
   "rounds": 8,
-  "sell_backs": 27,
+  "sell_backs": 26,
   "strategies": [
     {
       "agents": 4,
-      "earned_yocto": "468720000000000000000000",
-      "spent_yocto": "3189600000000000000000000",
+      "earned_yocto": "560480000000000000000000",
+      "spent_yocto": "3252400000000000000000000",
       "strategy": "bargain",
       "units_held": 48
     },
     {
       "agents": 3,
-      "earned_yocto": "20801040000000000000000000",
-      "spent_yocto": "19477200000000000000000000",
+      "earned_yocto": "19176560000000000000000000",
+      "spent_yocto": "18677200000000000000000000",
       "strategy": "dumper",
       "units_held": 0
     },
     {
       "agents": 3,
-      "earned_yocto": "6060160000000000000000000",
-      "spent_yocto": "7511200000000000000000000",
+      "earned_yocto": "6508800000000000000000000",
+      "spent_yocto": "7911200000000000000000000",
       "strategy": "flipper",
       "units_held": 40
     },
     {
       "agents": 4,
-      "earned_yocto": "3774720000000000000000000",
-      "spent_yocto": "24765600000000000000000000",
+      "earned_yocto": "4303520000000000000000000",
+      "spent_yocto": "25165600000000000000000000",
       "strategy": "greedy",
-      "units_held": 112
+      "units_held": 116
     },
     {
       "agents": 3,
-      "earned_yocto": "3430960000000000000000000",
-      "spent_yocto": "18336800000000000000000000",
+      "earned_yocto": "3167840000000000000000000",
+      "spent_yocto": "17501200000000000000000000",
       "strategy": "hoarder",
-      "units_held": 88
+      "units_held": 80
     },
     {
       "agents": 3,
-      "earned_yocto": "1822080000000000000000000",
+      "earned_yocto": "1860480000000000000000000",
       "spent_yocto": "10082400000000000000000000",
       "strategy": "noise",
       "units_held": 52
     }
   ],
-  "volume_yocto": "83362800000000000000000000",
-  "wall_clock_seconds": 26
+  "volume_yocto": "82590000000000000000000000",
+  "wall_clock_seconds": 25
 }
