@@ -258,14 +258,15 @@ async fn a_scripted_economy_moves_without_a_single_model_call() -> anyhow::Resul
     }
     println!("\n{BUYERS} buyers, {} merchants, {} materials, {ROUNDS} rounds, no model calls\n",
              MERCHANTS.len(), MATERIALS.len());
-    println!("{:>5}  {:>7}  {:>6}  {:>8}  {:>9}  {:>8}  {}",
-             "round", "trades", "sales", "refused", "volume", "closed", "cheapest iron / oak");
-    println!("{}", "-".repeat(88));
+    println!("{:>5}  {:>7}  {:>6}  {:>8}  {:>9}  {:>9}  {:>8}  {}",
+             "round", "trades", "sales", "refused", "restocks", "volume", "closed", "cheapest iron / oak");
+    println!("{}", "-".repeat(100));
 
     let mut total_trades = 0u32;
     let mut total_sales = 0u32;
     let mut volume = 0u128;
     let mut total_refused = 0u32;
+    let mut total_restocks = 0u32;
     let mut first_closure: Option<usize> = None;
 
     for round in 1..=ROUNDS {
@@ -387,6 +388,41 @@ async fn a_scripted_economy_moves_without_a_single_model_call() -> anyhow::Resul
             refused += r;
         }
 
+        // ── anyone keeps the town alive ──────────────────────────────────────
+        //
+        // `restock` is permissionless and non-payable, so the market no longer
+        // needs the contract owner to put goods back on a shelf — which is what
+        // the `games` track means by an economy that evolves without a dev
+        // patch. Here one buyer sweeps every shelf after each round; a thin one
+        // refills itself out of its own treasury, a well-stocked one refuses.
+        //
+        // Concurrent, because it is 25 independent view-and-poke pairs and the
+        // round above already established that buyers do not collide.
+        let sweeps = MERCHANTS.iter().flat_map(|(name, _, shelves)| {
+            shelves.iter().map(move |(item, _)| (*name, *item))
+        }).map(|(name, item)| {
+            let m = &m;
+            let poker = &buyers[0].1;
+            async move {
+                let merchant_id = m.merchants.iter().find(|(n, _)| n == &name).map(|(_, a)| a.id().clone());
+                let Some(merchant_id) = merchant_id else { return 0u32 };
+                let outcome = poker
+                    .call(m.market.id(), "restock")
+                    .args_json(json!({ "merchant_id": merchant_id, "item": item }))
+                    .gas(BUY_GAS)
+                    .transact()
+                    .await;
+                // A refusal is the normal case — most shelves are above the
+                // trigger — so it is counted, never treated as an error.
+                match outcome {
+                    Ok(o) if o.is_success() => 1,
+                    _ => 0,
+                }
+            }
+        }).collect::<Vec<_>>();
+        let restocks: u32 = futures::future::join_all(sweeps).await.into_iter().sum();
+        total_restocks += restocks;
+
         total_trades += trades;
         total_sales += sales;
 
@@ -399,8 +435,8 @@ async fn a_scripted_economy_moves_without_a_single_model_call() -> anyhow::Resul
         if closed_now > 0 && first_closure.is_none() {
             first_closure = Some(round);
         }
-        println!("{:>5}  {:>7}  {:>6}  {:>8}  {:>9}  {:>8}  {} / {}",
-                 round, trades, sales, refused, near(volume), closed_now, near(iron), near(oak));
+        println!("{:>5}  {:>7}  {:>6}  {:>8}  {:>9}  {:>9}  {:>8}  {} / {}",
+                 round, trades, sales, refused, restocks, near(volume), closed_now, near(iron), near(oak));
         total_refused += refused;
     }
 
@@ -441,7 +477,8 @@ async fn a_scripted_economy_moves_without_a_single_model_call() -> anyhow::Resul
     }
 
     let closed = m.closed_count().await?;
-    println!("\n{total_trades} purchases, {total_sales} sell-backs, {total_refused} refused on a stale quote, \
+    println!("\n{total_trades} purchases, {total_sales} sell-backs, {total_restocks} merchant restocks, \
+              {total_refused} refused on a stale quote, \
               {} NEAR of volume, {closed} merchant(s) closed{}, in {:.1}s of wall clock\n",
              near(volume),
              match first_closure { Some(r) => format!(" (first in round {r})"), None => String::new() },

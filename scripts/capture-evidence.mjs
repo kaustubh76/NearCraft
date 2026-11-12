@@ -24,7 +24,7 @@ const stamp = started.toISOString().replace(/[:.]/g, '-').slice(0, 19)
 /// failing one are different facts.
 const CHECKS = [
   { topic: 'unit-tests', cmd: 'npm', args: ['run', '--silent', 'test:contracts'],
-    proves: '93 Rust unit tests across all three contracts. Offline, no wasm target, no network.' },
+    proves: '106 Rust unit tests across all three contracts. Offline, no wasm target, no network.' },
   { topic: 'policy-and-injection', cmd: 'node', args: ['--test', 'tests/near/policy.mjs', 'tests/near/injection.mjs', 'tests/near/market.mjs'],
     proves: 'The policy layer refuses out-of-policy agent calls, a prompt-injected agent is blocked across two layers AND recognised as paying a known-bad account, and the plugin HTTP contract is well-formed. Offline.' },
   { topic: 'live-testnet-reads', cmd: 'npm', args: ['run', '--silent', 'reads'],

@@ -103,6 +103,47 @@ pub fn buy_price(base_price: u128, stock: u128, demand_bps: u128) -> u128 {
         .max(1)
 }
 
+// ----------------------------------------------------------------- restocking
+
+/// Below this, a merchant's shelf is thin enough to restock.
+///
+/// It is the top of the "nearly gone" band, so the trigger lines up with a
+/// price band a player can already see rather than being a number from nowhere.
+pub const RESTOCK_TRIGGER_STOCK: u128 = 32;
+
+/// What it restocks up to: the bottom of the reference band, where the
+/// scarcity multiplier is exactly 1.00x.
+pub const RESTOCK_TARGET_STOCK: u128 = 128;
+
+/// How many units a merchant should buy back, and what each one costs it.
+///
+/// The price is the bid it *would post for the restocked shelf*, not for the
+/// thin one it has. That inversion is the whole design, and it is provable
+/// rather than a matter of taste: `scarcity_bps` is non-increasing in stock, so
+/// for every `s < RESTOCK_TARGET_STOCK`
+///
+///   restock_cost = 0.8 x unit_price(target) < unit_price(target) <= unit_price(s)
+///
+/// — a merchant can never restock above what it just sold at. Pricing at the
+/// *current* thin bid (1.5-2.0x) would do the opposite: the merchant would pay
+/// more for goods than it sells them for, so every restock would be a
+/// guaranteed loss and the feature meant to keep merchants alive would kill
+/// them. `restocking_never_costs_more_than_the_shelf_just_sold_for` pins it.
+///
+/// Returns `(units, cost_per_unit)`, and `(0, _)` when nothing should happen —
+/// above the trigger, or too poor to afford even one unit.
+pub fn restock_plan(base_price: u128, stock: u128, demand_bps: u128, spare: u128) -> (u128, u128) {
+    let cost_per_unit = buy_price(base_price, RESTOCK_TARGET_STOCK, demand_bps);
+    if stock >= RESTOCK_TRIGGER_STOCK || cost_per_unit == 0 {
+        return (0, cost_per_unit);
+    }
+    let wanted = RESTOCK_TARGET_STOCK.saturating_sub(stock);
+    // Never spend into the floor: `spare` is already treasury minus floor, the
+    // same quantity every other buy-side path in this contract uses.
+    let affordable = spare / cost_per_unit;
+    (wanted.min(affordable), cost_per_unit)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,5 +244,70 @@ mod tests {
         let _ = decay_demand(u128::MAX, u64::MAX);
         let _ = bump_demand(u128::MAX, u128::MAX);
         let _ = ease_demand(0, u128::MAX);
+    }
+}
+
+#[cfg(test)]
+mod restock_tests {
+    use super::*;
+
+    const BASE: u128 = 400_000_000_000_000_000_000_000; // 0.4 NEAR, as the catalog
+
+    #[test]
+    fn a_full_shelf_is_not_restocked() {
+        for stock in [RESTOCK_TRIGGER_STOCK, 64, 128, 512, 9_999] {
+            let (units, _) = restock_plan(BASE, stock, BPS, u128::MAX);
+            assert_eq!(units, 0, "stock {stock} is at or above the trigger");
+        }
+    }
+
+    #[test]
+    fn a_thin_shelf_is_restocked_to_the_reference_band() {
+        let (units, _) = restock_plan(BASE, 31, BPS, u128::MAX);
+        assert_eq!(units, RESTOCK_TARGET_STOCK - 31, "fills exactly to the target");
+        let (units, _) = restock_plan(BASE, 0, BPS, u128::MAX);
+        assert_eq!(units, RESTOCK_TARGET_STOCK, "a sold-out shelf fills completely");
+    }
+
+    #[test]
+    fn a_poor_merchant_restocks_only_what_it_can_afford() {
+        let (_, unit) = restock_plan(BASE, 10, BPS, u128::MAX);
+        let (units, _) = restock_plan(BASE, 10, BPS, unit * 5);
+        assert_eq!(units, 5, "five units of spare buys five units");
+        let (units, _) = restock_plan(BASE, 10, BPS, unit - 1);
+        assert_eq!(units, 0, "and not one unit buys none");
+    }
+
+    #[test]
+    fn restocking_never_costs_more_than_the_shelf_just_sold_for() {
+        // THE invariant. If this ever fails, restocking is a money pump running
+        // backwards and merchants die of the feature meant to save them.
+        for demand in [BPS, 12_000, DEMAND_MAX_BPS] {
+            let (_, cost) = restock_plan(BASE, 0, demand, u128::MAX);
+            for stock in [0, 1, 31, 64, 127] {
+                let sold_at = unit_price(BASE, stock, demand);
+                assert!(
+                    cost < sold_at,
+                    "restock at {cost} must undercut the {sold_at} it sells for at stock {stock} (demand {demand})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_restock_price_is_the_target_shelf_bid_not_the_thin_one() {
+        let (_, cost) = restock_plan(BASE, 1, BPS, u128::MAX);
+        assert_eq!(cost, buy_price(BASE, RESTOCK_TARGET_STOCK, BPS));
+        assert!(
+            cost < buy_price(BASE, 1, BPS),
+            "pricing at the thin shelf's own bid would be the trap"
+        );
+    }
+
+    #[test]
+    fn restocking_cannot_overflow() {
+        let (units, cost) = restock_plan(u128::MAX, 0, u128::MAX, u128::MAX);
+        assert!(units <= RESTOCK_TARGET_STOCK);
+        assert!(cost > 0);
     }
 }

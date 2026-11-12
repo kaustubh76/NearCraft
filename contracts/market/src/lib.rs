@@ -28,17 +28,22 @@ use near_sdk::{
 };
 
 pub mod pricing;
-use pricing::{buy_price, scarcity_band, unit_price, BPS};
+use pricing::{buy_price, restock_plan, scarcity_band, unit_price, BPS};
 
 const GAS_FOR_MT_TRANSFER: Gas = Gas::from_tgas(15);
 const GAS_FOR_DELIVERY_CALLBACK: Gas = Gas::from_tgas(12);
 /// A payout callback only restores a ledger entry, so it needs very little.
 const GAS_FOR_PAYOUT_CALLBACK: Gas = Gas::from_tgas(8);
+const GAS_FOR_MT_MINT: Gas = Gas::from_tgas(15);
+const GAS_FOR_RESTOCK_CALLBACK: Gas = Gas::from_tgas(10);
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
 
 #[ext_contract(ext_items)]
 #[allow(dead_code)]
 trait Items {
+    /// Owner-only on the items contract, and this contract IS that owner — which
+    /// is what lets a merchant restock without anyone minting for it by hand.
+    fn mt_mint(&mut self, token_id: String, amount: U128, receiver_id: AccountId);
     fn mt_transfer(
         &mut self,
         receiver_id: AccountId,
@@ -68,6 +73,7 @@ trait MarketCallbacks {
         count: U128,
         proceeds: U128,
     );
+    fn on_restocked(&mut self, merchant_id: AccountId, item: String, units: U128, cost: U128);
     fn on_credit_paid(&mut self, who: AccountId, amount: U128);
     fn on_treasury_paid(&mut self, merchant_id: AccountId, amount: U128);
 }
@@ -579,6 +585,114 @@ impl Market {
 
     /// Take your credited proceeds. Players and merchants both use this; a
     /// merchant's treasury is separate and only it can withdraw it.
+    /// Restock a thin shelf out of the merchant's own treasury.
+    ///
+    /// **Permissionless and non-payable, deliberately.** The `games` track asks
+    /// for "economies that evolve without a dev patch", and until this existed
+    /// the only way to put goods back on a shelf was the contract owner calling
+    /// `list_item` — which is precisely a dev patch. Anyone may now poke a thin
+    /// merchant, and a function-call key can do it because nothing is attached.
+    ///
+    /// Why it is not a griefing vector: the trigger is self-limiting. After one
+    /// restock the shelf sits at `RESTOCK_TARGET_STOCK`, and nobody can re-arm
+    /// it without *buying* the stock back down at a rising price. Repeated
+    /// poking is a no-op, and the merchant comes out ahead in cash each time —
+    /// see the arithmetic on `restock_plan`.
+    ///
+    /// Why it is not inside `buy` or `sell`: those paths already make a
+    /// cross-contract call with a rollback, and adding a second, independent
+    /// money movement to a path that has to unwind atomically is how an economy
+    /// starts leaking. Keeping it separate keeps both rollbacks simple.
+    pub fn restock(&mut self, merchant_id: AccountId, item: String) -> Promise {
+        let merchant = self.merchants.get(&merchant_id).cloned().expect("no such merchant");
+        let key = ListingKey { merchant_id: merchant_id.clone(), item: item.clone() };
+        let listing = self.listings.get(&key).cloned().expect("this merchant does not deal in that material");
+
+        let demand = self.current_demand(&listing);
+        let spare = merchant.treasury.0.saturating_sub(merchant.floor.0);
+        let (units, cost_per_unit) = restock_plan(listing.base_price.0, listing.stock.0, demand, spare);
+
+        require!(
+            listing.stock.0 < pricing::RESTOCK_TRIGGER_STOCK,
+            "this shelf does not need restocking"
+        );
+        require!(units > 0, "this merchant cannot afford a single unit right now");
+
+        let cost = cost_per_unit * units;
+
+        // Books first, mint second, and the callback unwinds all of it if the
+        // mint fails — the same shape as every other cross-contract path here.
+        self.listings.insert(
+            key,
+            Listing { stock: U128(listing.stock.0 + units), ..listing },
+        );
+        let mut merchant = merchant;
+        merchant.treasury = U128(merchant.treasury.0 - cost);
+        self.merchants.insert(merchant_id.clone(), merchant);
+        // The wholesaler is the house: the spend leaves the merchant and lands
+        // as the owner's withdrawable credit, so it is a pure internal transfer
+        // and the ledger total does not move.
+        let owner = self.owner_id.clone();
+        self.credit(&owner, cost);
+
+        env::log_str(&format!(
+            "{merchant_id} restocked {units} {item} at {} NEAR each, paying {} NEAR",
+            near_str(cost_per_unit),
+            near_str(cost)
+        ));
+
+        // Minting is what makes the shelf real. Raising `stock` without it would
+        // attribute goods this contract does not hold, and the next purchase
+        // would fail its delivery and roll back — the bug economy.rs exercises
+        // deliberately with an unbacked shelf.
+        ext_items::ext(self.items_contract.clone())
+            .with_static_gas(GAS_FOR_MT_MINT)
+            .mt_mint(item.clone(), U128(units), env::current_account_id())
+            .then(
+                ext_self::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_RESTOCK_CALLBACK)
+                    .on_restocked(merchant_id, item, U128(units), U128(cost)),
+            )
+    }
+
+    /// Unwind a restock whose mint failed.
+    #[private]
+    pub fn on_restocked(
+        &mut self,
+        merchant_id: AccountId,
+        item: String,
+        units: U128,
+        cost: U128,
+        #[callback_result] result: Result<(), PromiseError>,
+    ) -> bool {
+        if result.is_ok() {
+            return true;
+        }
+        let key = ListingKey { merchant_id: merchant_id.clone(), item: item.clone() };
+        if let Some(listing) = self.listings.get(&key).cloned() {
+            self.listings.insert(
+                key,
+                Listing { stock: U128(listing.stock.0.saturating_sub(units.0)), ..listing },
+            );
+        }
+        if let Some(merchant) = self.merchants.get(&merchant_id).cloned() {
+            self.merchants.insert(
+                merchant_id.clone(),
+                Merchant { treasury: U128(merchant.treasury.0 + cost.0), ..merchant },
+            );
+        }
+        // Take the owner's credit back too, or the restock would have paid the
+        // house for goods that never arrived.
+        let owner = self.owner_id.clone();
+        let held = self.credits.get(&owner).copied().unwrap_or(U128(0)).0;
+        self.credits.insert(owner, U128(held.saturating_sub(cost.0)));
+        env::log_str(&format!(
+            "{merchant_id} could not mint {} {item}; the restock was unwound",
+            units.0
+        ));
+        false
+    }
+
     pub fn withdraw(&mut self) -> Promise {
         let who = env::predecessor_account_id();
         let amount = self.credits.get(&who).copied().unwrap_or(U128(0)).0;
@@ -908,6 +1022,129 @@ mod tests {
     }
 
     /// The whole purchase unwinds if the NEP-245 delivery fails.
+    // ------------------------------------------------------------- restocking
+
+    /// A market whose iron shelf is thin enough to restock.
+    fn thin_market() -> Market {
+        let mut m = market();
+        ctx(owner(), 0);
+        m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(10));
+        m
+    }
+
+    #[test]
+    fn restocking_moves_stock_treasury_and_the_house_credit_together() {
+        let mut m = thin_market();
+        let treasury_before = m.merchant_treasury_for(ironmonger());
+        let house_before = m.credit_of(owner()).0;
+        let demand_before = m.quote(ironmonger(), IRON.to_string(), 1).demand_bps;
+
+        // Anyone may poke it — this is called as a player, not as the owner.
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+
+        let after = m.quote(ironmonger(), IRON.to_string(), 1);
+        assert_eq!(after.stock, U128(128), "filled to the reference band");
+
+        let spent = treasury_before - m.merchant_treasury_for(ironmonger());
+        assert!(spent > 0, "the merchant paid for it");
+        assert_eq!(
+            m.credit_of(owner()).0 - house_before,
+            spent,
+            "the wholesaler is the house: every yocto the merchant spent landed as owner credit"
+        );
+        assert_eq!(
+            after.demand_bps, demand_before,
+            "a restock is not a player buying or selling, so demand must not move"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "this shelf does not need restocking")]
+    fn a_well_stocked_shelf_refuses_to_restock() {
+        let mut m = market(); // 256 iron, far above the trigger
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot afford a single unit")]
+    fn a_merchant_at_its_floor_cannot_restock() {
+        ctx(owner(), 0);
+        let mut m = Market::new(owner(), items());
+        m.register_merchant(ironmonger(), "Ironmonger".into(), U128(0));
+        m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(5));
+        // No treasury at all, so no spare.
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+    }
+
+    #[test]
+    fn restocking_never_spends_into_the_floor() {
+        let mut m = thin_market();
+        let floor = m.merchant(ironmonger()).unwrap().floor.0;
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+        assert!(
+            m.merchant_treasury_for(ironmonger()) >= floor,
+            "the floor is the one line a merchant never crosses"
+        );
+    }
+
+    #[test]
+    fn a_failed_mint_unwinds_the_whole_restock() {
+        let mut m = thin_market();
+        let treasury_before = m.merchant_treasury_for(ironmonger());
+        let house_before = m.credit_of(owner()).0;
+
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+        let spent = treasury_before - m.merchant_treasury_for(ironmonger());
+        assert_eq!(m.quote(ironmonger(), IRON.to_string(), 1).stock, U128(128));
+
+        // The mint failed: the shelf must not claim goods this contract does not
+        // hold, or the next purchase would fail its delivery instead.
+        ctx("market.test.near".parse().unwrap(), 0);
+        let ok = m.on_restocked(
+            ironmonger(), IRON.to_string(), U128(118), U128(spent),
+            Err(PromiseError::Failed),
+        );
+
+        assert!(!ok);
+        assert_eq!(m.quote(ironmonger(), IRON.to_string(), 1).stock, U128(10), "shelf restored");
+        assert_eq!(m.merchant_treasury_for(ironmonger()), treasury_before, "treasury restored");
+        assert_eq!(m.credit_of(owner()).0, house_before, "the house was not paid for goods that never arrived");
+        assert!(get_logs().iter().any(|l| l.contains("restock was unwound")));
+    }
+
+    #[test]
+    fn a_successful_mint_unwinds_nothing() {
+        let mut m = thin_market();
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+        let treasury = m.merchant_treasury_for(ironmonger());
+
+        ctx("market.test.near".parse().unwrap(), 0);
+        let ok = m.on_restocked(ironmonger(), IRON.to_string(), U128(118), U128(1), Ok(()));
+
+        assert!(ok);
+        assert_eq!(m.quote(ironmonger(), IRON.to_string(), 1).stock, U128(128), "shelf kept");
+        assert_eq!(m.merchant_treasury_for(ironmonger()), treasury, "treasury kept");
+    }
+
+    #[test]
+    fn restocking_leaves_the_ledger_total_unchanged() {
+        // A restock moves money from a treasury to the house credit and nowhere
+        // else, so the contract's total obligations must not budge. This is the
+        // money invariant in miniature.
+        let mut m = thin_market();
+        let total_before = m.merchant_treasury_for(ironmonger()) + m.credit_of(owner()).0;
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+        let total_after = m.merchant_treasury_for(ironmonger()) + m.credit_of(owner()).0;
+        assert_eq!(total_before, total_after, "a restock must be a pure internal transfer");
+    }
+
     #[test]
     fn a_failed_credit_payout_puts_the_credit_back() {
         let mut m = market();

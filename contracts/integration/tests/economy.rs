@@ -298,3 +298,109 @@ async fn a_merchant_can_be_flooded_until_it_stops_buying() -> anyhow::Result<()>
         "a refused lot must come back to the seller");
     Ok(())
 }
+
+/// Restocking mints real tokens, not just a bigger number in the market's books.
+///
+/// This is the only layer that can prove it. A unit test sees `stock` rise and
+/// is satisfied; only a real node can confirm the market's NEP-245 balance rose
+/// to back it. Raising `stock` without minting is exactly the unbacked-shelf bug
+/// that `a_purchase_of_an_unbacked_shelf_rolls_back` exercises on purpose, and
+/// it would not surface until a player's delivery failed.
+#[tokio::test]
+async fn restocking_mints_the_goods_it_claims() -> anyhow::Result<()> {
+    let world = World::setup().await?;
+
+    // Set the shelf thin directly rather than buying it down. Draining 256
+    // units at a rising scarcity price costs more NEAR than the sandbox budget
+    // allows, and player-driven draining already has its own test
+    // (`a_merchant_can_be_flooded_until_it_stops_buying`). What this test is
+    // for is the mint, so put the shelf where the trigger fires and keep the
+    // assertion on the thing being proved.
+    //
+    // Lowering the attribution is safe: setup minted 100,000 to the market, so
+    // the shelf is still fully backed before the restock.
+    let player = world
+        .root
+        .create_subaccount("restocker")
+        .initial_balance(NearToken::from_near(10))
+        .transact()
+        .await?
+        .into_result()?;
+
+    // list_item is owner-only, and World's owner is root.
+    world
+        .root
+        .call(world.market.id(), "list_item")
+        .args_json(json!({
+            "merchant_id": world.ironmonger.id(), "item": IRON,
+            "base_price": NearToken::from_millinear(400).as_yoctonear().to_string(), "stock": "10",
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+
+    let stock_before = world.stock_of(IRON).await?;
+    let backing_before = world.balance_of(world.market.as_account(), IRON).await?;
+    let treasury_before = world.merchant_treasury().await?;
+    println!("\n--- shelf drained to {stock_before}, market holds {backing_before} {IRON} ---");
+
+    // Anyone may poke it. Called by the player, not the owner — that is the
+    // whole point of "an economy that evolves without a dev patch".
+    let outcome = player
+        .call(world.market.id(), "restock")
+        .args_json(json!({ "merchant_id": world.ironmonger.id(), "item": IRON }))
+        .max_gas()
+        .transact()
+        .await?;
+    assert!(outcome.is_success(), "restock failed: {:?}", outcome.clone().into_result().unwrap_err());
+
+    let stock_after = world.stock_of(IRON).await?;
+    let backing_after = world.balance_of(world.market.as_account(), IRON).await?;
+    let treasury_after = world.merchant_treasury().await?;
+    let minted = backing_after - backing_before;
+    println!("--- restocked to {stock_after}, market now holds {backing_after} (minted {minted}) ---");
+
+    // Not 128. This merchant is budget-capped, and that is the design working:
+    // World funds it with 15 NEAR against a 1 NEAR floor, so 14 NEAR of spare
+    // buys 43 units at the 0.32 NEAR target-shelf bid. A merchant restocks
+    // toward the reference band, never past what it can pay for, and never into
+    // its floor.
+    assert!(stock_after > stock_before, "the shelf grew");
+    assert!(stock_after <= 128, "never past the reference band");
+    assert_eq!(
+        minted,
+        stock_after - stock_before,
+        "every unit added to the shelf must be backed by a real minted token"
+    );
+    assert!(treasury_after < treasury_before, "the merchant paid for its own restock");
+    let floor = {
+        let m: serde_json::Value = world
+            .market
+            .view("merchant")
+            .args_json(json!({ "merchant_id": world.ironmonger.id() }))
+            .await?
+            .json()?;
+        m["floor"].as_str().unwrap().parse::<u128>()?
+    };
+    assert!(treasury_after >= floor, "and never into its floor");
+
+    // And the restocked shelf actually delivers, which is the thing an unbacked
+    // shelf would fail at.
+    let held_before = world.balance_of(&player, IRON).await?;
+    let total = world.quote_total(IRON, 4).await?;
+    let bought = player
+        .call(world.market.id(), "buy")
+        .args_json(json!({ "merchant_id": world.ironmonger.id(), "item": IRON, "count": 4 }))
+        .deposit(NearToken::from_yoctonear(total))
+        .max_gas()
+        .transact()
+        .await?;
+    assert!(bought.is_success(), "a restocked shelf must be able to deliver");
+    assert_eq!(
+        world.balance_of(&player, IRON).await? - held_before,
+        4,
+        "the materials arrived from the restocked shelf"
+    );
+
+    Ok(())
+}

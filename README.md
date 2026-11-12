@@ -23,7 +23,7 @@ column before the description.
 | `RULES.md` — round rules + sequence diagram | **Done.** Required by the `swarms` prompt before any code. |
 | `BASELINE.md` + hash-verified baseline import | **Done, machine-checked.** `npm run verify:baseline` |
 | `contracts/items` — NEP-245 materials | **Built and tested.** 29 unit tests. NEP-245 core 10/10 + Enumeration 2/2 + Approval Management 5/5, verified against the compiled ABI. Three spec ambiguities are decided and disclosed in the module header, including that `mt_is_approved` takes an explicit `owner_id` — the spec's signature names none, which a multi-token cannot answer. |
-| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 51 unit tests (including the pricing rule and the payout rollbacks). |
+| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 64 unit tests (the pricing rule, the payout rollbacks and restocking). |
 | `contracts/guard` — the shared blocklist, on-chain | **Built and tested.** 13 unit tests. Public, attributed by the runtime, not deletable by us. |
 | `backend/near/counterparty.mjs` — allow/warn/block | **Built and tested.** 23 tests. Pure scoring, no API key, no indexer. |
 | `backend/near` — signer, policy, warn→human approval | **Built and tested.** 59 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
@@ -37,6 +37,7 @@ column before the description.
 | `evidence/` | **Built.** `npm run evidence` retains each check's real output with its exit code and an output hash. Failures are kept, not edited out. |
 | Social / email login | **Built and tested.** [`backend/near/oidc.mjs`](backend/near/oidc.mjs) — JWKS fetch, JWT signature verification, `iss`/`aud`/`exp`/`nbf`/`sub` checks. 25 offline tests including `alg: none`, the HMAC confusion attack, a swapped payload and a token minted for another application. **Not configured against a real provider**, so the demo onboards seeded identities. |
 | Gasless play — no seed phrase, no popup, no gas prompt | **Built and measured on public testnet.** `npm run live:player`: a player holding **no full-access key at all** buys and sells on NEAR testnet and its balance moves by **exactly 0** — the relayer pays. Reproduced twice, hashes retained in `evidence/live/`. Also `npm run test:gasless` on a local node, plus 15 offline tests. [docs/GASLESS.md](docs/GASLESS.md) |
+| Merchant restocking — "an economy that evolves without a dev patch" | **Built and tested.** `market.restock(merchant_id, item)` is **permissionless and non-payable**, so anyone may refill a thin shelf and a scoped key can do it. The merchant pays out of its own treasury at the bid it *would post for the restocked shelf* — provably below what it sells for, so a restock can never be a loss — and never spends into its floor. It **mints** the goods through `items.mt_mint`, so a shelf never claims stock the contract does not hold; a sandbox test on a real node proves the market's NEP-245 balance rises by exactly the units added. 13 tests. |
 | Payout rollbacks | **Built and tested.** `withdraw` and `withdraw_treasury` used to zero the ledger and then fire a bare transfer with no callback: a failed payout debited the claimant and delivered nothing, and the market silently kept money it no longer accounted for. Both now roll back. 3 unit tests. |
 | NEP-245 Approval Management | **Built and tested.** 10 unit tests. Implemented because without it a key-less player could buy but never sell. |
 | Minecraft plugin settlement path | **Not built**, and not startable here — no Java runtime on this machine and the Paper jar lives on the operator host. The note below also corrects our own earlier estimate of the work. |
@@ -233,7 +234,7 @@ Needs Rust and Node 22+, nothing else — not even the wasm target, because
 near-sdk unit tests build for the host. All three checks pass right now:
 
 ```sh
-npm run test:contracts    # 93 Rust unit tests across all three contracts
+npm run test:contracts    # 106 Rust unit tests across all three contracts
 npm run test:near         # 107 offline tests: policy, injection, counterparty, market, web, OIDC
 npm run verify:baseline   # 11 vendored files, SHA-256 unchanged
 ```
@@ -493,12 +494,25 @@ rather than an adjective. Take the cadence in `GAME_LOOP.md` — a player makes 
 trading decision every few minutes — and say each of five merchants serves one
 trade every ten minutes across eight active hours: that is about **1,680 trades
 a week**. At the measured 5.7 trades per second that is **roughly five minutes,
-not one** — and only if the shelves could be kept stocked, which this contract
-does not model, because merchants do not restock. Trades already fall from 17 a
-round to 10 as the market drains.
+not one**.
 
-So: a week of trading in about five minutes, under a stated definition, with
-restocking unimplemented. Not a week in a minute. We would rather print the rate
+**A correction to the reason this file used to give.** It said the shortfall was
+because "merchants do not restock", and that restocking was the missing piece.
+Merchants now restock — permissionlessly, out of their own treasuries — and it
+changed the figure by nothing, because that was never the binding constraint.
+Measured: across eight rounds the simulation poked all 25 shelves after every
+round and performed **zero** restocks, because no shelf ever fell below the
+trigger of 32 units. The fixture's shelves start at 64 to 2048.
+
+Trades fall from 17 a round to 10 for a different reason, which the run shows
+plainly: the *price* rises. Iron goes 0.448 to 0.614 NEAR as the demand
+multiplier climbs, and the bargain-hunting strategies stop buying once the unit
+price passes base. That is the price rule working, not the market running out of
+goods — and no amount of restocking addresses it.
+
+So: a week of trading in about five minutes, under a stated definition, and the
+limit is throughput rather than stock. Not a week in a minute. We would rather
+print the rate
 we measured than round it up.
 
 ### Needs a live testnet deployment (the bonus, not the proof)

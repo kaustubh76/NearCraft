@@ -167,6 +167,8 @@ const RETIRED_CLAIMS = [
     why: 'a scoped key sells through the non-payable market.sell under an approval' },
   { pattern: /61 Rust unit tests/i,
     why: 'the count has moved on; run npm run test:contracts for the current figure' },
+  { pattern: /does not model, because merchants do not restock/i,
+    why: 'merchants do restock now, permissionlessly, and it was never the binding constraint on throughput' },
   { pattern: /holds a function-call key, nothing more/i,
     why: 'an agent account also carries a disclosed operator full-access key; only the agent PROCESS holds just the scoped key' },
 ]

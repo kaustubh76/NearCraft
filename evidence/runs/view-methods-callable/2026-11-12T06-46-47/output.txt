@@ -1,0 +1,36 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.68s
+     Running tests/views.rs (target/debug/deps/views-8c037fdba2a085b5)
+
+running 1 test
+
+--- calling 26 view methods as real view calls ---
+  ok        items.dev-20261112064724-98216672237109.test.near.contract_source_metadata
+  ok        items.dev-20261112064724-98216672237109.test.near.mt_owner
+  ok        items.dev-20261112064724-98216672237109.test.near.mt_balance_of
+  ok        items.dev-20261112064724-98216672237109.test.near.mt_batch_balance_of
+  ok        items.dev-20261112064724-98216672237109.test.near.mt_supply
+  ok        items.dev-20261112064724-98216672237109.test.near.mt_batch_supply
+  ok        items.dev-20261112064724-98216672237109.test.near.mt_token
+  ok        items.dev-20261112064724-98216672237109.test.near.mt_tokens
+  ok        items.dev-20261112064724-98216672237109.test.near.mt_tokens_for_owner
+  ok        items.dev-20261112064724-98216672237109.test.near.mt_token_approval
+  ok        items.dev-20261112064724-98216672237109.test.near.mt_is_approved
+  ok        market.dev-20261112064724-98216672237109.test.near.contract_source_metadata
+  ok        market.dev-20261112064724-98216672237109.test.near.items_contract
+  ok        market.dev-20261112064724-98216672237109.test.near.merchants
+  ok        market.dev-20261112064724-98216672237109.test.near.merchant
+  ok        market.dev-20261112064724-98216672237109.test.near.is_closed
+  ok        market.dev-20261112064724-98216672237109.test.near.credit_of
+  ok        market.dev-20261112064724-98216672237109.test.near.quote
+  ok        market.dev-20261112064724-98216672237109.test.near.quotes
+  ok        guard.dev-20261112064724-98216672237109.test.near.contract_source_metadata
+  ok        guard.dev-20261112064724-98216672237109.test.near.threshold
+  ok        guard.dev-20261112064724-98216672237109.test.near.blocked
+  ok        guard.dev-20261112064724-98216672237109.test.near.is_reported
+  ok        guard.dev-20261112064724-98216672237109.test.near.reporter_count
+  ok        guard.dev-20261112064724-98216672237109.test.near.reports_for
+  ok        guard.dev-20261112064724-98216672237109.test.near.summary
+test every_view_method_is_callable_as_a_view ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.28s
+
