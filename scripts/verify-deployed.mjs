@@ -48,10 +48,30 @@ try {
 const p = provider()
 const n = names(manifest.root || rootAccountId())
 
+/// What the contract says about its own build, per NEP-330.
+///
+/// This is not decoration. A reproducible build embeds the commit hash in the
+/// wasm, so the deployed bytes are pinned to ONE commit: rebuilding the same
+/// source at a later commit produces different bytes and a DIFFERS here. A
+/// verifier therefore has to check out the commit the contract names, and the
+/// only place that commit is recorded is the contract itself.
+async function buildInfo(accountId) {
+  try {
+    const meta = await p.callFunction({ contractId: accountId, method: 'contract_source_metadata', args: {} })
+    return meta?.build_info ?? null
+  } catch {
+    return null
+  }
+}
+
+/// `git+https://host/org/repo?rev=<sha>` -> the sha.
+const revOf = (info) => info?.source_code_snapshot?.match(/rev=([0-9a-f]{7,40})/)?.[1] ?? null
+
 console.log('\nIs the deployed code the code in this repo?')
 console.log(`rpc ${manifest.rpc}\n`)
 
 const problems = []
+const revs = new Set()
 let checked = 0
 
 for (const [name, wasmUrl] of Object.entries(WASM)) {
@@ -82,11 +102,17 @@ for (const [name, wasmUrl] of Object.entries(WASM)) {
   }
 
   checked += 1
+  const info = await buildInfo(accountId)
+  const rev = revOf(info)
+  if (rev) revs.add(rev)
   if (live === NO_CODE) {
     problems.push(`${name}: ${accountId} has no contract deployed at all`)
     console.log(`  ${name.padEnd(8)} ${accountId.padEnd(32)} NO CODE`)
   } else if (live === expected) {
     console.log(`  ${name.padEnd(8)} ${accountId.padEnd(32)} MATCH    ${live}`)
+    console.log(`  ${' '.repeat(8)} ${' '.repeat(32)}          ${
+      info ? `built reproducibly from ${rev ?? 'an unnamed revision'}` : 'no build_info — built outside a pinned container'
+    }`)
   } else {
     problems.push(`${name}: the chain runs ${live}, this repo builds ${expected}`)
     console.log(`  ${name.padEnd(8)} ${accountId.padEnd(32)} DIFFERS  ${live}`)
@@ -117,5 +143,18 @@ if (problems.length) {
 
 console.log(
   `\nall ${checked} deployed contract(s) hash to the wasm this repo builds, ` +
-  'verified with no credentials\n'
+  'verified with no credentials'
 )
+if (revs.size === 1) {
+  const [rev] = revs
+  console.log(
+    `\nThe chain says all of it was built from commit ${rev}. To reproduce the\n` +
+    'bytes yourself — the commit matters, because a reproducible build embeds it:\n' +
+    `  git checkout ${rev} && npm run build:reproducible && npm run verify:deployed\n`
+  )
+} else if (revs.size > 1) {
+  console.log(
+    `\nNote: the contracts were built from ${revs.size} different commits ` +
+    `(${[...revs].join(', ')}).\nThat is legal but worth knowing — verify each against its own.\n`
+  )
+}

@@ -112,9 +112,17 @@ deployed contracts are now built with `cargo near build reproducible-wasm`,
 inside a digest-pinned container, from a commit:
 
 ```sh
+git checkout 4da447eb17c279c4ba4d1f3f07a9ec4e2561baac
 npm run build:reproducible      # needs Docker; ~3 min per contract
 npm run verify:deployed
 ```
+
+**The checkout is not optional, and the reason is worth knowing:** a
+reproducible build embeds the commit hash *in the wasm* — `strings` will find it
+— so the deployed bytes are pinned to exactly one commit. Rebuild the identical
+contract source at a later commit and you get different bytes and a mismatch.
+`npm run verify:deployed` prints the commit the chain names and the command to
+use, so you do not have to find it here.
 
 So the hashes above are a function of the committed source and nothing else. The
 chain will tell you which commit and which container, because NEP-330
