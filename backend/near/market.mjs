@@ -73,7 +73,23 @@ export function quoteRequest({ marketContract, merchantId, item, count }) {
 
 // ------------------------------------------------------------------ writes
 
-/// A player purchase. Pure: builds the call, signs nothing.
+// ------------------------------------- writes: the FULL-ACCESS player path
+//
+// The two builders below attach a deposit, so they are reachable only by a
+// player who holds a full-access key and signs for themselves — the shape the
+// Minecraft port will need, where the player has their own wallet.
+//
+// **They are not the path this product's players take.** A NearCraft player
+// holds one function-call access key and nothing else, and such a key cannot
+// attach a deposit at all; nor can a relayed NEP-366 delegate's inner action,
+// which nearcore refuses with "Deposit is not allowed with function call"
+// (proved in tests/near/gasless.mjs). Those players go through the
+// non-payable builders further down, submitted by the relayer.
+//
+// Keeping both is deliberate: this is the seam the Minecraft settlement port
+// plugs into, and deleting it would mean rebuilding it from memory later.
+
+/// A player purchase, signed by the player with a full-access key. Pure.
 ///
 /// `deposit` is the quoted total, passed through as a string so a 24-digit
 /// yoctoNEAR amount never touches a JS number.
@@ -95,9 +111,13 @@ export function buyRequest({ marketContract, merchantId, item, count, total }) {
   }
 }
 
-/// A player sale. Routed through NEP-245's transfer-and-call on the *items*
-/// contract, with the merchant account id as `msg` — the market contract's
-/// `mt_on_transfer` reads that to know who is buying.
+/// A player sale, signed by the player with a full-access key. Routed through
+/// NEP-245's transfer-and-call on the *items* contract, with the merchant
+/// account id as `msg` — the market contract's `mt_on_transfer` reads that to
+/// know who is buying.
+///
+/// Needs 1 yoctoNEAR, so a scoped key cannot take this path either. See
+/// `sellUnderApprovalRequest`.
 export function sellRequest({ itemsContract, marketContract, merchantId, item, count }) {
   return {
     contractId: requireAccount(itemsContract, 'ITEMS_CONTRACT_MALFORMED'),
@@ -113,6 +133,72 @@ export function sellRequest({ itemsContract, marketContract, merchantId, item, c
     gas: PLAYER_GAS,
     // NEP-245 requires exactly 1 yoctoNEAR on a transfer.
     deposit: 1n,
+  }
+}
+
+// --------------------------------------- writes: the SCOPED-KEY player path
+//
+// What a player holding one function-call key can actually do. Both are
+// non-payable by construction, which is the only reason they are reachable:
+// the money moves through a credit balance held inside the market contract,
+// and the materials move under a NEP-245 approval granted once at onboarding
+// while a bootstrap full-access key still existed.
+//
+// Each returns `{ methodName, args }` rather than a full request, because that
+// is exactly what `relayer.relay()` takes — the relayer builds the delegate
+// action and pays for it. Validation lives here so there is one place that
+// decides what a well-formed order is, rather than two that can disagree.
+
+/// A player purchase paid from credit. Non-payable, therefore relayable.
+export function buyWithCreditRequest({ merchantId, item, count }) {
+  return {
+    methodName: 'buy_with_credit',
+    args: {
+      merchant_id: requireAccount(merchantId, 'MERCHANT_ID_MALFORMED'),
+      item: requireItem(item),
+      count: requireCount(count),
+    },
+  }
+}
+
+/// A player sale under the standing approval. Non-payable, therefore relayable.
+///
+/// `approvalId` comes from the items contract's `mt_token_approval` view: the
+/// market was granted a standing allowance at onboarding, and NEP-245 requires
+/// the approval id to be quoted on the pull.
+export function sellUnderApprovalRequest({ merchantId, item, count, approvalId }) {
+  // A string of digits, not a number: see `approvalFor`.
+  if (typeof approvalId !== 'string' || !/^[0-9]+$/.test(approvalId)) {
+    throw new MarketRequestError('APPROVAL_ID_MALFORMED', String(approvalId))
+  }
+  return {
+    methodName: 'sell',
+    args: {
+      merchant_id: requireAccount(merchantId, 'MERCHANT_ID_MALFORMED'),
+      item: requireItem(item),
+      count: requireCount(count),
+      approval_id: approvalId,
+    },
+  }
+}
+
+/// A player staking credit in a merchant. Non-payable, therefore relayable —
+/// which is the whole reason `invest_with_credit` exists beside payable
+/// `invest`.
+///
+/// Note this is reachable only by a player whose key was ISSUED with the
+/// method: a player key is immutable for life, so one onboarded before
+/// `invest_with_credit` existed can never call it.
+export function investWithCreditRequest({ merchantId, amount }) {
+  if (typeof amount !== 'string' || !/^[0-9]+$/.test(amount) || amount === '0') {
+    throw new MarketRequestError('AMOUNT_NOT_A_YOCTO_STRING', String(amount))
+  }
+  return {
+    methodName: 'invest_with_credit',
+    args: {
+      merchant_id: requireAccount(merchantId, 'MERCHANT_ID_MALFORMED'),
+      amount,
+    },
   }
 }
 
@@ -200,6 +286,26 @@ async function viewCall(rpcUrl, { contractId, method, args }) {
   return JSON.parse(new TextDecoder().decode(new Uint8Array(body.result.result)))
 }
 
+/// A plain NEAR RPC query that is NOT a contract view.
+///
+/// `view_account` is a different `request_type` from `call_function`, so it
+/// cannot go through `viewCall` — and a player's NEAR balance is the one number
+/// the gasless claim is actually about, so it has to be readable here rather
+/// than only from a script.
+async function queryNode(rpcUrl, params) {
+  const res = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 'nearcraft', method: 'query', params }),
+  })
+  if (!res.ok) throw new MarketRequestError('RPC_HTTP_ERROR', `${res.status} ${res.statusText}`)
+  const body = await res.json()
+  if (body.error) {
+    throw new MarketRequestError('RPC_ERROR', body.error.data?.toString?.() ?? JSON.stringify(body.error))
+  }
+  return body.result
+}
+
 /// Read-only market client. Needs no key and no credentials, and runs in both
 /// Node and the browser.
 export function createMarketReader({ marketContract, itemsContract, rpcUrl = 'https://test.rpc.fastnear.com' }) {
@@ -232,6 +338,46 @@ export function createMarketReader({ marketContract, itemsContract, rpcUrl = 'ht
         method: 'mt_batch_balance_of',
         args: { account_id: requireAccount(accountId, 'ACCOUNT_MALFORMED'), token_ids: tokenIds.map(requireItem) },
       })
+    },
+
+    /// The spend budget the market holds for an account, in yoctoNEAR. This is
+    /// what a player actually spends: a scoped key cannot attach a deposit, so
+    /// buying draws on credit rather than on the account's balance.
+    async creditOf(accountId) {
+      return viewCall(rpcUrl, {
+        contractId: requireAccount(marketContract, 'MARKET_CONTRACT_MALFORMED'),
+        method: 'credit_of',
+        args: { account_id: requireAccount(accountId, 'ACCOUNT_MALFORMED') },
+      })
+    },
+
+    /// The approval id the market holds over one of an account's materials, or
+    /// null if there is none. NEP-245 requires it to be quoted on the pull, and
+    /// it was granted once at onboarding while a bootstrap full-access key
+    /// still existed — a scoped key could never grant another.
+    async approvalFor(accountId, item) {
+      const approval = await viewCall(rpcUrl, {
+        contractId: requireAccount(itemsContract, 'ITEMS_CONTRACT_MALFORMED'),
+        method: 'mt_token_approval',
+        args: { token_id: requireItem(item), account_id: requireAccount(accountId, 'ACCOUNT_MALFORMED') },
+      })
+      const grant = approval?.approved_account_ids?.[marketContract]
+      // Left as the string the chain gave. `approval_id` is a U64, which NEAR
+      // serialises as a JSON string, and the contract refuses an integer with
+      // "invalid type: integer, expected a string" — which is exactly what a
+      // Number() here caused on a live sell.
+      return grant ? String(grant.approval_id) : null
+    },
+
+    /// An account's NEAR balance in yoctoNEAR — the number the whole gasless
+    /// claim is about, so the page can show it moving by zero.
+    async nearBalance(accountId) {
+      const state = await queryNode(rpcUrl, {
+        request_type: 'view_account',
+        finality: 'final',
+        account_id: requireAccount(accountId, 'ACCOUNT_MALFORMED'),
+      })
+      return String(state.amount)
     },
   })
 }

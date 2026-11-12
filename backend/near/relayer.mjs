@@ -54,6 +54,29 @@ export function playerCall({ marketContract, methodName, args, gas = DEFAULT_GAS
 }
 
 /// A relayer. Holds a funded account and pays for other people's calls.
+/// Did the inner call actually succeed?
+///
+/// A relayed delegate has TWO layers of success, and only one of them is
+/// obvious. The outer transaction can succeed — the relayer's submission was
+/// well formed, signed and paid for — while the function call inside it
+/// panics. nearcore reports that as a Failure on a RECEIPT, not on the
+/// transaction, so a caller that checks the transaction gets a hash back for a
+/// call that did nothing at all.
+///
+/// Found live, not imagined: a player's `sell` panicked on a malformed
+/// approval_id and the play service answered 200 with a transaction hash. The
+/// player would have seen "sold" and still been holding the iron.
+export function innerFailure(outcome) {
+  for (const receipt of outcome?.receipts_outcome ?? []) {
+    const failure = receipt?.outcome?.status?.Failure
+    if (failure) {
+      const panic = failure?.ActionError?.kind?.FunctionCallError?.ExecutionError
+      return panic ?? JSON.stringify(failure)
+    }
+  }
+  return null
+}
+
 export function createRelayer({
   relayerAccountId,
   relayerKey,
@@ -104,6 +127,13 @@ export function createRelayer({
         event: 'relayed', player: playerAccountId, methodName,
         relayerPaid: (before - after).toString(),
       })
+
+      // The relayer paid either way — that is what being a relayer means — but
+      // reporting success for a call that panicked would make every caller of
+      // this function wrong in the same way.
+      const failure = innerFailure(outcome)
+      if (failure) throw new RelayRefusal('INNER_CALL_FAILED', failure)
+
       return { outcome, relayerPaid: before - after }
     },
 

@@ -13,7 +13,9 @@ import { fileURLToPath } from 'node:url'
 const ROOT = new URL('..', import.meta.url).pathname
 const PORT = Number(process.env.PORT ?? 8080)
 
-const TYPES = {
+/// Exported so scripts/serve-play.mjs serves the same files the same way
+/// rather than keeping a second table that can drift.
+export const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
