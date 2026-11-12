@@ -12,7 +12,7 @@ Built for the **NEAR HACKATHON** (1–14 November 2026). Tracks entered:
 
 ---
 
-## Status — 11 November 2026
+## Status — 12 November 2026
 
 This README describes what exists today, not what is planned. Read the status
 column before the description.
@@ -195,6 +195,19 @@ track is being entered on.
 ---
 
 ## Verify it yourself
+
+**Rehearsed the way you will meet it.** On 12 November 2026 this repository was
+cloned fresh from GitHub into an empty directory — no `.local/`, no
+`node_modules`, no build cache — and every command below was run against that
+clone. It found a real failure on the first one: `npm test` exited 1, because a
+documentation check added hours earlier flagged the gitignored `.local/`
+directory as missing. Fixed, re-cloned, re-run. `npm install && npm test` now
+passes all 183 checks from clean, `npm run reads` and `npm run keys` work with
+no credentials, `npm run check:nep245` without a build says
+`ABI not found — run npm run build:contracts first`, `npm run evidence` records
+6 pass and 6 **skipped** rather than pretending, and `npm run build:contracts`
+compiles from the cloned sources. The only things `.gitignore` excludes are
+credentials, `node_modules/` and build output, so a clone has every input.
 
 ### Runs today, no credentials, no network
 
