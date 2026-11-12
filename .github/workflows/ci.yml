@@ -23,7 +23,7 @@ jobs:
           node-version: '22'
       - uses: dtolnay/rust-toolchain@stable
       - run: npm ci --no-audit --no-fund
-      # 115 Rust unit tests + 107 offline Node tests + the 11 baseline hashes.
+      # 116 Rust unit tests + 107 offline Node tests + the 11 baseline hashes.
       - run: npm test
 
   sandbox:

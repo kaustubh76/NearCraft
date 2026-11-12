@@ -363,6 +363,22 @@ impl Market {
         self.credits.get(&account_id).copied().unwrap_or(U128(0))
     }
 
+    /// Everything this contract owes: every merchant treasury plus every credit
+    /// balance.
+    ///
+    /// Exists so solvency can be checked from outside — the contract's own NEAR
+    /// balance must always cover this, or it is promising money it does not
+    /// hold. A unit test cannot see that, because it has no account balance.
+    ///
+    /// O(state), and that is acceptable only because this economy is five
+    /// merchants and a handful of players. Saying so rather than letting a
+    /// reader assume it scales.
+    pub fn ledger_total(&self) -> U128 {
+        let treasuries: u128 = self.merchants.iter().map(|(_, m)| m.treasury.0).sum();
+        let credits: u128 = self.credits.iter().map(|(_, c)| c.0).sum();
+        U128(treasuries + credits)
+    }
+
     pub fn items_contract(&self) -> AccountId {
         self.items_contract.clone()
     }
@@ -1100,6 +1116,168 @@ mod tests {
     }
 
     /// The whole purchase unwinds if the NEP-245 delivery fails.
+    // ------------------------------------------------- the money invariant
+
+    /// Everything this contract owes, as the test sees it.
+    fn ledger(m: &Market) -> u128 {
+        m.ledger_total().0
+    }
+
+    /// The identity, asserted at a named step so a failure says where.
+    fn conserved(m: &Market, deposited: u128, paid_out: u128, step: &str) {
+        let held = ledger(m);
+        let expected = deposited - paid_out;
+        assert_eq!(
+            held, expected,
+            "the ledger drifted {step}: it holds {held}, but {deposited} deposited \
+             minus {paid_out} paid out is {expected}"
+        );
+    }
+
+    /// Every yoctoNEAR that enters this contract is still accounted for.
+    ///
+    ///   sum(treasuries) + sum(credits) == deposited - paid out
+    ///
+    /// `docs/RECAPITALIZATION.md` calls this the gate and it did not exist until
+    /// now, which matters because the contract has fourteen money-moving paths
+    /// and three of them were added the same day as this test.
+    ///
+    /// The point is the step-by-step assertion. Checking only at the end would
+    /// let two errors cancel; checking after every call says which one broke it.
+    /// Four payable entry points add, two withdrawals remove, and **everything
+    /// else must net to exactly zero** — a credit out and a treasury in, or the
+    /// reverse. Each rollback has to put back precisely what its forward path
+    /// took.
+    #[test]
+    fn every_yocto_is_accounted_for() {
+        let mut deposited: u128 = 0;
+        let mut paid_out: u128 = 0;
+
+        ctx(owner(), 0);
+        let mut m = Market::new(owner(), items());
+        conserved(&m, deposited, paid_out, "on a fresh contract");
+
+        // Registering and listing move no money at all.
+        m.register_merchant(ironmonger(), "Ironmonger".into(), U128(BASE));
+        m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(256));
+        conserved(&m, deposited, paid_out, "after registering and listing");
+
+        // ── in: the owner funds a treasury ──────────────────────────────────
+        ctx(owner(), BASE * 100);
+        m.fund_merchant(ironmonger());
+        deposited += BASE * 100;
+        conserved(&m, deposited, paid_out, "after fund_merchant");
+
+        // ── in: anyone funds a spend budget ─────────────────────────────────
+        ctx(player(), BASE * 50);
+        m.fund_credit(player());
+        deposited += BASE * 50;
+        conserved(&m, deposited, paid_out, "after fund_credit");
+
+        // ── in: a payable purchase, paid exactly ────────────────────────────
+        let total = m.quote(ironmonger(), IRON.to_string(), 4).total.0;
+        ctx(player(), total);
+        let _ = m.buy(ironmonger(), IRON.to_string(), 4);
+        deposited += total;
+        conserved(&m, deposited, paid_out, "after an exact buy");
+
+        // ── in: a purchase that overpays. The excess must stay inside, as
+        //       buyer credit, not vanish into the contract's pocket.
+        let total = m.quote(ironmonger(), IRON.to_string(), 4).total.0;
+        ctx(player(), total + BASE * 3);
+        let _ = m.buy(ironmonger(), IRON.to_string(), 4);
+        deposited += total + BASE * 3;
+        conserved(&m, deposited, paid_out, "after an overpaid buy");
+
+        // ── internal: a failed delivery rolls the purchase back ─────────────
+        ctx("market.test.near".parse().unwrap(), 0);
+        m.on_items_delivered(
+            player(), ironmonger(), IRON.to_string(), U128(4), U128(total),
+            Err(PromiseError::Failed),
+        );
+        conserved(&m, deposited, paid_out, "after a delivery rollback");
+
+        // ── internal: the agent path spends a budget ────────────────────────
+        ctx(player(), 0);
+        let _ = m.buy_with_credit(ironmonger(), IRON.to_string(), 2);
+        conserved(&m, deposited, paid_out, "after buy_with_credit");
+
+        // ── internal: a sale pulled under an approval ───────────────────────
+        ctx(player(), 0);
+        let _ = m.sell(ironmonger(), IRON.to_string(), 2, U64(1));
+        conserved(&m, deposited, paid_out, "after sell");
+
+        // ── internal: and its rollback ──────────────────────────────────────
+        let proceeds = m.quote(ironmonger(), IRON.to_string(), 2).merchant_bid.unwrap().0 * 2;
+        ctx("market.test.near".parse().unwrap(), 0);
+        m.on_materials_pulled(
+            player(), ironmonger(), IRON.to_string(), U128(2), U128(proceeds),
+            Err(PromiseError::Failed),
+        );
+        conserved(&m, deposited, paid_out, "after a sale rollback");
+
+        // ── internal: the push path, including a partial fill ───────────────
+        ctx(items(), 0);
+        m.mt_on_transfer(
+            player(), vec![player()], vec![IRON.to_string()], vec![U128(6)],
+            ironmonger().to_string(),
+        );
+        conserved(&m, deposited, paid_out, "after mt_on_transfer");
+
+        // ── internal: a restock pays the house out of the treasury ──────────
+        ctx(owner(), 0);
+        m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(8));
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+        conserved(&m, deposited, paid_out, "after a restock");
+
+        // ── internal: and its rollback ──────────────────────────────────────
+        ctx("market.test.near".parse().unwrap(), 0);
+        m.on_restocked(ironmonger(), IRON.to_string(), U128(1), U128(BASE), Err(PromiseError::Failed));
+        conserved(&m, deposited, paid_out, "after a restock rollback");
+
+        // ── in: a payable investment ────────────────────────────────────────
+        ctx(player(), BASE * 7);
+        let _ = m.invest(ironmonger());
+        deposited += BASE * 7;
+        conserved(&m, deposited, paid_out, "after invest");
+
+        // ── internal: investing from credit ─────────────────────────────────
+        ctx(player(), 0);
+        let _ = m.invest_with_credit(ironmonger(), U128(BASE * 2));
+        conserved(&m, deposited, paid_out, "after invest_with_credit");
+
+        // ── out: a credit withdrawal ────────────────────────────────────────
+        let owed = m.credit_of(player()).0;
+        ctx(player(), 0);
+        let _ = m.withdraw();
+        paid_out += owed;
+        conserved(&m, deposited, paid_out, "after withdraw");
+
+        // ── back in: the payout failed, so the claim returns ────────────────
+        ctx("market.test.near".parse().unwrap(), 0);
+        m.on_credit_paid(player(), U128(owed), Err(PromiseError::Failed));
+        paid_out -= owed;
+        conserved(&m, deposited, paid_out, "after a failed credit payout");
+
+        // ── out: a treasury withdrawal ──────────────────────────────────────
+        let merchant = m.merchant(ironmonger()).unwrap();
+        let withdrawable = merchant.treasury.0 - merchant.floor.0;
+        ctx(ironmonger(), 0);
+        let _ = m.withdraw_treasury();
+        paid_out += withdrawable;
+        conserved(&m, deposited, paid_out, "after withdraw_treasury");
+
+        // ── back in: that payout failed too ─────────────────────────────────
+        ctx("market.test.near".parse().unwrap(), 0);
+        m.on_treasury_paid(ironmonger(), U128(withdrawable), Err(PromiseError::Failed));
+        paid_out -= withdrawable;
+        conserved(&m, deposited, paid_out, "after a failed treasury payout");
+
+        // Fourteen paths, and not one yoctoNEAR unaccounted for.
+        assert!(deposited > 0 && ledger(&m) > 0, "the walk actually moved money");
+    }
+
     // -------------------------------------------------------------- investing
 
     /// A merchant flooded until its treasury sits at its floor: closed to

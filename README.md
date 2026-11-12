@@ -23,7 +23,7 @@ column before the description.
 | `RULES.md` — round rules + sequence diagram | **Done.** Required by the `swarms` prompt before any code. |
 | `BASELINE.md` + hash-verified baseline import | **Done, machine-checked.** `npm run verify:baseline` |
 | `contracts/items` — NEP-245 materials | **Built and tested.** 29 unit tests. NEP-245 core 10/10 + Enumeration 2/2 + Approval Management 5/5, verified against the compiled ABI. Three spec ambiguities are decided and disclosed in the module header, including that `mt_is_approved` takes an explicit `owner_id` — the spec's signature names none, which a multi-token cannot answer. |
-| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 73 unit tests (the pricing rule, the payout rollbacks, restocking and investment). |
+| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 74 unit tests (the pricing rule, the payout rollbacks, restocking, investment and the money invariant). |
 | `contracts/guard` — the shared blocklist, on-chain | **Built and tested.** 13 unit tests. Public, attributed by the runtime, not deletable by us. |
 | `backend/near/counterparty.mjs` — allow/warn/block | **Built and tested.** 23 tests. Pure scoring, no API key, no indexer. |
 | `backend/near` — signer, policy, warn→human approval | **Built and tested.** 59 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
@@ -37,6 +37,7 @@ column before the description.
 | `evidence/` | **Built.** `npm run evidence` retains each check's real output with its exit code and an output hash. Failures are kept, not edited out. |
 | Social / email login | **Built and tested.** [`backend/near/oidc.mjs`](backend/near/oidc.mjs) — JWKS fetch, JWT signature verification, `iss`/`aud`/`exp`/`nbf`/`sub` checks. 25 offline tests including `alg: none`, the HMAC confusion attack, a swapped payload and a token minted for another application. **Not configured against a real provider**, so the demo onboards seeded identities. |
 | Gasless play — no seed phrase, no popup, no gas prompt | **Built and measured on public testnet.** `npm run live:player`: a player holding **no full-access key at all** buys and sells on NEAR testnet and its balance moves by **exactly 0** — the relayer pays. Reproduced twice, hashes retained in `evidence/live/`. Also `npm run test:gasless` on a local node, plus 15 offline tests. [docs/GASLESS.md](docs/GASLESS.md) |
+| The money invariant | **Built and tested.** `sum(treasuries) + sum(credits) == deposited − paid out`, asserted after **every one** of the contract's fourteen money-moving calls, so a failure names the step rather than the session. Proved by injecting a real leak — a sale that credits the seller without debiting the treasury — which the test catches as "the ledger drifted after sell" with the 1.66 NEAR created from nothing. Plus the half a unit test cannot see: a sandbox test that the market's own NEAR balance always covers what it owes, across buys, a sale, an investment and a real withdrawal. `docs/RECAPITALIZATION.md`'s own formula for this was **wrong** — it double-counted stakes — and is corrected there. |
 | Reopening a broke merchant — the prompt's own sentence | **Built and tested.** The `games` prompt ends its description with "it closes its shop **until someone invests in it**". `market.invest(merchant_id)` is payable and permissionless; `market.invest_with_credit` is **non-payable** so a player holding one scoped key can call it at all — without that the mechanic would be unreachable for exactly the players it is for. `invest` returns whether the shop reopened, and says so in its log rather than claiming success when the amount fell short. What a funder gets back is the shop, not a dividend — and that is the incentive: a closed merchant will not buy from you. A tracked stake repaid from margin is the richer design in [docs/RECAPITALIZATION.md](docs/RECAPITALIZATION.md) and is **not** built, because it needs new contract state. 9 tests. |
 | Merchant restocking — "an economy that evolves without a dev patch" | **Built and tested.** `market.restock(merchant_id, item)` is **permissionless and non-payable**, so anyone may refill a thin shelf and a scoped key can do it. The merchant pays out of its own treasury at the bid it *would post for the restocked shelf* — provably below what it sells for, so a restock can never be a loss — and never spends into its floor. It **mints** the goods through `items.mt_mint`, so a shelf never claims stock the contract does not hold; a sandbox test on a real node proves the market's NEP-245 balance rises by exactly the units added. 13 tests. |
 | Payout rollbacks | **Built and tested.** `withdraw` and `withdraw_treasury` used to zero the ledger and then fire a bare transfer with no callback: a failed payout debited the claimant and delivered nothing, and the market silently kept money it no longer accounted for. Both now roll back. 3 unit tests. |
@@ -76,6 +77,16 @@ the no-full-access-key property against the protocol **first**, because if that
 were false nothing else would matter. It does not report per-call gas: measured
 either side of a single call, before nearcore credits the unused gas back, the
 two figures summed to 0.076 NEAR on a run that actually cost 0.0015.
+
+**Solvency, checkable by anyone with no credentials.** The deployed market
+answers `ledger_total()` — everything it owes, every merchant treasury plus
+every credit balance — so the one property that matters for a contract holding
+other people's money can be verified from outside:
+
+```
+ledger_total()                 0.897569 NEAR owed
+market.nearcraftmc.testnet     3.389757 NEAR held      solvent
+```
 
 **And the prompt's own sentence, on the public chain.** The `games` prompt ends
 its description with "it closes its shop until someone invests in it". Chandler
@@ -250,7 +261,7 @@ Needs Rust and Node 22+, nothing else — not even the wasm target, because
 near-sdk unit tests build for the host. All three checks pass right now:
 
 ```sh
-npm run test:contracts    # 115 Rust unit tests across all three contracts
+npm run test:contracts    # 116 Rust unit tests across all three contracts
 npm run test:near         # 107 offline tests: policy, injection, counterparty, market, web, OIDC
 npm run verify:baseline   # 11 vendored files, SHA-256 unchanged
 ```

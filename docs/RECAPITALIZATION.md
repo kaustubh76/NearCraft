@@ -85,7 +85,27 @@ demonstrates — and to say plainly that the other half is not there.
 - The margin attribution rule written down and unit-tested in `pricing.rs`
   alongside the price rule, in the same readable style.
 - A rollback test proving a failed delivery unwinds a margin split.
-- An invariant test: the sum of treasury, stakes outstanding and payouts made
-  equals everything ever deposited. A money contract without that is a guess.
+- An invariant test. **This one is built**, and the formula this document used
+  to state was wrong. It said "the sum of treasury, stakes outstanding and
+  payouts made equals everything ever deposited", which double-counts: a
+  stake's principal goes straight into the treasury, so it is already inside
+  the first term, and an outstanding claim is a promise about future margin
+  rather than money held. The identity that is actually asserted, in
+  `every_yocto_is_accounted_for`, is:
 
-Until those exist, this stays a design note.
+  ```
+  sum(merchant treasuries) + sum(credit balances)
+      == everything ever deposited − everything ever paid out
+  ```
+
+  It is checked after every one of the contract's fourteen money-moving calls,
+  not once at the end, so a failure names the step. Four payable entry points
+  add, two withdrawals remove, and everything else must net to exactly zero.
+  Solvency — that the NEAR to honour the ledger is really there — is the
+  separate sandbox half, `the_market_never_owes_more_than_it_holds`.
+
+  When stakes are added, they change nothing about this identity: a stake is a
+  deposit that lands in a treasury, and a payout is a credit. That is a reason
+  to be glad the formula was corrected before the accounting was built on it.
+
+Until the first two exist, the stake design stays a design note.

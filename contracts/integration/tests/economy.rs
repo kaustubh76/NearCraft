@@ -404,3 +404,98 @@ async fn restocking_mints_the_goods_it_claims() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// The contract must never promise more than it holds.
+///
+/// This is the half of the money invariant a unit test structurally cannot
+/// reach: a unit test has no account balance. `every_yocto_is_accounted_for`
+/// proves the ledger is internally consistent — deposits minus payouts — and
+/// this proves the NEAR to honour it is actually there, after a session of real
+/// trading with real transfers.
+///
+/// Asserted as `>=`, not `==`, and the gap is explained rather than tolerated:
+/// the market attaches 1 yoctoNEAR of its OWN balance to every `mt_transfer`,
+/// and a slice of its balance is locked as storage stake. Both push the balance
+/// away from the ledger in the *safe* direction. An `==` here would fail for
+/// reasons that are not bugs.
+#[tokio::test]
+async fn the_market_never_owes_more_than_it_holds() -> anyhow::Result<()> {
+    let world = World::setup().await?;
+    let player = world
+        .root
+        .create_subaccount("solvency")
+        .initial_balance(NearToken::from_near(30))
+        .transact()
+        .await?
+        .into_result()?;
+
+    let solvent = |label: &'static str, world: &World| {
+        let market = world.market.clone();
+        async move {
+            let owed: String = market.view("ledger_total").args_json(json!({})).await?.json()?;
+            let owed: u128 = owed.parse()?;
+            let held = market.as_account().view_account().await?.balance.as_yoctonear();
+            println!("  {label:<22} owes {owed:>30}  holds {held:>30}");
+            if held < owed {
+                anyhow::bail!("{label}: the market owes {owed} but holds only {held}");
+            }
+            Ok::<u128, anyhow::Error>(owed)
+        }
+    };
+
+    println!("\n--- solvency across a trading session ---");
+    solvent("at genesis", &world).await?;
+
+    // Buy, which moves a deposit in and goods out.
+    for _ in 0..3 {
+        let total = world.quote_total(IRON, 8).await?;
+        player
+            .call(world.market.id(), "buy")
+            .args_json(json!({ "merchant_id": world.ironmonger.id(), "item": IRON, "count": 8 }))
+            .deposit(NearToken::from_yoctonear(total))
+            .max_gas()
+            .transact()
+            .await?
+            .into_result()?;
+    }
+    solvent("after three buys", &world).await?;
+
+    // Sell back through the push path, which moves treasury to credit.
+    player
+        .call(world.items.id(), "mt_transfer_call")
+        .args_json(json!({
+            "receiver_id": world.market.id(), "token_id": IRON, "amount": "8",
+            "approval": null, "memo": null, "msg": world.ironmonger.id(),
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .max_gas()
+        .transact()
+        .await?
+        .into_result()?;
+    solvent("after selling back", &world).await?;
+
+    // Invest, another way in.
+    player
+        .call(world.market.id(), "invest")
+        .args_json(json!({ "merchant_id": world.ironmonger.id() }))
+        .deposit(NearToken::from_near(2))
+        .max_gas()
+        .transact()
+        .await?
+        .into_result()?;
+    solvent("after an investment", &world).await?;
+
+    // And a real withdrawal, which moves NEAR out for real.
+    let owed_before = solvent("before withdrawing", &world).await?;
+    player
+        .call(world.market.id(), "withdraw")
+        .args_json(json!({}))
+        .max_gas()
+        .transact()
+        .await?
+        .into_result()?;
+    let owed_after = solvent("after withdrawing", &world).await?;
+    assert!(owed_after < owed_before, "a withdrawal reduces what the market owes");
+
+    Ok(())
+}

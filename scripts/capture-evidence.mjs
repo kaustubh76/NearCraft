@@ -24,7 +24,7 @@ const stamp = started.toISOString().replace(/[:.]/g, '-').slice(0, 19)
 /// failing one are different facts.
 const CHECKS = [
   { topic: 'unit-tests', cmd: 'npm', args: ['run', '--silent', 'test:contracts'],
-    proves: '115 Rust unit tests across all three contracts. Offline, no wasm target, no network.' },
+    proves: '116 Rust unit tests across all three contracts. Offline, no wasm target, no network.' },
   { topic: 'policy-and-injection', cmd: 'node', args: ['--test', 'tests/near/policy.mjs', 'tests/near/injection.mjs', 'tests/near/market.mjs'],
     proves: 'The policy layer refuses out-of-policy agent calls, a prompt-injected agent is blocked across two layers AND recognised as paying a known-bad account, and the plugin HTTP contract is well-formed. Offline.' },
   { topic: 'live-testnet-reads', cmd: 'npm', args: ['run', '--silent', 'reads'],
@@ -49,6 +49,12 @@ const CHECKS = [
   { topic: 'access-key-limits', cmd: 'cargo', args: ['test', '-p', 'nearcraft-integration', '--test', 'keys', '--', '--nocapture'],
     cwd: 'contracts', requiresWasm: true,
     proves: 'A function-call access key scoped to one method, signed with THAT key against a real nearcore node. The protocol refuses everything else and names its own refusals.' },
+  { topic: 'money-invariant', cmd: 'cargo', args: ['test', '-p', 'nearcraft-market', '--lib', 'every_yocto_is_accounted_for', '--', '--nocapture'],
+    cwd: 'contracts',
+    proves: 'Every yoctoNEAR entering the market contract is still accounted for: sum(treasuries) + sum(credits) == deposited - paid out, asserted after EVERY ONE of the fourteen money-moving calls rather than once at the end, so a failure names the step rather than the session. Four payable entry points add, two withdrawals remove, and every other path — purchases, sales, the push path, restocks, credit investments and all four rollbacks — must net to exactly zero. Verified by injecting a real leak (a sale that credits the seller without debiting the treasury): the test names "after sell" and the 1.66 NEAR created from nothing.' },
+  { topic: 'solvency', cmd: 'cargo', args: ['test', '-p', 'nearcraft-integration', '--test', 'economy', 'the_market_never_owes_more_than_it_holds', '--', '--nocapture'],
+    cwd: 'contracts', requiresWasm: true,
+    proves: 'The market never promises more than it holds, across a real trading session on a real node: buys, a sale through the push path, an investment and a real withdrawal. This is the half a unit test cannot reach, because a unit test has no account balance. Asserted as >= rather than ==, because the contract spends 1 yoctoNEAR of its own balance per mt_transfer and locks a slice as storage stake — both drift the balance in the safe direction, and the run prints the figures so a reader can see the gap is exactly that.' },
   { topic: 'cross-contract-economy', cmd: 'cargo', args: ['test', '-p', 'nearcraft-integration', '--test', 'economy', '--', '--nocapture'],
     cwd: 'contracts', requiresWasm: true,
     proves: 'Buy, the rollback on a failed delivery, a sale through mt_transfer_call, a closed merchant refusing and the resolver refunding, and withdrawals moving real NEAR.' },
