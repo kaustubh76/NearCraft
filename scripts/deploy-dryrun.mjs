@@ -81,6 +81,14 @@ try {
     // redeploy path had never run anywhere, sandbox or testnet. A contract fix
     // that cannot be shipped is not a fix.
     ['npm run deploy with NEAR_REDEPLOY=1 — replacing live code', 'scripts/deploy.mjs', { NEAR_REDEPLOY: '1' }],
+    // A fourth pass with NEAR_MIGRATE, for the batched deploy+migrate — two
+    // actions in one transaction. The shape here is unchanged, so `migrate`
+    // takes its "already the current shape" branch; what this pass proves is
+    // that the TRANSACTION is well formed and that the contract is still
+    // readable afterwards. The cross-shape half is proved against the live
+    // bytes in contracts/integration/tests/migration.rs, which can break a
+    // contract on purpose where this cannot.
+    ['npm run deploy with NEAR_MIGRATE=market — batched deploy + migrate', 'scripts/deploy.mjs', { NEAR_MIGRATE: 'market' }],
     ['npm run reads — every merchant quote and reason', 'scripts/reads.mjs'],
     ['npm run keys — agent key limits, read back from the chain', 'scripts/keys.mjs'],
   ]) {

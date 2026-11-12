@@ -49,6 +49,17 @@ impl World {
     /// + 15 (treasury) + per-agent costs. Raising these without checking the
     /// total produces a NotEnoughBalance failure in setup rather than in a test.
     pub async fn setup() -> anyhow::Result<Self> {
+        Self::setup_with_market_wasm(&wasm("nearcraft_market")?).await
+    }
+
+    /// The same world, but with the market deployed from wasm you supply.
+    ///
+    /// Exists for the migration test, which has to deploy the bytes actually
+    /// running on testnet rather than a fresh build of them — otherwise it
+    /// proves that a build migrates itself, which is not the question. Every
+    /// bootstrap call below is one the live code already answers, so the
+    /// fixture goes through exactly this path.
+    pub async fn setup_with_market_wasm(market_wasm: &[u8]) -> anyhow::Result<Self> {
         let worker = near_workspaces::sandbox().await?;
         let root = worker.dev_create_account().await?;
 
@@ -66,7 +77,7 @@ impl World {
             .into_result()?;
 
         let items = items_account.deploy(&wasm("nearcraft_items")?).await?.into_result()?;
-        let market = market_account.deploy(&wasm("nearcraft_market")?).await?.into_result()?;
+        let market = market_account.deploy(market_wasm).await?.into_result()?;
 
         // The market owns the items contract, so it mints its own shop-floor pool.
         items.call("new").args_json(json!({ "owner_id": market.id() })).transact().await?.into_result()?;

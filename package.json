@@ -18,7 +18,7 @@
     "test": "npm run test:contracts && npm run test:near && npm run verify:baseline && npm run check:docs",
     "test:near": "node --test tests/near/policy.mjs tests/near/injection.mjs tests/near/market.mjs tests/near/counterparty.mjs tests/near/human-approval.mjs tests/near/onboarding.mjs tests/near/relayer.mjs tests/near/web.mjs tests/near/oidc.mjs",
     "check:nep245": "node scripts/check-nep245.mjs",
-    "test:sandbox": "cargo test --manifest-path contracts/Cargo.toml -p nearcraft-integration --test smoke --test views --test keys --test economy",
+    "test:sandbox": "cargo test --manifest-path contracts/Cargo.toml -p nearcraft-integration --test smoke --test views --test keys --test economy --test migration",
     "evidence": "node scripts/capture-evidence.mjs",
     "test:gasless": "node --test tests/near/gasless.mjs",
     "agent": "node scripts/agent-run.mjs",

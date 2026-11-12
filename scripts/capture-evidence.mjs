@@ -24,7 +24,7 @@ const stamp = started.toISOString().replace(/[:.]/g, '-').slice(0, 19)
 /// failing one are different facts.
 const CHECKS = [
   { topic: 'unit-tests', cmd: 'npm', args: ['run', '--silent', 'test:contracts'],
-    proves: '116 Rust unit tests across all three contracts. Offline, no wasm target, no network.' },
+    proves: '120 Rust unit tests across all three contracts. Offline, no wasm target, no network.' },
   { topic: 'policy-and-injection', cmd: 'node', args: ['--test', 'tests/near/policy.mjs', 'tests/near/injection.mjs', 'tests/near/market.mjs'],
     proves: 'The policy layer refuses out-of-policy agent calls, a prompt-injected agent is blocked across two layers AND recognised as paying a known-bad account, and the plugin HTTP contract is well-formed. Offline.' },
   { topic: 'live-testnet-reads', cmd: 'npm', args: ['run', '--silent', 'reads'],
@@ -47,7 +47,7 @@ const CHECKS = [
     proves: 'NEP-245 core 10/10, Enumeration 2/2 and Approval Management 5/5 present, Metadata absent as documented, and security-relevant modifiers correct — including that market.sell and buy_with_credit carry NO modifiers, since a function-call key cannot attach NEAR. Read off the ABI cargo-near emitted, not off our source comments.' },
   { topic: 'view-methods-callable', cmd: 'cargo', args: ['test', '-p', 'nearcraft-integration', '--test', 'views', '--', '--nocapture'],
     cwd: 'contracts', requiresWasm: true,
-    proves: 'All 26 view methods across the three contracts can actually be entered as view calls on a real node. nearcore forbids some host functions in a view context, and a &self method that reaches for one compiles, passes every unit test, and then fails for every real client with ProhibitedInView — mt_is_approved shipped with exactly that bug and no test here caught it. A view that panics on its arguments is recorded as reached; only an unenterable view fails this check.' },
+    proves: 'All 28 view methods across the three contracts can actually be entered as view calls on a real node, AND the list is checked against the compiled ABI so it cannot fall behind in silence — it already had: ledger_total was added in the money-invariant release and never added here, so the one view whose entire purpose is to be callable from outside was going uncalled by the test that exists to check exactly that. nearcore forbids some host functions in a view context, and a &self method that reaches for one compiles, passes every unit test, and then fails for every real client with ProhibitedInView — mt_is_approved shipped with exactly that bug and no test here caught it. A view that panics on its arguments is recorded as reached; only an unenterable view fails this check.' },
   { topic: 'access-key-limits', cmd: 'cargo', args: ['test', '-p', 'nearcraft-integration', '--test', 'keys', '--', '--nocapture'],
     cwd: 'contracts', requiresWasm: true,
     proves: 'A function-call access key scoped to one method, signed with THAT key against a real nearcore node. The protocol refuses everything else and names its own refusals.' },
@@ -57,6 +57,9 @@ const CHECKS = [
   { topic: 'solvency', cmd: 'cargo', args: ['test', '-p', 'nearcraft-integration', '--test', 'economy', 'the_market_never_owes_more_than_it_holds', '--', '--nocapture'],
     cwd: 'contracts', requiresWasm: true,
     proves: 'The market never promises more than it holds, across a real trading session on a real node: buys, a sale through the push path, an investment and a real withdrawal. This is the half a unit test cannot reach, because a unit test has no account balance. Asserted as >= rather than ==, because the contract spends 1 yoctoNEAR of its own balance per mt_transfer and locks a slice as storage stake — both drift the balance in the safe direction, and the run prints the figures so a reader can see the gap is exactly that.' },
+  { topic: 'state-migration', cmd: 'cargo', args: ['test', '-p', 'nearcraft-integration', '--test', 'migration', '--', '--nocapture'],
+    cwd: 'contracts', requiresWasm: true,
+    proves: 'The migration mechanism, against the bytes testnet is actually running. The test deploys contracts/integration/fixtures/market-live.wasm — fetched from market.nearcraftmc.testnet with a public view_code call, with its code_hash pinned and re-checked after deploying, so the fixture cannot be swapped for a convenient local build — writes state through it, then BREAKS the contract with a plain redeploy and asserts every view really does fail to deserialize, then rescues it with deploy+migrate as two actions in ONE transaction and asserts the ledger total, treasury, stock, credit and a live quote all came through unchanged. Also: a second migrate is a no-op rather than a reset, and a stranger calling migrate is refused with "Method migrate is private" — which no unit test can show, because near-sdk emits that check only in the wasm32 wrapper, and an un-private migrate would let anyone overwrite the contract state. Verified by injecting a real migration bug (dropping credits): the test named the 2 NEAR that vanished from ledger_total, which credit_of alone could not see.' },
   { topic: 'cross-contract-economy', cmd: 'cargo', args: ['test', '-p', 'nearcraft-integration', '--test', 'economy', '--', '--nocapture'],
     cwd: 'contracts', requiresWasm: true,
     proves: 'Buy, the rollback on a failed delivery, a sale through mt_transfer_call, a closed merchant refusing and the resolver refunding, and withdrawals moving real NEAR.' },

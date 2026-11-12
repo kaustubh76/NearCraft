@@ -1,0 +1,16 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.45s
+     Running unittests src/lib.rs (target/debug/deps/nearcraft_market-cf74c69643b1cbde)
+
+running 1 test
+delivery failed; purchase rolled back and 4096000000000000000000000 yoctoNEAR credited to bob
+could not pull materials from bob; sale unwound (approval missing, stale or exhausted?)
+ironmonger.test.near restocked 120 iron_ingot at 0.800 NEAR each, paying 96.000 NEAR
+ironmonger.test.near could not mint 1 iron_ingot; the restock was unwound
+bob invested 7.000 NEAR in ironmonger.test.near
+bob invested 2.000 NEAR of credit in ironmonger.test.near
+payout of 58.040 NEAR to bob failed; the credit has been restored
+treasury payout of 14.056 NEAR to ironmonger.test.near failed; the treasury has been restored
+test tests::every_yocto_is_accounted_for ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 77 filtered out; finished in 0.35s
+

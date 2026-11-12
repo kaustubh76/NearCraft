@@ -147,6 +147,38 @@ pub struct Market {
     listings: IterableMap<ListingKey, Listing>,
     /// Withdrawable proceeds, for players selling and for refunds.
     credits: IterableMap<AccountId, U128>,
+    /// What the stock now on a shelf cost the merchant to put there.
+    ///
+    /// Only `restock` writes it, so it is a record of money actually spent
+    /// rather than an estimate. Without it, revenue cannot be told from margin:
+    /// a merchant that restocked a thin shelf and then sold into a glut made a
+    /// LOSS, and no rule based on the sale price alone can see that.
+    ///
+    /// A top-level map rather than a field on `Listing`, deliberately: adding a
+    /// field to the nested struct would invalidate every stored listing value
+    /// and turn this migration into a per-entry rewrite onto a fresh prefix.
+    basis: IterableMap<ListingKey, U128>,
+}
+
+/// The state shape running on testnet today, kept only so `migrate` can read
+/// it.
+///
+/// Identical to `Market` minus `basis`, in the same field order with the same
+/// generic parameters, because borsh is positional: it reads bytes by layout,
+/// never by name. That is also why the old layout is a strict PREFIX of the new
+/// one, which is what makes the probe in `migrate` sound rather than lucky.
+///
+/// **The rule for this struct, so migrations never become archaeology:**
+/// `migrate` handles the current shape and the immediately-previous one, and
+/// nothing older. Delete `MarketV1` once the live contract has moved past it.
+#[derive(BorshDeserialize)]
+#[borsh(crate = "near_sdk::borsh")]
+struct MarketV1 {
+    owner_id: AccountId,
+    items_contract: AccountId,
+    merchants: IterableMap<AccountId, Merchant>,
+    listings: IterableMap<ListingKey, Listing>,
+    credits: IterableMap<AccountId, U128>,
 }
 
 #[near]
@@ -159,6 +191,58 @@ impl Market {
             merchants: IterableMap::new(b"m".to_vec()),
             listings: IterableMap::new(b"l".to_vec()),
             credits: IterableMap::new(b"c".to_vec()),
+            basis: IterableMap::new(b"b".to_vec()),
+        }
+    }
+
+    /// Carry live state across a code upgrade that changes the state layout.
+    ///
+    /// Borsh state is positional, so deploying code with an extra field over
+    /// existing state makes every method **and every view** panic with "Cannot
+    /// deserialize the contract state". This is the method that fixes that, and
+    /// it has to run in the SAME transaction as the deploy: between two
+    /// separate transactions the contract is unreadable, and a contract nobody
+    /// can read is a contract nobody can fix.
+    ///
+    /// `#[private]` is the entire security story. An un-private `migrate` would
+    /// let **anyone** overwrite the contract's state, which is the most
+    /// dangerous method signature in this project. It costs nothing to satisfy:
+    /// the batched deploy is signed by this account acting on itself, so
+    /// `predecessor == current` holds by construction. near-sdk emits that
+    /// check only inside the `target_arch = "wasm32"` wrapper, never in a unit
+    /// test, so `tests/migration.rs` is where it is actually proved.
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate() -> Self {
+        let raw = env::storage_read(b"STATE").expect("there is no state to migrate");
+
+        // The CURRENT shape first, so re-running migrate is a no-op instead of
+        // a corruption. At most one of these two can ever parse: borsh rejects
+        // trailing bytes, and the old layout is a strict prefix of the new one
+        // — so old bytes read as `Market` run out of input, and new bytes read
+        // as `MarketV1` leave a tail.
+        //
+        // `env::state_read` cannot express this. It PANICS on a shape mismatch
+        // rather than returning None, so the natural "try the new shape, fall
+        // back to the old" probe has to go through the raw bytes.
+        if let Ok(current) = Market::try_from_slice(&raw) {
+            env::log_str("migrate: state is already the current shape, nothing to carry");
+            return current;
+        }
+
+        let old = MarketV1::try_from_slice(&raw)
+            .expect("state is neither the current shape nor the one before it");
+        env::log_str("migrate: carried state forward from the shape that had no cost basis");
+        Market {
+            owner_id: old.owner_id,
+            items_contract: old.items_contract,
+            merchants: old.merchants,
+            listings: old.listings,
+            credits: old.credits,
+            // Empty, and that is the honest answer: restocks that happened
+            // before this migration spent money nobody recorded, so their cost
+            // cannot be reconstructed. Recording starts here.
+            basis: IterableMap::new(b"b".to_vec()),
         }
     }
 
@@ -178,6 +262,17 @@ impl Market {
         let key = ListingKey { merchant_id, item };
         match self.listings.get(&key).cloned() {
             Some(existing) => {
+                // `list_item` SETS stock rather than adding to it, so lowering
+                // it would otherwise leave basis paid for units that are gone.
+                // Scale it down proportionally; raising stock leaves basis alone,
+                // because units the owner conjured were not bought through
+                // `restock` and cost the merchant nothing.
+                if stock.0 < existing.stock.0 && existing.stock.0 > 0 {
+                    let held = self.basis.get(&key).copied().unwrap_or(U128(0)).0;
+                    if held > 0 {
+                        self.basis.insert(key.clone(), U128(held * stock.0 / existing.stock.0));
+                    }
+                }
                 self.listings.insert(key, Listing { base_price, stock, ..existing });
             }
             None => {
@@ -357,6 +452,15 @@ impl Market {
     /// verdict here but for different reasons.
     fn stocks_anything(&self, merchant_id: &AccountId) -> bool {
         self.listings.iter().any(|(key, _)| &key.merchant_id == merchant_id)
+    }
+
+    /// What the stock now on this shelf cost the merchant to put there.
+    ///
+    /// Zero means either "never restocked" or "restocked before cost basis
+    /// existed" — the two are indistinguishable on purpose, because they are the
+    /// same fact: nobody wrote the cost down.
+    pub fn basis_of(&self, merchant_id: AccountId, item: String) -> U128 {
+        self.basis.get(&ListingKey { merchant_id, item }).copied().unwrap_or(U128(0))
     }
 
     pub fn credit_of(&self, account_id: AccountId) -> U128 {
@@ -717,9 +821,13 @@ impl Market {
         // Books first, mint second, and the callback unwinds all of it if the
         // mint fails — the same shape as every other cross-contract path here.
         self.listings.insert(
-            key,
+            key.clone(),
             Listing { stock: U128(listing.stock.0 + units), ..listing },
         );
+        // What this stock cost, recorded at the moment it is spent. A cost not
+        // written down when it is incurred cannot be reconstructed afterwards.
+        let held_basis = self.basis.get(&key).copied().unwrap_or(U128(0)).0;
+        self.basis.insert(key, U128(held_basis + cost));
         let mut merchant = merchant;
         merchant.treasury = U128(merchant.treasury.0 - cost);
         self.merchants.insert(merchant_id.clone(), merchant);
@@ -765,10 +873,15 @@ impl Market {
         let key = ListingKey { merchant_id: merchant_id.clone(), item: item.clone() };
         if let Some(listing) = self.listings.get(&key).cloned() {
             self.listings.insert(
-                key,
+                key.clone(),
                 Listing { stock: U128(listing.stock.0.saturating_sub(units.0)), ..listing },
             );
         }
+        // The basis has to come back with the stock, or the shelf would carry a
+        // cost for units that never arrived and every later margin would be
+        // understated.
+        let held_basis = self.basis.get(&key).copied().unwrap_or(U128(0)).0;
+        self.basis.insert(key, U128(held_basis.saturating_sub(cost.0)));
         if let Some(merchant) = self.merchants.get(&merchant_id).cloned() {
             self.merchants.insert(
                 merchant_id.clone(),
@@ -1437,6 +1550,109 @@ mod tests {
         assert_eq!(
             after.demand_bps, demand_before,
             "a restock is not a player buying or selling, so demand must not move"
+        );
+    }
+
+    #[test]
+    fn a_restock_records_what_it_paid() {
+        let mut m = thin_market();
+        assert_eq!(
+            m.basis_of(ironmonger(), IRON.to_string()),
+            U128(0),
+            "a shelf nobody has restocked has no recorded cost"
+        );
+        let treasury_before = m.merchant_treasury_for(ironmonger());
+
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+
+        let spent = treasury_before - m.merchant_treasury_for(ironmonger());
+        assert_eq!(
+            m.basis_of(ironmonger(), IRON.to_string()),
+            U128(spent),
+            "the recorded basis is exactly the treasury the restock spent"
+        );
+    }
+
+    #[test]
+    fn restocking_twice_accumulates_the_cost_rather_than_replacing_it() {
+        let mut m = thin_market();
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+        let first = m.basis_of(ironmonger(), IRON.to_string()).0;
+        assert!(first > 0);
+
+        // Drain it back under the trigger, then restock again. The second
+        // restock's cost must add to the first, not overwrite it.
+        ctx(owner(), 0);
+        m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(16));
+        let after_drain = m.basis_of(ironmonger(), IRON.to_string()).0;
+
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+        let second = m.basis_of(ironmonger(), IRON.to_string()).0;
+        assert!(
+            second > after_drain,
+            "the second restock added its own cost ({second} should exceed {after_drain})"
+        );
+    }
+
+    #[test]
+    fn a_failed_restock_takes_its_recorded_cost_back_too() {
+        let mut m = thin_market();
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+        let recorded = m.basis_of(ironmonger(), IRON.to_string()).0;
+        assert!(recorded > 0, "the restock recorded a cost to begin with");
+
+        // The mint failed. on_restocked unwinds stock, treasury and the house
+        // credit; the basis has to come back with them or every later margin is
+        // understated against a cost that bought nothing.
+        let stock = m.quote(ironmonger(), IRON.to_string(), 1).stock;
+        ctx("market.test.near".parse().unwrap(), 0);
+        let kept = m.on_restocked(
+            ironmonger(),
+            IRON.to_string(),
+            U128(stock.0 - 31),
+            U128(recorded),
+            Err(PromiseError::Failed),
+        );
+        assert!(!kept, "the callback reports the restock was unwound");
+        assert_eq!(
+            m.basis_of(ironmonger(), IRON.to_string()),
+            U128(0),
+            "the recorded cost went back with the stock"
+        );
+    }
+
+    #[test]
+    fn relisting_a_shelf_downward_scales_its_recorded_cost() {
+        let mut m = thin_market();
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+        let full = m.basis_of(ironmonger(), IRON.to_string()).0;
+        let stock = m.quote(ironmonger(), IRON.to_string(), 1).stock.0;
+        assert_eq!(stock, 128);
+        assert!(full > 0);
+
+        // list_item SETS stock. Halving it without scaling basis would leave
+        // the shelf carrying a cost for 64 units that are no longer there.
+        ctx(owner(), 0);
+        m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(64));
+        assert_eq!(
+            m.basis_of(ironmonger(), IRON.to_string()),
+            U128(full / 2),
+            "halving the stock halved the recorded cost"
+        );
+
+        // Raising it must NOT invent cost: units the owner conjured were never
+        // bought, so they cost the merchant nothing.
+        let half = m.basis_of(ironmonger(), IRON.to_string()).0;
+        m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(512));
+        assert_eq!(
+            m.basis_of(ironmonger(), IRON.to_string()),
+            U128(half),
+            "conjured stock is free, so the recorded cost does not move"
         );
     }
 

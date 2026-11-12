@@ -26,6 +26,33 @@ use serde_json::json;
 /// for any of them is unreachable for every client, including a judge with curl.
 const PROHIBITED: &str = "ProhibitedInView";
 
+/// The view method names a contract's compiled ABI declares.
+///
+/// Read from the same build directory `wasm()` reads, so the two cannot
+/// disagree about which build is under test.
+fn abi_view_names(crate_name: &str) -> anyhow::Result<Vec<String>> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../target/near")
+        .join(crate_name)
+        .join(format!("{crate_name}_abi.json"));
+    let text = std::fs::read_to_string(&path).map_err(|e| {
+        anyhow::anyhow!(
+            "cannot read {}: {e}\n\nBuild the contracts first:\n    npm run build:contracts",
+            path.display()
+        )
+    })?;
+    let abi: serde_json::Value = serde_json::from_str(&text)?;
+    Ok(abi["body"]["functions"]
+        .as_array()
+        .map(|fns| {
+            fns.iter()
+                .filter(|f| f["kind"] == "view")
+                .filter_map(|f| f["name"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
 #[tokio::test]
 async fn every_view_method_is_callable_as_a_view() -> anyhow::Result<()> {
     let world = World::setup().await?;
@@ -47,8 +74,8 @@ async fn every_view_method_is_callable_as_a_view() -> anyhow::Result<()> {
     let market_id = world.market.id().to_string();
 
     // Every view the three contracts expose, with arguments good enough to
-    // enter the method. Taken from the compiled ABI, so a new view that is not
-    // listed here is a gap worth noticing.
+    // enter the method. The coverage assertion after the loop is what keeps
+    // this list honest — see the note there.
     let cases: Vec<(&Contract, &str, serde_json::Value)> = vec![
         // ----------------------------------------------------------- items
         (&world.items, "contract_source_metadata", json!({})),
@@ -76,6 +103,8 @@ async fn every_view_method_is_callable_as_a_view() -> anyhow::Result<()> {
         (&world.market, "credit_of", json!({ "account_id": who })),
         (&world.market, "quote", json!({ "merchant_id": merchant, "item": IRON, "count": 1 })),
         (&world.market, "quotes", json!({ "item": IRON, "count": 1 })),
+        (&world.market, "ledger_total", json!({})),
+        (&world.market, "basis_of", json!({ "merchant_id": merchant, "item": IRON })),
         // ----------------------------------------------------------- guard
         (&guard, "contract_source_metadata", json!({})),
         (&guard, "threshold", json!({})),
@@ -108,6 +137,32 @@ async fn every_view_method_is_callable_as_a_view() -> anyhow::Result<()> {
             }
         }
     }
+
+    // The list above has to cover EVERY view the ABI declares.
+    //
+    // This used to be a comment claiming the list was "taken from the compiled
+    // ABI", with nothing enforcing it — so `ledger_total`, added later, was
+    // silently never called here, and this check quietly stopped covering the
+    // method whose whole purpose is to be callable from outside. A list that can
+    // fall behind in silence is the same defect as a check that cannot fail.
+    let mut uncovered = Vec::new();
+    for (crate_name, contract) in [
+        ("nearcraft_items", &world.items),
+        ("nearcraft_market", &world.market),
+        ("nearcraft_guard", &guard),
+    ] {
+        for name in abi_view_names(crate_name)? {
+            if !cases.iter().any(|(c, m, _)| c.id() == contract.id() && *m == name) {
+                uncovered.push(format!("{crate_name}.{name}"));
+            }
+        }
+    }
+    assert!(
+        uncovered.is_empty(),
+        "these views exist in the compiled ABI but are never called by this test, \
+         so nothing here would notice if they became unreachable: {uncovered:?}"
+    );
+    println!("  covered every view the ABI declares");
 
     assert!(
         unreachable.is_empty(),

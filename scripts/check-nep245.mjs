@@ -70,6 +70,14 @@ const MODIFIER_RULES = [
     // never become payable or they stop being reachable by a player.
     invest_with_credit: [],
     restock: [],
+    // THE most dangerous signature in the project. `migrate` overwrites the
+    // contract's entire state, so an un-private one would let ANY account reset
+    // the market — every treasury, every credit balance, gone, from a single
+    // call anyone can make. near-sdk emits the privacy check only inside the
+    // wasm32 wrapper, so no unit test can see it; this rule and the sandbox
+    // test in contracts/integration/tests/migration.rs are the whole defence.
+    // Both modifiers are read off the ABI rather than assumed.
+    migrate: ['init', 'private'],
   }],
 ]
 

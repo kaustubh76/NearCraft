@@ -163,7 +163,25 @@ async function deployed(accountId) {
   return state.code_hash && state.code_hash !== '11111111111111111111111111111111'
 }
 
-async function deploy(accountId, wasmUrl) {
+/// Has `new` already run here? Answered with a FREE view rather than by calling
+/// `new` and catching the failure.
+///
+/// The old form cost a real transaction per contract on every re-run, and
+/// nearcore makes you hold ~0.061 NEAR of balance just to ATTEMPT a 60 TGas
+/// call — so an idempotent re-run needed ~0.18 NEAR of headroom purely to make
+/// three calls it already knew would fail. That is exactly how a re-run died
+/// one step after a successful migration.
+async function initialised(accountId) {
+  const r = await p.query({
+    request_type: 'view_state',
+    finality: 'final',
+    account_id: accountId,
+    prefix_base64: Buffer.from('STATE').toString('base64'),
+  })
+  return (r.values ?? []).length > 0
+}
+
+async function deploy(accountId, wasmUrl, { migrate = false } = {}) {
   let code
   try {
     code = new Uint8Array(await readFile(wasmUrl))
@@ -172,8 +190,39 @@ async function deploy(accountId, wasmUrl) {
       `missing ${wasmUrl.pathname}\n  Build first:  npm run build:contracts`
     )
   }
-  await as(accountId).deployContract(code)
-  log(`  deployed ${accountId}  (${(code.length / 1024).toFixed(1)} KiB)`)
+  const size = `${(code.length / 1024).toFixed(1)} KiB`
+  if (!migrate) {
+    await as(accountId).deployContract(code)
+    log(`  deployed ${accountId}  (${size})`)
+    return
+  }
+
+  // Deploy and migrate must be ONE transaction with two actions.
+  //
+  // Borsh state is positional, so the instant new code lands over old state
+  // every method AND every view panics with "Cannot deserialize the contract
+  // state" — including the view you would use to check whether it worked. Two
+  // separate transactions leave the contract unreadable in the gap between
+  // them, and a contract nobody can read is a contract nobody can fix.
+  //
+  // Batching also buys the safety property that makes this shippable: actions
+  // in one transaction revert together, so a `migrate` that panics leaves the
+  // OLD code and the OLD state exactly as they were. Proved against the live
+  // bytes in contracts/integration/tests/migration.rs, which deploys the wasm
+  // fetched from testnet, breaks it with a plain redeploy, and rescues it with
+  // this same pair of actions.
+  //
+  // `migrate` is `#[private]`, and this is why that is enough: the transaction
+  // is signed by the contract account acting on itself, so
+  // predecessor == current_account_id.
+  await as(accountId).signAndSendTransaction({
+    receiverId: accountId,
+    actions: [
+      actions.deployContract(code),
+      actions.functionCall('migrate', {}, teraToGas('60'), 0n),
+    ],
+  })
+  log(`  deployed + migrated ${accountId}  (${size}, one transaction, two actions)`)
 }
 
 async function call(accountId, contractId, methodName, args, { deposit = 0n, tgas = 60 } = {}) {
@@ -216,12 +265,20 @@ await saveKeys(keys)
 // that looked like success. The default stays "deploy only if absent", because
 // that is what makes a resumed first run idempotent.
 //
-// IMPORTANT: this is a bare `deployContract`. It is safe for a change that only
-// adds or alters METHODS, because borsh state is positional and untouched. A
-// change that adds or reorders a field in a contract's state struct will make
-// every method and every view panic with "Cannot deserialize the contract
-// state", and recovering needs a migrate method deployed in the same
-// transaction. No contract here has one yet.
+// IMPORTANT: `NEAR_REDEPLOY` is a bare `deployContract`. It is safe for a change
+// that only adds or alters METHODS, because borsh state is positional and
+// untouched. A change that adds or reorders a FIELD in a contract's state
+// struct makes every method and every view panic with "Cannot deserialize the
+// contract state", and recovering from that needs `migrate` deployed in the
+// same transaction.
+//
+// `NEAR_MIGRATE` is that second form, and `market` has a `migrate` method as of
+// the cost-basis release. Use it whenever the deployed struct and the built
+// struct differ by a field; use `NEAR_REDEPLOY` when they do not. Getting it
+// wrong in the safe direction (migrating when nothing changed) is harmless:
+// `migrate` reads the current shape first and logs that there is nothing to
+// carry.
+//
 // `NEAR_REDEPLOY=1` replaces all three; `NEAR_REDEPLOY=items,market` replaces
 // only those named. Targeting matters: redeploying a contract whose code has
 // not changed costs gas and buys nothing, and on a 1.5 NEAR root account that
@@ -231,13 +288,32 @@ const redeployAll = redeployRaw === '1'
 const redeployNamed = new Set(redeployRaw.split(',').map((x) => x.trim()).filter((x) => x && x !== '1'))
 const wantsRedeploy = (name) => redeployAll || redeployNamed.has(name)
 
+const migrateRaw = process.env.NEAR_MIGRATE ?? ''
+const migrateAll = migrateRaw === '1'
+const migrateNamed = new Set(migrateRaw.split(',').map((x) => x.trim()).filter((x) => x && x !== '1'))
+const wantsMigrate = (name) => migrateAll || migrateNamed.has(name)
+
+// Validated BEFORE anything is deployed: a typo names no contract, so without
+// this the loop would run, do nothing, print nothing unusual, and only then
+// throw — after spending gas on whatever else was asked for.
+const KNOWN = ['items', 'market', 'guard']
+for (const [varName, named] of [['NEAR_REDEPLOY', redeployNamed], ['NEAR_MIGRATE', migrateNamed]]) {
+  const unknown = [...named].filter((x) => !KNOWN.includes(x))
+  // A typo here would otherwise look exactly like a successful no-op.
+  if (unknown.length) throw new Error(`${varName} names unknown contract(s): ${unknown.join(', ')}`)
+}
+
 for (const [name, accountId, wasm] of [
   ['items', n.items, WASM.items],
   ['market', n.market, WASM.market],
   ['guard', n.guard, WASM.guard],
 ]) {
   if (!(await deployed(accountId))) {
+    // A contract with no code has no state to carry, and `new` runs below.
     await deploy(accountId, wasm)
+  } else if (wantsMigrate(name)) {
+    log(`  replacing code AND migrating state on ${accountId}  (NEAR_MIGRATE names ${name})`)
+    await deploy(accountId, wasm, { migrate: true })
   } else if (wantsRedeploy(name)) {
     log(`  replacing code on ${accountId}  (NEAR_REDEPLOY names ${name})`)
     await deploy(accountId, wasm)
@@ -246,11 +322,6 @@ for (const [name, accountId, wasm] of [
   }
 }
 
-const unknownRedeploy = [...redeployNamed].filter((x) => !['items', 'market', 'guard'].includes(x))
-if (unknownRedeploy.length) {
-  // A typo here would otherwise look exactly like a successful no-op.
-  throw new Error(`NEAR_REDEPLOY names unknown contract(s): ${unknownRedeploy.join(', ')}`)
-}
 
 log('\ninitialise')
 for (const [accountId, args] of [
@@ -260,11 +331,17 @@ for (const [accountId, args] of [
   // degrades silently rather than loudly. Deploying it is not optional.
   [n.guard, {}],
 ]) {
+  if (await initialised(accountId)) {
+    log(`  already  ${accountId} initialised`)
+    continue
+  }
   try {
     await call(rootAccountId(), accountId, 'new', args)
     log(`  init     ${accountId}  ${JSON.stringify(args)}`)
   } catch (e) {
-    // `new` is `#[init]`, so a second call fails. That is the idempotent path.
+    // Kept as a second line of defence. If the probe above and the contract
+    // ever disagree, a re-run must still be idempotent rather than fatal —
+    // and an off-by-a-word in this regex once survived until a live re-run.
     if (/already.{0,16}initiali[sz]ed/i.test(String(e))) log(`  already  ${accountId} initialised`)
     else throw e
   }

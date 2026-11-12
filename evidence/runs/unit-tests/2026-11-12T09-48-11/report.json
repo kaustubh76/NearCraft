@@ -1,0 +1,12 @@
+{
+  "topic": "unit-tests",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 4331,
+  "command": "npm run --silent test:contracts",
+  "cwd": ".",
+  "proves": "120 Rust unit tests across all three contracts. Offline, no wasm target, no network.",
+  "output_sha256": "75f0a62cea87280f083363b83b09ee5f136ead3dbc8ffb299c50bfe4eb940914",
+  "output_bytes": 9011,
+  "recorded_at": "2026-11-12T09:48:16.019Z"
+}

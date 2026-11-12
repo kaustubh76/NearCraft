@@ -160,6 +160,16 @@ baseline project, where it was the thing that made the evidence worth reading.
   which must actually cover each call's prepaid gas. A live agent with ample
   budget and allowance still failed to send, because 0.05 NEAR of account
   balance could not prepay a 60 TGas call (~0.061 NEAR).
+- **That ~0.061 NEAR is NOT `prepaid_gas × gas_price`, and the arithmetic will
+  mislead you.** At the live gas price of 1e8 yocto/gas, 60 TGas multiplies out
+  to 0.006 NEAR — ten times less than what nearcore actually demands. It
+  reserves against a *pessimistically inflated* price, assuming the prepaid gas
+  might be spent down a long chain of receipts with the price rising in each
+  one, so the headroom grows faster than the gas you attach. Measured twice, at
+  0.0609 NEAR both times: once when a live agent could not send, and once when
+  `npm run deploy` could not afford an `#[init]` call it was going to make
+  purely to watch it fail. **Attach the gas the call needs, not the gas you can
+  imagine needing.**
 - **The key allowance is a per-call ceiling against *prepaid* gas**, drawn down
   by gas actually burned. `max_gas()` demands ~1 NEAR of headroom and kills a
   modest allowance immediately. Agent calls use 60 TGas.

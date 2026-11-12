@@ -13,6 +13,12 @@ target/
 *.wasm
 dist/
 
+# ...except the pinned copy of the wasm actually running on testnet, which the
+# migration test deploys so that it migrates the code that is running rather
+# than a fresh build of it. The blanket rule above hides it silently, and a
+# test fixture that is not in the repository is a test nobody else can run.
+!contracts/integration/fixtures/*.wasm
+
 # os / editor
 .DS_Store
 *.swp

@@ -113,6 +113,47 @@ stronger claim — that anyone can rebuild this commit and get these exact bytes
 needs `cargo near build reproducible-wasm`, which is a Docker daemon away and
 not yet done.
 
+**And the deployed contract can be changed without losing anything.** Borsh
+contract state is positional, so the moment code with an extra field lands over
+existing state, every method *and every view* panics with "Cannot deserialize
+the contract state" — including the view you would use to find out whether it
+worked. A contract nobody can read is a contract nobody can fix, so until today
+no state field could safely change.
+
+`market` now has a `migrate` method, and it has been run on public testnet.
+The cost-basis field went in with it, and nothing was lost:
+
+```
+ledger_total                 897569600000000000000000  ->  897569600000000000000000
+ironmonger treasury          262569600000000000000000  ->  262569600000000000000000
+player credit                 20000000000000000000000  ->   20000000000000000000000
+items_contract            items.nearcraftmc.testnet   ->  items.nearcraftmc.testnet
+```
+
+Three things make that more than a hopeful anecdote:
+
+- **Deploy and migrate are one transaction with two actions**, never two
+  transactions. Actions in a single transaction also revert together, so a
+  `migrate` that panics leaves the old code and the old state untouched. That is
+  what makes it safe to try at all. `NEAR_MIGRATE=market npm run deploy`.
+- **It was rehearsed against the bytes testnet was running, not against a fresh
+  build of them.** [contracts/integration/tests/migration.rs](contracts/integration/tests/migration.rs)
+  deploys [contracts/integration/fixtures/market-live.wasm](contracts/integration/fixtures/market-live.wasm)
+  — fetched from the chain with a public `view_code` call, `code_hash` pinned in
+  the test and re-checked after deploying — then **breaks the contract on
+  purpose** with a plain redeploy, asserts every view really does fail, and only
+  then rescues it. A migration test that never sees the failure it exists to
+  prevent would pass on a migration that does nothing.
+- **`migrate` is `#[private]`.** An un-private one would let anyone overwrite
+  every treasury and every credit balance in a single call, which makes it the
+  most dangerous signature in the project. `npm run check:nep245` pins both its
+  modifiers off the compiled ABI, and the sandbox proves the refusal — near-sdk
+  emits that check only in the wasm wrapper, so no unit test can reach it.
+
+The honest limit: `migrate` carries the current shape and the one before it, and
+nothing older. The `basis` map it adds comes through **empty**, because restocks
+that happened before the migration spent money nobody recorded.
+
 **And the prompt's own sentence, on the public chain.** The `games` prompt ends
 its description with "it closes its shop until someone invests in it". Chandler
 withdrew its spare treasury down to its floor, reported closed, and an
