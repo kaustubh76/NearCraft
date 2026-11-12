@@ -56,7 +56,7 @@ guard    guard.nearcraftmc.testnet
 
 ```sh
 npm run reads     # every merchant's ask, bid, stock band and the contract's own reason
-npm run keys      # each agent key's receiver, method list and allowance, from the chain
+npm run keys      # every agent AND player key: receiver, method list, allowance, from the chain
 npm run verify:deployed   # the code on chain hashes to the wasm this repo builds
 npm run web       # the market page, reading those same contracts live in a browser
 ```
@@ -715,7 +715,7 @@ measured, three times, than round it up.
 ```sh
 npm run deploy    # idempotent; needs NEAR_ROOT_KEY
 npm run reads     # every merchant's price, bid, stock band and reason
-npm run keys      # reads method_names + allowance back from the chain
+npm run keys      # reads method_names + allowance back from the chain, agents and players
 ```
 
 ---
@@ -780,6 +780,15 @@ that was not already theirs. An earlier version of this file claimed the agent
 account held "a function-call key, nothing more", which was simply false, and
 `npm run keys` audited **zero** accounts while reporting success — both are
 fixed, and the audit now refuses to pass when it has nothing to check.
+
+That audit covered only agents until it was widened, which meant the one account
+in the deployment holding **no** full-access key — the player, the strongest key
+claim here — was the one account it never looked at. It now reads every player's
+keys back too, and compares the recorded method list against the chain in both
+directions. On the live deployment that check failed immediately:
+`deployment.json` advertised `invest_with_credit` on a key that does not grant
+it and can never be given it. The prose in this file was right; the JSON beside
+it was not, and only the JSON was machine-readable.
 
 The player's account id is not a name someone chose. It is derived from the
 login — `p-<first 8 hex of sha256("provider:subject")>` — so the same identity

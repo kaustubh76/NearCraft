@@ -47,9 +47,9 @@
       "account_id": "p-1d6a3c5d.nearcraftmc.testnet",
       "permitted_methods": [
         "buy_with_credit",
-        "sell",
-        "invest_with_credit"
-      ]
+        "sell"
+      ],
+      "function_call_public_key": "ed25519:69tLBGBhuXTHU4mccA6EKfi7aieyC2GhFLffU1Gjpuus"
     }
   ],
   "relayer": {

@@ -192,3 +192,19 @@ what it was issued, permanently, and there is no re-keying it.
 
 So the method list in the catalog is not a configuration detail. It is a
 decision taken once per player, for good, at the moment of onboarding.
+
+### And this paragraph was true while `deployment.json` said otherwise
+
+The paragraph above has been correct since it was written. The manifest beside
+it was not: `deployment.json` recorded the live player's key as granting
+`[buy_with_credit, sell, invest_with_credit]`, because `deploy.mjs` wrote the
+**configured** method list rather than the one on chain — and on the idempotent
+path, for an account onboarded under an older configuration, those are different
+lists. The prose said the right thing; the only machine-readable artifact said
+the wrong one, and nothing compared the two.
+
+`npm run keys` now audits players as well as agents, and compares the manifest
+against `view_access_key_list` **in both directions**: recording a method the
+key does not grant fails, and so does holding one the manifest does not record.
+Before the manifest was corrected, that check failed on the live deployment,
+naming the method — which is the only reason to believe it works.

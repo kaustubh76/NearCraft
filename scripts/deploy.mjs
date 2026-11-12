@@ -565,7 +565,27 @@ for (const subject of cat.players?.seed_subjects ?? ['player-1']) {
   log(`           ${limits.length} key(s), none full-access`)
 
   await topUpCredit(result.accountId, econ(cat.players?.budget_near ?? '2'))
-  players.push({ account_id: result.accountId, permitted_methods: result.permittedMethods ?? [] })
+
+  // Record what the CHAIN grants, not what this run configured.
+  //
+  // `signIn()` returns `permittedMethods` from its own arguments on both
+  // paths — including the idempotent one, where no key was issued at all. So
+  // recording that published a method list for an account that had been
+  // onboarded long before, under a different configuration. It did: the live
+  // manifest advertised `invest_with_credit` on a player whose key grants
+  // `buy_with_credit` and `sell`, and whose key can never change, because
+  // onboarding deleted its full-access key. A player key is immutable for
+  // life, which makes the manifest the only thing that CAN be wrong here.
+  //
+  // This is A7's defect — a manifest that is a diary of one run rather than a
+  // description of the deployment — repeated for players after being fixed for
+  // agents. `npm run keys` now audits players too, in both directions.
+  const scopedKey = limits.find((k) => !k.fullAccess)
+  players.push({
+    account_id: result.accountId,
+    permitted_methods: scopedKey?.methodNames ?? [],
+    function_call_public_key: scopedKey?.publicKey ?? null,
+  })
 }
 await saveKeys(keys)
 
