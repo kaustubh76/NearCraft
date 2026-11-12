@@ -18,10 +18,11 @@ key or a Minecraft server.
 
 ```sh
 npm install
-npm test                     # 234 offline checks, ~6s
+npm test                     # every offline check, ~6s — it PRINTS the count, so
+                             # do not copy one into a doc; eight were stale at once
 ```
 
-That is 116 Rust unit tests (`contracts/`), 107 Node tests (`tests/near/`) and the
+That is the Rust unit tests (`contracts/`), the Node tests (`tests/near/`) and the
 11 baseline hash checks. Then, after building the wasm:
 
 ```sh

@@ -165,8 +165,15 @@ const RETIRED_CLAIMS = [
     why: 'Approval Management is implemented and is what the player sell path uses' },
   { pattern: /which is why a scoped key cannot sell/i,
     why: 'a scoped key sells through the non-payable market.sell under an approval' },
-  { pattern: /61 Rust unit tests/i,
-    why: 'the count has moved on; run npm run test:contracts for the current figure' },
+  // Not one stale number but the whole class. Hand-written test counts have now
+  // rotted FOUR times in this repository: eight at once in the claims audit,
+  // then 183, then 116, then 135 within a single day of each other. The command
+  // prints the count; a document that repeats it is a second source of truth
+  // with no way to stay true. So: do not write one down.
+  { pattern: /\b\d+ Rust unit tests?\b/i,
+    why: 'a hand-written Rust unit-test count rots — npm run test:contracts prints it, so cite the command instead of a number' },
+  { pattern: /\b\d+ offline (?:Node )?checks\b/i,
+    why: 'a hand-written offline-check TOTAL rots — npm test prints it, so cite the command instead of a number. A per-file count is fine: it is a claim about one file that a reader can check' },
   { pattern: /does not model, because merchants do not restock/i,
     why: 'merchants do restock now, permissionlessly, and it was never the binding constraint on throughput' },
   { pattern: /holds a function-call key, nothing more/i,

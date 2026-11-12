@@ -24,7 +24,7 @@ const stamp = started.toISOString().replace(/[:.]/g, '-').slice(0, 19)
 /// failing one are different facts.
 const CHECKS = [
   { topic: 'unit-tests', cmd: 'npm', args: ['run', '--silent', 'test:contracts'],
-    proves: '135 Rust unit tests across all three contracts. Offline, no wasm target, no network.' },
+    proves: 'Every Rust unit test across all three contracts, offline, with no wasm target and no network. The count is in the retained output below rather than in this sentence — it has drifted three times in one day, and this project has already had to correct eight stale counts at once.' },
   { topic: 'policy-and-injection', cmd: 'node', args: ['--test', 'tests/near/policy.mjs', 'tests/near/injection.mjs', 'tests/near/market.mjs'],
     proves: 'The policy layer refuses out-of-policy agent calls, a prompt-injected agent is blocked across two layers AND recognised as paying a known-bad account, and the plugin HTTP contract is well-formed. Offline.' },
   { topic: 'live-testnet-reads', cmd: 'npm', args: ['run', '--silent', 'reads'],

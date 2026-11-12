@@ -36,7 +36,7 @@ column before the description.
 | `AGENTS.md` | **Written.** Repo instructions and the claims policy, for the AI judges the organisers named. |
 | `evidence/` | **Built.** `npm run evidence` retains each check's real output with its exit code and an output hash. Failures are kept, not edited out. |
 | Social / email login | **Built and tested.** [`backend/near/oidc.mjs`](backend/near/oidc.mjs) — JWKS fetch, JWT signature verification, `iss`/`aud`/`exp`/`nbf`/`sub` checks. 25 offline tests including `alg: none`, the HMAC confusion attack, a swapped payload and a token minted for another application. **Not configured against a real provider**, so the demo onboards seeded identities. |
-| Gasless play — no seed phrase, no popup, no gas prompt | **Built and measured on public testnet.** `npm run live:player`: a player holding **no full-access key at all** buys and sells on NEAR testnet and its balance moves by **exactly 0** — the relayer pays. Reproduced twice, hashes retained in `evidence/live/`. Also `npm run test:gasless` on a local node, plus 15 offline tests. [docs/GASLESS.md](docs/GASLESS.md) |
+| Gasless play — no seed phrase, no popup, no gas prompt | **Built and measured on public testnet.** `npm run live:player`: a player holding **no full-access key at all** buys and sells on NEAR testnet and its balance moves by **exactly 0** — the relayer pays. Reproduced twice, hashes retained in `evidence/live/`. Also `npm run test:gasless` on a local node — three tests, the third a key-less player **backing a merchant** for nothing — plus the relayer and onboarding tests. [docs/GASLESS.md](docs/GASLESS.md) |
 | The money invariant | **Built and tested.** `sum(treasuries) + sum(credits) == deposited − paid out`, asserted after **every one** of the contract's fourteen money-moving calls, so a failure names the step rather than the session. Proved by injecting a real leak — a sale that credits the seller without debiting the treasury — which the test catches as "the ledger drifted after sell" with the 1.66 NEAR created from nothing. Plus the half a unit test cannot see: a sandbox test that the market's own NEAR balance always covers what it owes, across buys, a sale, an investment and a real withdrawal. `docs/RECAPITALIZATION.md`'s own formula for this was **wrong** — it double-counted stakes — and is corrected there. |
 | Reopening a broke merchant — the prompt's own sentence | **Built and tested.** The `games` prompt ends its description with "it closes its shop **until someone invests in it**". `market.invest(merchant_id)` is payable and permissionless; `market.invest_with_credit` is **non-payable** so a player holding one scoped key can call it at all — without that the mechanic would be unreachable for exactly the players it is for. `invest` returns whether the shop reopened, and says so in its log rather than claiming success when the amount fell short. A funder gets back the shop — a closed merchant will not buy from you, so the player holding iron is exactly the person who wants the ironmonger funded — **and now the stake too**: it is recorded, and half of every later sale's margin repays it until the claim is settled. That is the design in [docs/RECAPITALIZATION.md](docs/RECAPITALIZATION.md), which needed new contract state and the migration to carry it, and both now exist. Covered by `backing_tests` in [contracts/market/src/pricing.rs](contracts/market/src/pricing.rs) for the arithmetic, the `invest`/`backer`/`basis` tests in [contracts/market/src/lib.rs](contracts/market/src/lib.rs) for the behaviour, and one end-to-end run on a real node in [contracts/integration/tests/economy.rs](contracts/integration/tests/economy.rs). |
 | Merchant restocking — "an economy that evolves without a dev patch" | **Built and tested.** `market.restock(merchant_id, item)` is **permissionless and non-payable**, so anyone may refill a thin shelf and a scoped key can do it. The merchant pays out of its own treasury at the bid it *would post for the restocked shelf* — provably below what it sells for, so a restock can never be a loss — and never spends into its floor. It **mints** the goods through `items.mt_mint`, so a shelf never claims stock the contract does not hold; a sandbox test on a real node proves the market's NEP-245 balance rises by exactly the units added. 13 tests. |
@@ -359,9 +359,9 @@ cloned fresh from GitHub into an empty directory — no `.local/`, no
 clone. It found a real failure on the first one: `npm test` exited 1, because a
 documentation check added hours earlier flagged the gitignored `.local/`
 directory as missing. Fixed, re-cloned, re-run. `npm install && npm test` now
-passes from clean — 183 checks on the day of the rehearsal, 234 today, and
-the point is that the number came from the run rather than from this
-sentence. `npm run reads` and `npm run keys` work with
+passes from clean — 183 checks on the day of the rehearsal, more now, and the
+point is that the number comes from the run rather than from this sentence,
+which is exactly why this sentence no longer carries one. `npm run reads` and `npm run keys` work with
 no credentials, `npm run check:nep245` without a build says
 `ABI not found — run npm run build:contracts first`, `npm run evidence` records
 6 pass and 6 **skipped** rather than pretending, and `npm run build:contracts`
@@ -379,8 +379,8 @@ Needs Rust and Node 22+, nothing else — not even the wasm target, because
 near-sdk unit tests build for the host. All three checks pass right now:
 
 ```sh
-npm run test:contracts    # 116 Rust unit tests across all three contracts
-npm run test:near         # 107 offline tests: policy, injection, counterparty, market, web, OIDC
+npm run test:contracts    # the Rust unit tests across all three contracts
+npm run test:near         # policy, injection, counterparty, market, web, OIDC
 npm run verify:baseline   # 11 vendored files, SHA-256 unchanged
 ```
 
