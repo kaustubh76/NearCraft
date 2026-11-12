@@ -57,6 +57,7 @@ guard    guard.nearcraftmc.testnet
 ```sh
 npm run reads     # every merchant's ask, bid, stock band and the contract's own reason
 npm run keys      # each agent key's receiver, method list and allowance, from the chain
+npm run verify:deployed   # the code on chain hashes to the wasm this repo builds
 npm run web       # the market page, reading those same contracts live in a browser
 ```
 
@@ -87,6 +88,30 @@ other people's money can be verified from outside:
 ledger_total()                 0.897569 NEAR owed
 market.nearcraftmc.testnet     3.389757 NEAR held      solvent
 ```
+
+**And the code being audited is the code that is running.** `npm run
+verify:deployed` hashes each local build and compares it to the `code_hash` the
+chain reports, over public RPC with no credentials:
+
+```
+items    items.nearcraftmc.testnet        MATCH    GKsTsdXEsUJz1vQvrCgvRxkxHzvzwqzc78eiKLXyF1qM
+market   market.nearcraftmc.testnet       MATCH    7KML46Pr78rCqEipQ1ch2tNkQ9ULfG6wtHg4PPuazBQJ
+guard    guard.nearcraftmc.testnet        MATCH    3cbYjTpBugxCNZdHmJR4CM3D7mHThJWEoTVfvYMnNbRn
+```
+
+It exists because the first time it ran it **failed**: `items` was serving bytes
+this repo does not build. The behaviour was right — the fix it was supposed to
+carry was on chain — but no check here could have told the difference, and that
+is the same bug class as a contract fix that silently never ships. It is now
+green on all three after a redeploy.
+
+Its limit, which the script prints rather than hides: `cargo near build
+non-reproducible-wasm` is not byte-stable, so a mismatch cannot by itself
+separate "never deployed" from "rebuilt since deploying". Only behaviour can,
+which is what `npm run reads` and the view-method check are for. Making the
+stronger claim — that anyone can rebuild this commit and get these exact bytes —
+needs `cargo near build reproducible-wasm`, which is a Docker daemon away and
+not yet done.
 
 **And the prompt's own sentence, on the public chain.** The `games` prompt ends
 its description with "it closes its shop until someone invests in it". Chandler
@@ -243,7 +268,9 @@ cloned fresh from GitHub into an empty directory — no `.local/`, no
 clone. It found a real failure on the first one: `npm test` exited 1, because a
 documentation check added hours earlier flagged the gitignored `.local/`
 directory as missing. Fixed, re-cloned, re-run. `npm install && npm test` now
-passes all 183 checks from clean, `npm run reads` and `npm run keys` work with
+passes from clean — 183 checks on the day of the rehearsal, 234 today, and
+the point is that the number came from the run rather than from this
+sentence. `npm run reads` and `npm run keys` work with
 no credentials, `npm run check:nep245` without a build says
 `ABI not found — run npm run build:contracts first`, `npm run evidence` records
 6 pass and 6 **skipped** rather than pretending, and `npm run build:contracts`
