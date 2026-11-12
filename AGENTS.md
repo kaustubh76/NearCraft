@@ -161,6 +161,29 @@ baseline project, where it was the thing that made the evidence worth reading.
   which must actually cover each call's prepaid gas. A live agent with ample
   budget and allowance still failed to send, because 0.05 NEAR of account
   balance could not prepay a 60 TGas call (~0.061 NEAR).
+- **`npm run build:contracts` and `npm run build:reproducible` produce
+  DIFFERENT BYTES from the same source, and that is correct.** The first uses
+  your local rustc; the second builds the committed commit inside a
+  digest-pinned container (rust 1.99.1). The contracts on testnet are the
+  reproducible ones, so `npm run verify:deployed` is green after
+  `build:reproducible` and goes red after `build:contracts` — which is not a
+  bug and not a regression. If you see that red, you have not broken anything;
+  you have compared the chain against a local build it was never built from.
+  `build:contracts` stays the default because it needs no Docker, which is what
+  keeps `npm test` working on a clean clone.
+- **`reproducible-wasm` copies only the WASM out of the container, not the
+  ABI** — the ABI path it prints is a path inside the container. So
+  `npm run check:nep245` fails with "ABI not found" straight after a
+  reproducible build, which looks like a broken conformance check and is not
+  one. `npm run build:reproducible` therefore ends with `cargo near abi` for
+  each contract: that generates no wasm, so it cannot overwrite the artifact
+  whose hash the chain is being matched against. Do not reach for
+  `build:contracts` to get the ABIs back — it would overwrite all three wasms
+  and turn `verify:deployed` red.
+- **A reproducible build builds the COMMITTED commit and ignores your working
+  tree.** So commit and push before building, or you will ship bytes that do not
+  match the source anyone else can fetch — and the mismatch is invisible,
+  because the artifact is perfectly self-consistent.
 - **That ~0.061 NEAR is NOT `prepaid_gas × gas_price`, and the arithmetic will
   mislead you.** At the live gas price of 1e8 yocto/gas, 60 TGas multiplies out
   to 0.006 NEAR — ten times less than what nearcore actually demands. It

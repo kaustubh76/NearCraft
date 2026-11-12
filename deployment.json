@@ -2,7 +2,7 @@
   "note": "Written by npm run deploy. Public ids only — no secret material.",
   "network": "testnet",
   "rpc": "https://test.rpc.fastnear.com",
-  "deployed_at": "2026-11-12T10:18:29.798Z",
+  "deployed_at": "2026-11-12T11:18:46.312Z",
   "economy_scale": 0.01,
   "root": "nearcraftmc.testnet",
   "contracts": {

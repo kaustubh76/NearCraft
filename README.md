@@ -105,13 +105,36 @@ carry was on chain — but no check here could have told the difference, and tha
 is the same bug class as a contract fix that silently never ships. It is now
 green on all three after a redeploy.
 
-Its limit, which the script prints rather than hides: `cargo near build
-non-reproducible-wasm` is not byte-stable, so a mismatch cannot by itself
-separate "never deployed" from "rebuilt since deploying". Only behaviour can,
-which is what `npm run reads` and the view-method check are for. Making the
-stronger claim — that anyone can rebuild this commit and get these exact bytes —
-needs `cargo near build reproducible-wasm`, which is a Docker daemon away and
-not yet done.
+**And you can rebuild those bytes yourself.** That used to be the limit here:
+`npm run build:contracts` uses your local rustc and is not byte-stable, so a
+hash match only ever meant "matches the artifact on *this* machine". The three
+deployed contracts are now built with `cargo near build reproducible-wasm`,
+inside a digest-pinned container, from a commit:
+
+```sh
+npm run build:reproducible      # needs Docker; ~3 min per contract
+npm run verify:deployed
+```
+
+So the hashes above are a function of the committed source and nothing else. The
+chain will tell you which commit and which container, because NEP-330
+`build_info` is now populated where it used to read `null`:
+
+```
+build_environment      sourcescan/cargo-near:0.22.0-rust-1.99.1@sha256:c9655eaf…
+source_code_snapshot   git+https://github.com/kaustubh76/NearCraft?rev=4da447eb…
+build_command          cargo near build non-reproducible-wasm --locked
+```
+
+That is also what lets SourceScan and NearBlocks verify a contract, and it is
+the strongest form of the `security` track's claim: the code you audited is the
+code running, and you do not have to take our word for either half.
+
+`npm run build:contracts` is deliberately still the non-reproducible one, since
+it needs no Docker — which is what keeps `npm test` working on a clean clone
+with no credentials. The two therefore produce **different bytes from the same
+source**, and `npm run verify:deployed` says so when it fails, rather than
+leaving you to guess.
 
 **And the deployed contract can be changed without losing anything.** Borsh
 contract state is positional, so the moment code with an extra field lands over
@@ -694,7 +717,7 @@ npm run keys      # reads method_names + allowance back from the chain
 | Track | How |
 |---|---|
 | **`games`** | Requirement by requirement, with the gaps named. **(1)** Materials as NEP-245 multi-tokens, one contract holding every item type — core 10/10, Enumeration 2/2, Approval Management 5/5, read off the compiled ABI. **(2)** No seed phrase, no wallet popup, no gas prompt: **measured on public testnet**, a player holding no full-access key buys and sells while its balance moves by exactly 0. Identity verification is real too ([`oidc.mjs`](backend/near/oidc.mjs), 25 offline tests); what is missing is a configured provider client id, which is operator configuration rather than code. **(3)** The price rule in one readable file, [`pricing.rs`](contracts/market/src/pricing.rs), and the merchant's own reason string rendered beside every quote — on the live web page today; **the in-game tooltip needs the Minecraft host, which is not up**. **(4)** Fast-forward: 135 real transactions in 26.4s, 5.1 a second, measured three times. **That is still not "a week in a minute"** — and it got 11% slower when cost basis and the margin split went in, which is reported rather than quietly re-measured away — the arithmetic is worked out above, and the limit turned out to be throughput rather than stock. Plus the two things the prompt's own description asks for: a broke merchant **reopens when someone invests in it** (shown on chain), and merchants **restock themselves**, so the economy evolves without a dev patch. The loop is specified in [GAME_LOOP.md](GAME_LOOP.md), written before any code. |
-| **`security`** | All three requirements. **(1)** A counterparty check returning `allow`/`warn`/`block` with reasons, scoring the four named signals — account activity, is-a-contract and code-changed, prior interactions, and an on-chain shared blocklist other agents report to with evidence. The wrapper refuses to sign on `block` and **parks the call for a human on `warn`**. **(2)** Agents sign with a function-call access key scoped to one contract with an explicit method list and allowance, never a full-access key — its limits are explained below, proved at the protocol level in the sandbox, and read back off the live chain by `npm run keys`. The agent *account* does also carry an operator key, which that command discloses and counts; the section below says exactly who holds it and why players are treated differently. **(3)** The attack demo: a prompt-injected agent tries to pay a known-bad account, is stopped, and the log is printed. Signals and their data sources are written up in [docs/SECURITY_SIGNALS.md](docs/SECURITY_SIGNALS.md), which was written before the code, as the prompt asks. |
+| **`security`** | All three requirements. **(1)** A counterparty check returning `allow`/`warn`/`block` with reasons, scoring the four named signals — account activity, is-a-contract and code-changed, prior interactions, and an on-chain shared blocklist other agents report to with evidence. The wrapper refuses to sign on `block` and **parks the call for a human on `warn`**. **(2)** Agents sign with a function-call access key scoped to one contract with an explicit method list and allowance, never a full-access key — its limits are explained below, proved at the protocol level in the sandbox, and read back off the live chain by `npm run keys`. The agent *account* does also carry an operator key, which that command discloses and counts; the section below says exactly who holds it and why players are treated differently. **(3)** The attack demo: a prompt-injected agent tries to pay a known-bad account, is stopped, and the log is printed. Signals and their data sources are written up in [docs/SECURITY_SIGNALS.md](docs/SECURITY_SIGNALS.md), which was written before the code, as the prompt asks. **Beyond the three:** the deployed contracts are built reproducibly, so `npm run verify:deployed` lets anyone confirm that the code running on testnet is the code in this repository at a named commit — the premise every other security claim here rests on, and one we were asserting rather than proving until it was checked and `items` turned out to be running bytes this repo does not build. |
 
 **Two tracks are entered: `games` and `security`.**
 

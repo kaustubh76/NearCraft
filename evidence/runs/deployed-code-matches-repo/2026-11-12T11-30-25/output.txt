@@ -1,0 +1,10 @@
+
+Is the deployed code the code in this repo?
+rpc https://test.rpc.fastnear.com
+
+  items    items.nearcraftmc.testnet        MATCH    9qJB1YKG99RWC4aSrFAe5ZtHi3yyrNJuv9wAymH14Neu
+  market   market.nearcraftmc.testnet       MATCH    ComurSizwvoRiSvivNECXEjvV8bswZH7eB9aV9VwCW4Q
+  guard    guard.nearcraftmc.testnet        MATCH    CgdXoW7cUMChaeLK1hioST8xHg8RwqDF4q1YzZi28Vtu
+
+all 3 deployed contract(s) hash to the wasm this repo builds, verified with no credentials
+

@@ -11,6 +11,14 @@
 // reached the chain — and the only clue at the time was a deploy log line that
 // looked like success. A claim about a deployment that cannot be checked is the
 // one kind of claim this project does not get to make.
+//
+// The deployed contracts are built with `cargo near build reproducible-wasm`,
+// so these hashes are a function of the committed source and a digest-pinned
+// container rather than of this machine. That is what makes the comparison
+// meaningful to someone else: run the same command on the same commit and you
+// get the same bytes. `npm run build:contracts` does NOT — it uses the local
+// rustc — so comparing against that build proves nothing, which the failure
+// message spells out.
 
 import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
@@ -92,14 +100,17 @@ if (problems.length) {
   console.error(`\nthe chain is not running this repo's code (${problems.length}):`)
   for (const x of problems) console.error(`  ${x}`)
   console.error(
-    '\nDIFFERS has two causes and this check cannot tell them apart, because\n' +
-    '`cargo near build non-reproducible-wasm` is not byte-stable — rebuilding\n' +
-    'unchanged source yields different bytes. So it means either:\n' +
-    '  - this build was never deployed (a fix that silently never shipped), or\n' +
-    '  - the contract was rebuilt after it was deployed.\n' +
-    'Behaviour is what distinguishes them: npm run reads, and the live view\n' +
-    'calls in contracts/integration/tests/views.rs.\n' +
-    '\nEither way the remedy is the same:  NEAR_REDEPLOY=<name> npm run deploy\n'
+    '\nWhat DIFFERS means depends on which build you compared with.\n' +
+    '\n`cargo near build reproducible-wasm` IS byte-stable: it builds the\n' +
+    'committed commit inside a digest-pinned container, so a mismatch there\n' +
+    'means the deployed code is not this commit. That is the comparison a third\n' +
+    'party can make, and the one the deployed contracts were built for.\n' +
+    '\n`npm run build:contracts` uses non-reproducible-wasm and your local\n' +
+    'rustc, so it legitimately produces different bytes from the same source.\n' +
+    'A DIFFERS against THAT build tells you nothing on its own.\n' +
+    '\nTo reproduce the deployed bytes yourself:\n' +
+    '  cargo near build reproducible-wasm --manifest-path contracts/<name>/Cargo.toml\n' +
+    '\nIf it still differs, the remedy is:  NEAR_REDEPLOY=<name> npm run deploy\n'
   )
   process.exit(1)
 }

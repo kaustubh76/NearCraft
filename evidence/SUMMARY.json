@@ -1,6 +1,6 @@
 {
   "note": "Written by npm run evidence. Each run keeps its own directory; failures are retained alongside passes and are never edited out.",
-  "recorded_at": "2026-11-12T10:18:47.828Z",
+  "recorded_at": "2026-11-12T11:30:25.650Z",
   "host": {
     "platform": "darwin",
     "arch": "arm64",
@@ -35,6 +35,18 @@
     },
     {
       "transactions": {
+        "buy": "44F2LmUt1RiXr9tJ21JZpjzfeNKZvBHWawkJXFq6AZ5a",
+        "sell": "8rZEAkDCydtVioRi3SfP2T8RQAmUXNGk9amn7zHQBM53"
+      },
+      "what": "p-1d6a3c5d.nearcraftmc.testnet bought and sold 2x iron_ingot holding 0 full-access keys, paying nothing; relayer paid 1602646487438200000000 yocto",
+      "explorer": [
+        "https://testnet.nearblocks.io/txns/44F2LmUt1RiXr9tJ21JZpjzfeNKZvBHWawkJXFq6AZ5a",
+        "https://testnet.nearblocks.io/txns/8rZEAkDCydtVioRi3SfP2T8RQAmUXNGk9amn7zHQBM53"
+      ],
+      "path": "evidence/live/player-gasless-44F2LmUt1RiXr9tJ21JZpjzfeNKZvBHWawkJXFq6AZ5a.json"
+    },
+    {
+      "transactions": {
         "buy": "4EZNk7HbNb17pBneKRtZrV8XgzmS4jU95VgGriXBh5wQ",
         "sell": "q7hdf2y7jkBoZSoLNeMtSyoZMDMxb9rPKLuPHTDvYAz"
       },
@@ -59,6 +71,18 @@
     },
     {
       "transactions": {
+        "buy": "9F7n2B1QSwfBb6yrL79hfg3GMhUYXDg933LAbUx7zRPC",
+        "sell": "E6wPsRQPMhp674CQ5pwCs6XwET597py9VeUzayGQsjH7"
+      },
+      "what": "p-1d6a3c5d.nearcraftmc.testnet bought and sold 2x iron_ingot holding 0 full-access keys, paying nothing; relayer paid 1600145721641200000000 yocto",
+      "explorer": [
+        "https://testnet.nearblocks.io/txns/9F7n2B1QSwfBb6yrL79hfg3GMhUYXDg933LAbUx7zRPC",
+        "https://testnet.nearblocks.io/txns/E6wPsRQPMhp674CQ5pwCs6XwET597py9VeUzayGQsjH7"
+      ],
+      "path": "evidence/live/player-gasless-9F7n2B1QSwfBb6yrL79hfg3GMhUYXDg933LAbUx7zRPC.json"
+    },
+    {
+      "transactions": {
         "buy": "ARHkdKYmpuwjb6XbKQ1yGCkHNL6x9iTBBC4JTa6tgF6s",
         "sell": "7YMSMvoYfXQchTPzK6AgDqnSGFoM6jB9kD1ddFyaT4oB"
       },
@@ -80,87 +104,87 @@
     {
       "topic": "unit-tests",
       "status": "pass",
-      "path": "evidence/runs/unit-tests/2026-11-12T10-18-47/"
+      "path": "evidence/runs/unit-tests/2026-11-12T11-30-25/"
     },
     {
       "topic": "policy-and-injection",
       "status": "pass",
-      "path": "evidence/runs/policy-and-injection/2026-11-12T10-18-47/"
+      "path": "evidence/runs/policy-and-injection/2026-11-12T11-30-25/"
     },
     {
       "topic": "live-testnet-reads",
       "status": "pass",
-      "path": "evidence/runs/live-testnet-reads/2026-11-12T10-18-47/"
+      "path": "evidence/runs/live-testnet-reads/2026-11-12T11-30-25/"
     },
     {
       "topic": "live-testnet-keys",
       "status": "pass",
-      "path": "evidence/runs/live-testnet-keys/2026-11-12T10-18-47/"
+      "path": "evidence/runs/live-testnet-keys/2026-11-12T11-30-25/"
     },
     {
       "topic": "deployed-code-matches-repo",
       "status": "pass",
-      "path": "evidence/runs/deployed-code-matches-repo/2026-11-12T10-18-47/"
+      "path": "evidence/runs/deployed-code-matches-repo/2026-11-12T11-30-25/"
     },
     {
       "topic": "agent-run",
       "status": "pass",
-      "path": "evidence/runs/agent-run/2026-11-12T10-18-47/"
+      "path": "evidence/runs/agent-run/2026-11-12T11-30-25/"
     },
     {
       "topic": "gasless-play",
       "status": "pass",
-      "path": "evidence/runs/gasless-play/2026-11-12T10-18-47/"
+      "path": "evidence/runs/gasless-play/2026-11-12T11-30-25/"
     },
     {
       "topic": "identity-verification",
       "status": "pass",
-      "path": "evidence/runs/identity-verification/2026-11-12T10-18-47/"
+      "path": "evidence/runs/identity-verification/2026-11-12T11-30-25/"
     },
     {
       "topic": "counterparty-and-approval",
       "status": "pass",
-      "path": "evidence/runs/counterparty-and-approval/2026-11-12T10-18-47/"
+      "path": "evidence/runs/counterparty-and-approval/2026-11-12T11-30-25/"
     },
     {
       "topic": "baseline-integrity",
       "status": "pass",
-      "path": "evidence/runs/baseline-integrity/2026-11-12T10-18-47/"
+      "path": "evidence/runs/baseline-integrity/2026-11-12T11-30-25/"
     },
     {
       "topic": "nep245-conformance",
       "status": "pass",
-      "path": "evidence/runs/nep245-conformance/2026-11-12T10-18-47/"
+      "path": "evidence/runs/nep245-conformance/2026-11-12T11-30-25/"
     },
     {
       "topic": "view-methods-callable",
       "status": "pass",
-      "path": "evidence/runs/view-methods-callable/2026-11-12T10-18-47/"
+      "path": "evidence/runs/view-methods-callable/2026-11-12T11-30-25/"
     },
     {
       "topic": "access-key-limits",
       "status": "pass",
-      "path": "evidence/runs/access-key-limits/2026-11-12T10-18-47/"
+      "path": "evidence/runs/access-key-limits/2026-11-12T11-30-25/"
     },
     {
       "topic": "money-invariant",
       "status": "pass",
-      "path": "evidence/runs/money-invariant/2026-11-12T10-18-47/"
+      "path": "evidence/runs/money-invariant/2026-11-12T11-30-25/"
     },
     {
       "topic": "solvency",
       "status": "pass",
-      "path": "evidence/runs/solvency/2026-11-12T10-18-47/"
+      "path": "evidence/runs/solvency/2026-11-12T11-30-25/"
     },
     {
       "topic": "state-migration",
       "status": "pass",
-      "path": "evidence/runs/state-migration/2026-11-12T10-18-47/"
+      "path": "evidence/runs/state-migration/2026-11-12T11-30-25/"
     },
     {
       "topic": "cross-contract-economy",
       "status": "pass",
-      "path": "evidence/runs/cross-contract-economy/2026-11-12T10-18-47/"
+      "path": "evidence/runs/cross-contract-economy/2026-11-12T11-30-25/"
     }
   ]
 }
