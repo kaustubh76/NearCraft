@@ -167,6 +167,8 @@ const RETIRED_CLAIMS = [
     why: 'a scoped key sells through the non-payable market.sell under an approval' },
   { pattern: /61 Rust unit tests/i,
     why: 'there are 90, across three contracts' },
+  { pattern: /holds a function-call key, nothing more/i,
+    why: 'an agent account also carries a disclosed operator full-access key; only the agent PROCESS holds just the scoped key' },
 ]
 for (const doc of [...DOCS, 'web/market.html']) {
   if (!(await exists(doc))) continue

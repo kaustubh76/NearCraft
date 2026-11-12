@@ -30,7 +30,7 @@ const CHECKS = [
   { topic: 'live-testnet-reads', cmd: 'npm', args: ['run', '--silent', 'reads'],
     proves: 'The deployed contracts on NEAR testnet answering a public, credential-free query: every merchant ask, bid, stock band and the contract\'s own reason string. Needs no account and no key.' },
   { topic: 'live-testnet-keys', cmd: 'npm', args: ['run', '--silent', 'keys'],
-    proves: 'Each live agent key\'s receiver_id, method_names and allowance, read back from the chain rather than asserted, plus the spend budgets. Exits non-zero if any agent key is ever unrestricted.' },
+    proves: 'Each live agent key\'s receiver_id, method_names and allowance, read back from the chain rather than asserted, plus the spend budgets and a count of the disclosed operator keys. Exits non-zero if any agent key is unrestricted, if the chain carries a scoped key the manifest does not record, if the manifest records one the chain does not have, or IF THERE IS NOTHING TO AUDIT — that last case shipped: the manifest said agents: [] and this check reported success having examined zero accounts.' },
   { topic: 'agent-run', cmd: 'npm', args: ['run', '--silent', 'agent'], requiresWasm: true,
     proves: 'An agent with a scoped key shopping on a real nearcore node, end to end: an unknown counterparty parked for a human and approved, the same counterparty clearing on its own once trust accrued, and a prompt-injected objective BLOCKED because the public guard contract has corroborated reports against the account it names. Every layer is the real one, including two vendored baseline modules.' },
   { topic: 'gasless-play', cmd: 'node', args: ['--test', 'tests/near/gasless.mjs'], requiresWasm: true,

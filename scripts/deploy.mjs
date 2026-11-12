@@ -326,7 +326,51 @@ for (const agent of cat.agents) {
   }).then(({ keys: ks }) => ks.filter((k) => k.access_key.permission?.FunctionCall?.receiver_id === n.market))
     .catch(() => [])
   if (existingScoped.length) {
+    // Record what is ON CHAIN, not only what this run issued.
+    //
+    // This branch used to `continue` without touching `agentKeys`, so every
+    // re-run wrote `agents: []` into deployment.json — and `npm run keys`,
+    // which iterates that array, then audited nothing and reported success.
+    // The manifest has to describe the deployment, not diary one run.
+    //
+    // Prefer the key whose secret is in the keystore: that is the one the agent
+    // process actually signs with, so it is the one worth publishing.
+    const mine = keys[`${id}#function-call`]
+    const minePub = mine ? KeyPair.fromString(mine).getPublicKey().toString() : null
+    const chosen = existingScoped.find((k) => k.public_key === minePub) ?? existingScoped[0]
+
     log(`  keyed    ${id} already (${existingScoped.length} scoped key(s))`)
+
+    // Prune orphans: scoped keys on this account that are not the one we hold
+    // the secret for.
+    //
+    // These are the residue of an earlier, non-idempotent version of this loop,
+    // which minted a fresh key on every run and overwrote the keystore entry.
+    // So an orphan grants real authority over the agent account while NOBODY
+    // holds its secret any more — unusable by us, unrotatable, and still live.
+    // Leaving that in place is strictly worse than removing it.
+    //
+    // Only prune when our own key was positively identified on chain. If the
+    // keystore and the chain disagree we might be looking at a key we actually
+    // need, so say so and change nothing.
+    if (existingScoped.length > 1) {
+      const orphans = existingScoped.filter((k) => k.public_key !== minePub)
+      if (!minePub || orphans.length === existingScoped.length) {
+        log('           ^ WARNING: cannot tell which scoped key is ours, so none were')
+        log('             removed. npm run keys will name them; resolve by hand.')
+      } else {
+        for (const o of orphans) {
+          await as(id).deleteKey(o.public_key)
+          log(`           pruned orphan scoped key ${o.public_key.slice(0, 26)}…`)
+        }
+      }
+    }
+
+    agentKeys[id] = {
+      secretKey: mine ?? null,
+      publicKey: chosen.public_key,
+      permitted: chosen.access_key.permission.FunctionCall.method_names ?? [],
+    }
     await topUpCredit(id, econ(agent.budget_near))
     continue
   }

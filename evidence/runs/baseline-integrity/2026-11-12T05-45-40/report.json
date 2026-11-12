@@ -1,0 +1,12 @@
+{
+  "topic": "baseline-integrity",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 218,
+  "command": "npm run --silent verify:baseline",
+  "cwd": ".",
+  "proves": "11 vendored baseline files are byte-identical to their recorded SHA-256. This is what makes the eligibility disclosure checkable rather than a promise.",
+  "output_sha256": "919f68b2218c861de5c506c4c6b13a73c61024821da9a789bbd046c661d95d47",
+  "output_bytes": 693,
+  "recorded_at": "2026-11-12T05:46:15.087Z"
+}

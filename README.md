@@ -467,7 +467,7 @@ npm run keys      # reads method_names + allowance back from the chain
 | Track | How |
 |---|---|
 | **`games`** | Requirement by requirement, with the gaps named. **(1)** Materials as NEP-245 multi-tokens, one contract holding every item type — core 10/10, Enumeration 2/2, Approval Management 5/5, read off the compiled ABI. **(2)** No seed phrase, no wallet popup, no gas prompt: measured, a player holding **no full-access key at all** both buys and sells for free. The one stubbed piece is OAuth token verification, behind `verifyIdentity` — so the mechanism is real and the login is not, and we say which half is which. **(3)** The price rule in one readable file, [`contracts/market/src/pricing.rs`](contracts/market/src/pricing.rs), and the merchant's own reason string rendered beside every quote — on the live web page today; **the in-game tooltip needs the Minecraft host, which is not up**. **(4)** Fast-forward: 135 real transactions in 23.7s. **That is not "a week in a minute"** — the arithmetic is worked out above and the claim declined. The loop is specified in [GAME_LOOP.md](GAME_LOOP.md), written before any code. |
-| **`security`** | All three requirements. **(1)** A counterparty check returning `allow`/`warn`/`block` with reasons, scoring the four named signals — account activity, is-a-contract and code-changed, prior interactions, and an on-chain shared blocklist other agents report to with evidence. The wrapper refuses to sign on `block` and **parks the call for a human on `warn`**. **(2)** Agents sign with a function-call access key scoped to one contract with an explicit method list and allowance, never full-access — its limits are explained above and proved in the sandbox. **(3)** The attack demo: a prompt-injected agent tries to pay a known-bad account, is stopped, and the log is printed. Signals and their data sources are written up in [docs/SECURITY_SIGNALS.md](docs/SECURITY_SIGNALS.md), which was written before the code, as the prompt asks. |
+| **`security`** | All three requirements. **(1)** A counterparty check returning `allow`/`warn`/`block` with reasons, scoring the four named signals — account activity, is-a-contract and code-changed, prior interactions, and an on-chain shared blocklist other agents report to with evidence. The wrapper refuses to sign on `block` and **parks the call for a human on `warn`**. **(2)** Agents sign with a function-call access key scoped to one contract with an explicit method list and allowance, never a full-access key — its limits are explained below, proved at the protocol level in the sandbox, and read back off the live chain by `npm run keys`. The agent *account* does also carry an operator key, which that command discloses and counts; the section below says exactly who holds it and why players are treated differently. **(3)** The attack demo: a prompt-injected agent tries to pay a known-bad account, is stopped, and the log is printed. Signals and their data sources are written up in [docs/SECURITY_SIGNALS.md](docs/SECURITY_SIGNALS.md), which was written before the code, as the prompt asks. |
 
 **Two tracks are entered: `games` and `security`.**
 
@@ -490,7 +490,7 @@ NEAR testnet
 ├── market.nearcraftmc.testnet     merchant inventories, pricing, treasuries, buy/sell settlement
 ├── guard.nearcraftmc.testnet      the public blocklist other agents report to, with evidence
 ├── ironmonger.nearcraftmc.testnet merchant agents — one named account each
-├── worker-1.nearcraftmc.testnet   player-hired agents — holds a function-call key, nothing more
+├── worker-1.nearcraftmc.testnet   player-hired agents — the agent process holds only a scoped key
 └── p-1d6a3c5d.nearcraftmc.testnet a player — one scoped key, no full-access key at all
 
 backend/
@@ -504,6 +504,24 @@ contracts/integration/tests/
 
 There is no `plugin/` directory. The Minecraft settlement path is not ported —
 see the note above for why, and for what that costs the `games` track.
+
+**Two key models, and the difference is deliberate.** A *player's* account ends
+up holding exactly one scoped key and no full-access key — `onboarding.mjs`
+installs the scoped key and deletes the bootstrap full-access key in the same
+transaction, because the entire point is that there is no seed phrase for a
+player to lose. An *agent's* account holds its scoped key **plus an operator
+full-access key**, created with the account and kept in gitignored `.local/`.
+
+That operator key is disclosed rather than hidden, and `npm run keys` counts it
+on every run. The reason it is not a hole in the security claim: the question
+the track asks is what the *agent* can do, and the agent process is given only
+the scoped key — it cannot transfer NEAR, cannot add keys, and can call exactly
+one method on exactly one contract, all enforced by the runtime rather than by
+us. The operator already owns the agent, so an operator key adds no authority
+that was not already theirs. An earlier version of this file claimed the agent
+account held "a function-call key, nothing more", which was simply false, and
+`npm run keys` audited **zero** accounts while reporting success — both are
+fixed, and the audit now refuses to pass when it has nothing to check.
 
 The player's account id is not a name someone chose. It is derived from the
 login — `p-<first 8 hex of sha256("provider:subject")>` — so the same identity

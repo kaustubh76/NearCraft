@@ -2,7 +2,7 @@
   "note": "Written by npm run deploy. Public ids only — no secret material.",
   "network": "testnet",
   "rpc": "https://test.rpc.fastnear.com",
-  "deployed_at": "2026-11-12T05:22:16.107Z",
+  "deployed_at": "2026-11-12T05:44:52.933Z",
   "economy_scale": 0.01,
   "root": "nearcraftmc.testnet",
   "contracts": {
@@ -59,5 +59,22 @@
     ],
     "note": "Pays gas for player calls. Funded for gas only, no spend budget. Holds a full-access key because a SignedDelegate action is not a function call, so a scoped key cannot submit one."
   },
-  "agents": []
+  "agents": [
+    {
+      "account_id": "worker-1.nearcraftmc.testnet",
+      "function_call_public_key": "ed25519:D9D4Eo6EmNSBPk66Uee6FMv6gqSSpgf9Y6Nv7V1X4NBJ",
+      "permitted_methods": [
+        "buy_with_credit"
+      ],
+      "scoped_to": "market.nearcraftmc.testnet"
+    },
+    {
+      "account_id": "worker-2.nearcraftmc.testnet",
+      "function_call_public_key": "ed25519:2orZSEsAFb1wXEzP9xEALgXCidMsBBPk2kiNKWQQitjz",
+      "permitted_methods": [
+        "buy_with_credit"
+      ],
+      "scoped_to": "market.nearcraftmc.testnet"
+    }
+  ]
 }
