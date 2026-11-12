@@ -32,6 +32,8 @@ use pricing::{buy_price, scarcity_band, unit_price, BPS};
 
 const GAS_FOR_MT_TRANSFER: Gas = Gas::from_tgas(15);
 const GAS_FOR_DELIVERY_CALLBACK: Gas = Gas::from_tgas(12);
+/// A payout callback only restores a ledger entry, so it needs very little.
+const GAS_FOR_PAYOUT_CALLBACK: Gas = Gas::from_tgas(8);
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
 
 #[ext_contract(ext_items)]
@@ -66,6 +68,8 @@ trait MarketCallbacks {
         count: U128,
         proceeds: U128,
     );
+    fn on_credit_paid(&mut self, who: AccountId, amount: U128);
+    fn on_treasury_paid(&mut self, merchant_id: AccountId, amount: U128);
 }
 
 #[near(serializers = [json, borsh])]
@@ -238,19 +242,37 @@ impl Market {
         if Self::closed(merchant) {
             return true;
         }
+        // A merchant with no shelves at all is closed.
+        //
+        // This used to return false — "not broke, just empty" — and that was
+        // asserted deliberately. It was the wrong reading of the question this
+        // method answers. `is_closed` is a routing signal, and `false` promises
+        // "it will buy something from you"; a merchant stocking nothing will
+        // refuse every sale, because `try_absorb` has no listing to absorb
+        // into. Saying it is open sends a player to a shop that cannot trade.
+        if !self.stocks_anything(&merchant_id) {
+            return true;
+        }
         let spare = merchant.treasury.0.saturating_sub(merchant.floor.0);
-        let mut stocks_anything = false;
         for (key, listing) in self.listings.iter() {
             if key.merchant_id != merchant_id {
                 continue;
             }
-            stocks_anything = true;
             let demand = self.current_demand(listing);
             if spare >= buy_price(listing.base_price.0, listing.stock.0, demand) {
                 return false; // it can still fund a unit of this one
             }
         }
-        stocks_anything
+        true
+    }
+
+    /// Does this merchant have any shelf at all?
+    ///
+    /// Extracted because `is_closed` needs it and so will anything that has to
+    /// distinguish "broke" from "has nothing to sell" — the two reach the same
+    /// verdict here but for different reasons.
+    fn stocks_anything(&self, merchant_id: &AccountId) -> bool {
+        self.listings.iter().any(|(key, _)| &key.merchant_id == merchant_id)
     }
 
     pub fn credit_of(&self, account_id: AccountId) -> U128 {
@@ -561,8 +583,42 @@ impl Market {
         let who = env::predecessor_account_id();
         let amount = self.credits.get(&who).copied().unwrap_or(U128(0)).0;
         require!(amount > 0, "nothing to withdraw");
+        // Zero the ledger first, then pay. If the payment fails the callback
+        // puts it back — without that, the entry was gone and the NEAR was
+        // refunded to this contract, so the claim simply evaporated and the
+        // market quietly kept money it no longer accounted for.
         self.credits.insert(who.clone(), U128(0));
-        Promise::new(who).transfer(NearToken::from_yoctonear(amount))
+        Promise::new(who.clone())
+            .transfer(NearToken::from_yoctonear(amount))
+            .then(
+                ext_self::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_PAYOUT_CALLBACK)
+                    .on_credit_paid(who, U128(amount)),
+            )
+    }
+
+    /// Put a credit back if its payout failed.
+    ///
+    /// Reachable in practice, not theoretically: a transfer to an account that
+    /// exists essentially cannot fail, but `NotEnoughBalance` can, because a
+    /// slice of this contract's balance is locked as storage stake while the
+    /// ledger total is free to approach it.
+    #[private]
+    pub fn on_credit_paid(
+        &mut self,
+        who: AccountId,
+        amount: U128,
+        #[callback_result] result: Result<(), PromiseError>,
+    ) -> bool {
+        if result.is_ok() {
+            return true;
+        }
+        self.credit(&who, amount.0);
+        env::log_str(&format!(
+            "payout of {} NEAR to {who} failed; the credit has been restored",
+            near_str(amount.0)
+        ));
+        false
     }
 
     /// A merchant withdrawing its own earnings, down to its floor.
@@ -573,7 +629,42 @@ impl Market {
         require!(withdrawable > 0, "treasury is at or below its floor");
         merchant.treasury = U128(merchant.treasury.0 - withdrawable);
         self.merchants.insert(who.clone(), merchant);
-        Promise::new(who).transfer(NearToken::from_yoctonear(withdrawable))
+        Promise::new(who.clone())
+            .transfer(NearToken::from_yoctonear(withdrawable))
+            .then(
+                ext_self::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_PAYOUT_CALLBACK)
+                    .on_treasury_paid(who, U128(withdrawable)),
+            )
+    }
+
+    /// Put a treasury back if its payout failed.
+    ///
+    /// Restores the *treasury* rather than crediting the merchant, which is not
+    /// interchangeable: the floor is measured against the treasury, so paying a
+    /// failed withdrawal back as credit would leave the merchant sitting at its
+    /// floor and reporting closed while its money was somewhere else.
+    #[private]
+    pub fn on_treasury_paid(
+        &mut self,
+        merchant_id: AccountId,
+        amount: U128,
+        #[callback_result] result: Result<(), PromiseError>,
+    ) -> bool {
+        if result.is_ok() {
+            return true;
+        }
+        if let Some(merchant) = self.merchants.get(&merchant_id).cloned() {
+            self.merchants.insert(
+                merchant_id.clone(),
+                Merchant { treasury: U128(merchant.treasury.0 + amount.0), ..merchant },
+            );
+        }
+        env::log_str(&format!(
+            "treasury payout of {} NEAR to {merchant_id} failed; the treasury has been restored",
+            near_str(amount.0)
+        ));
+        false
     }
 
     // ------------------------------------------------------------- internal
@@ -817,6 +908,72 @@ mod tests {
     }
 
     /// The whole purchase unwinds if the NEP-245 delivery fails.
+    #[test]
+    fn a_failed_credit_payout_puts_the_credit_back() {
+        let mut m = market();
+        ctx(player(), 5_000_000_000_000_000_000_000_000);
+        m.fund_credit(player());
+        let owed = m.credit_of(player()).0;
+        assert!(owed > 0);
+
+        ctx(player(), 0);
+        let _ = m.withdraw();
+        assert_eq!(m.credit_of(player()), U128(0), "zeroed before paying, by design");
+
+        // The transfer failed, so the claim must come back. Without the
+        // callback the entry was gone and the NEAR was refunded to this
+        // contract: the market kept money it no longer accounted for.
+        ctx("market.test.near".parse().unwrap(), 0);
+        let ok = m.on_credit_paid(player(), U128(owed), Err(PromiseError::Failed));
+
+        assert!(!ok);
+        assert_eq!(m.credit_of(player()), U128(owed), "credit restored in full");
+        assert!(get_logs().iter().any(|l| l.contains("credit has been restored")));
+    }
+
+    #[test]
+    fn a_successful_credit_payout_restores_nothing() {
+        let mut m = market();
+        ctx(player(), 5_000_000_000_000_000_000_000_000);
+        m.fund_credit(player());
+        let owed = m.credit_of(player()).0;
+
+        ctx(player(), 0);
+        let _ = m.withdraw();
+
+        ctx("market.test.near".parse().unwrap(), 0);
+        let ok = m.on_credit_paid(player(), U128(owed), Ok(()));
+
+        assert!(ok);
+        assert_eq!(m.credit_of(player()), U128(0), "paid out means paid out");
+    }
+
+    #[test]
+    fn a_failed_treasury_payout_restores_the_treasury_not_a_credit() {
+        let mut m = market();
+        let before = m.merchant_treasury_for(ironmonger());
+        let floor = m.merchant(ironmonger()).unwrap().floor.0;
+        let withdrawable = before - floor;
+        assert!(withdrawable > 0);
+
+        ctx(ironmonger(), 0);
+        let _ = m.withdraw_treasury();
+        assert_eq!(m.merchant_treasury_for(ironmonger()), floor, "left at the floor");
+        assert!(m.is_closed(ironmonger()), "and therefore closed");
+
+        ctx("market.test.near".parse().unwrap(), 0);
+        let ok = m.on_treasury_paid(ironmonger(), U128(withdrawable), Err(PromiseError::Failed));
+
+        assert!(!ok);
+        assert_eq!(m.merchant_treasury_for(ironmonger()), before, "treasury restored");
+        assert!(!m.is_closed(ironmonger()), "and open again");
+        // Restoring it as credit instead would leave the merchant at its floor,
+        // reporting closed, with its money somewhere else. The floor is
+        // measured against the treasury, so the two are not interchangeable.
+        assert_eq!(m.credit_of(ironmonger()), U128(0), "not paid back as credit");
+        assert!(get_logs().iter().any(|l| l.contains("treasury has been restored")));
+    }
+
     #[test]
     fn failed_delivery_rolls_the_purchase_back_and_refunds() {
         let mut m = market();
@@ -1203,13 +1360,22 @@ mod tests {
         broke.list_item(ironmonger(), "stone".into(), U128(BASE), U128(256));
         assert!(broke.is_closed(ironmonger()), "an unfunded merchant funds nothing");
 
-        // A merchant stocking nothing at all is not "closed", it is just empty.
+        // A merchant stocking nothing at all is closed.
+        //
+        // This test previously asserted the opposite — "no shelves is not the
+        // same as broke" — and the earlier reading was wrong. The two states do
+        // differ in cause, but `is_closed` answers "will this merchant trade
+        // with me", and an empty one will refuse every sale. Kept as a
+        // correction rather than quietly rewritten.
         ctx(owner(), 0);
         let mut empty = Market::new(owner(), items());
         empty.register_merchant(ironmonger(), "Ironmonger".into(), U128(0));
         ctx(owner(), BASE);
         empty.fund_merchant(ironmonger());
-        assert!(!empty.is_closed(ironmonger()), "no shelves is not the same as broke");
+        assert!(
+            empty.is_closed(ironmonger()),
+            "a merchant with nothing on its shelves cannot trade, so it is not open"
+        );
     }
 
     /// The reason string reaches a player's screen, so it must not leak raw
@@ -1289,7 +1455,7 @@ mod tests {
         ctx(owner(), BASE / 10);
         m.fund_merchant(ironmonger());
         ctx(seller(), 0);
-        m.sell(ironmonger(), IRON.to_string(), 1, U64(1));
+        let _ = m.sell(ironmonger(), IRON.to_string(), 1, U64(1));
     }
 
     /// A missing, stale or exhausted approval means the pull fails. The sale
@@ -1336,7 +1502,7 @@ mod tests {
     fn selling_nothing_is_refused() {
         let mut m = market();
         ctx(seller(), 0);
-        m.sell(ironmonger(), IRON.to_string(), 0, U64(1));
+        let _ = m.sell(ironmonger(), IRON.to_string(), 0, U64(1));
     }
 
 }

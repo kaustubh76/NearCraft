@@ -56,6 +56,10 @@ const MODIFIER_RULES = [
     // purchase; the same for the sale-side unwind.
     on_items_delivered: ['private'],
     on_materials_pulled: ['private'],
+    // The payout rollbacks. Callable by anyone, they would let a caller restore
+    // a credit or a treasury that was in fact paid out — minting money.
+    on_credit_paid: ['private'],
+    on_treasury_paid: ['private'],
     // THE one that matters: a function-call access key cannot attach NEAR, so
     // both the agent purchase path and the player sell path must stay
     // non-payable. If either becomes payable, agents silently stop being able

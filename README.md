@@ -23,7 +23,7 @@ column before the description.
 | `RULES.md` — round rules + sequence diagram | **Done.** Required by the `swarms` prompt before any code. |
 | `BASELINE.md` + hash-verified baseline import | **Done, machine-checked.** `npm run verify:baseline` |
 | `contracts/items` — NEP-245 materials | **Built and tested.** 29 unit tests. NEP-245 core 10/10 + Enumeration 2/2 + Approval Management 5/5, verified against the compiled ABI. Three spec ambiguities are decided and disclosed in the module header, including that `mt_is_approved` takes an explicit `owner_id` — the spec's signature names none, which a multi-token cannot answer. |
-| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 48 unit tests (including the pricing rule). |
+| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 51 unit tests (including the pricing rule and the payout rollbacks). |
 | `contracts/guard` — the shared blocklist, on-chain | **Built and tested.** 13 unit tests. Public, attributed by the runtime, not deletable by us. |
 | `backend/near/counterparty.mjs` — allow/warn/block | **Built and tested.** 23 tests. Pure scoring, no API key, no indexer. |
 | `backend/near` — signer, policy, warn→human approval | **Built and tested.** 59 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
@@ -36,6 +36,7 @@ column before the description.
 | `AGENTS.md` | **Written.** Repo instructions and the claims policy, for the AI judges the organisers named. |
 | `evidence/` | **Built.** `npm run evidence` retains each check's real output with its exit code and an output hash. Failures are kept, not edited out. |
 | Gasless play — no seed phrase, no popup, no gas prompt | **Built and measured on public testnet.** `npm run live:player`: a player holding **no full-access key at all** buys and sells on NEAR testnet and its balance moves by **exactly 0** — the relayer pays. Reproduced twice, hashes retained in `evidence/live/`. Also `npm run test:gasless` on a local node, plus 15 offline tests. [docs/GASLESS.md](docs/GASLESS.md) |
+| Payout rollbacks | **Built and tested.** `withdraw` and `withdraw_treasury` used to zero the ledger and then fire a bare transfer with no callback: a failed payout debited the claimant and delivered nothing, and the market silently kept money it no longer accounted for. Both now roll back. 3 unit tests. |
 | NEP-245 Approval Management | **Built and tested.** 10 unit tests. Implemented because without it a key-less player could buy but never sell. |
 | Minecraft plugin settlement path | **Not built**, and not startable here — no Java runtime on this machine and the Paper jar lives on the operator host. The note below also corrects our own earlier estimate of the work. |
 | Sealed-bid rounds (`swarms`) | **Not built, and that track is not entered.** See below. |
@@ -220,7 +221,7 @@ Needs Rust and Node 22+, nothing else — not even the wasm target, because
 near-sdk unit tests build for the host. All three checks pass right now:
 
 ```sh
-npm run test:contracts    # 90 Rust unit tests across all three contracts
+npm run test:contracts    # 93 Rust unit tests across all three contracts
 npm run test:near         # 82 offline tests: policy, injection, counterparty, market, web
 npm run verify:baseline   # 11 vendored files, SHA-256 unchanged
 ```

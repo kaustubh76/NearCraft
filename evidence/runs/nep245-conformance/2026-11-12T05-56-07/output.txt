@@ -1,0 +1,8 @@
+ok    NEP-245 core: 10/10 present
+ok    NEP-245 enumeration: 2/2 present
+ok    NEP-245 approval management: 5/5 present
+ok    Metadata absent, as documented
+ok    security-relevant modifiers correct (payable / private / non-payable)
+
+conformance ok — items 22 methods, market 23 methods
+
