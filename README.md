@@ -343,6 +343,29 @@ assumption we had started from:
 - **An empty `method_names` means *any method on that contract*.** near-api-js
   defaults it to `[]`, which is a quiet way to issue an unrestricted key.
   `npm run keys` exits non-zero if it ever finds one.
+- **An allowance is spent and never refilled, so a key can lock its account
+  out.** The `security` prompt closes by warning about exactly this: an account
+  holding *only* function-call keys cannot add a replacement, so once its
+  allowance falls below one call's prepaid gas it is stuck for good. We measured
+  who is actually exposed, on public testnet:
+
+  | Account | How it signs | Allowance drawn |
+  |---|---|---|
+  | `p-1d6a3c5d…` (a player), 6 calls | relayed, NEP-366 | **0 yoctoNEAR — not drawn at all** |
+  | `worker-1` (an agent), 1 call | its own scoped key | 670,133,550,974,700,000,000 (~0.00067 NEAR) |
+
+  Two consequences, and the first is a property of the design rather than luck.
+  **Relaying immunises the player**: the relayer's key pays, so the player's
+  allowance is never touched — which matters because the player is the one
+  account deliberately left with no full-access key, and so the one that could
+  not be rescued. A directly-signing agent *does* drain, at roughly 3,000 calls
+  per 2 NEAR, and for an agent that is recoverable: the operator key exists
+  precisely so it can be re-keyed. That is a second concrete reason for the key
+  `npm run keys` discloses.
+
+  `npm run keys` now prints the remaining headroom in calls and **fails below
+  fifty**, so this is visible long before it bites rather than on the day it
+  does.
 
 ### Look at the market
 

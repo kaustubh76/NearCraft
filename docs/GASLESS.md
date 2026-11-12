@@ -151,3 +151,24 @@ JSON, which is NEAR's normal convention for 64-bit values.
 - **Not established:** any real OAuth flow — token verification is stubbed
   behind `verifyIdentity`, and that is the one genuinely external dependency
   left. No testnet deployment. No Minecraft client is involved in any of it.
+
+## A side effect worth naming: relaying prevents lock-out
+
+NEAR's access-key docs warn — and the `security` track prompt repeats it — that
+an account holding *only* function-call keys "can lock itself out if the gas
+allowance runs out". It cannot add a replacement key, so when the allowance
+falls below one call's prepaid gas that account is finished.
+
+Our player is exactly the account at risk: one scoped key, no full-access key,
+by design. Measured over six relayed calls on public testnet, its allowance was
+drawn down by **zero yoctoNEAR**. A directly-signing agent over one call drew
+670,133,550,974,700,000,000 yocto (~0.00067 NEAR).
+
+The reason is the same mechanism that makes play gasless: in a NEP-366 delegate
+the *relayer's* key pays, so the player's allowance is never touched. So the
+design that removes the gas prompt also removes the lock-out, and it removes it
+for the one account that could not have been rescued. That was not the goal —
+it falls out of relaying — but it is worth stating, because the hazard is real
+for anything that signs for itself.
+
+`npm run keys` reports remaining headroom in calls and fails below fifty.

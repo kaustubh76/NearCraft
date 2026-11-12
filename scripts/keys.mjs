@@ -10,6 +10,17 @@
 import { readFile } from 'node:fs/promises'
 import { fromYocto, provider } from './near-env.mjs'
 
+/// What one 60 TGas agent call actually burns from a key's allowance, measured
+/// on public testnet: `worker-1`'s allowance fell by 670133550974700000000
+/// yoctoNEAR across exactly one live `buy_with_credit`.
+///
+/// Used only to turn a remaining allowance into "about this many calls left",
+/// which is the number that matters, because the security prompt's own closing
+/// note warns that an account holding ONLY function-call keys "can lock itself
+/// out if the gas allowance runs out". Gas prices move, so this is an estimate
+/// from a real measurement rather than a guarantee, and it is labelled as one.
+const MEASURED_BURN_PER_CALL = 670_133_550_974_700_000_000n
+
 const p = provider()
 let manifest
 try {
@@ -66,6 +77,27 @@ for (const agent of agents) {
     console.log(`    method_names  [${(fc.method_names ?? []).join(', ') || '*** ANY METHOD ***'}]`)
     console.log(`    allowance     ${fc.allowance ? fromYocto(fc.allowance) + ' NEAR (gas only)' : 'unlimited'}`)
     console.log('    cannot transfer NEAR, cannot add keys — enforced by the runtime')
+
+    // Lock-out headroom. An allowance is spent, never refilled, and a key whose
+    // allowance falls below one call's PREPAID gas stops working entirely — so
+    // an account with no full-access key to add a replacement is then stuck for
+    // good. Reporting the remaining calls makes that visible years before it
+    // happens instead of on the day it does.
+    if (fc.allowance) {
+      const left = BigInt(fc.allowance) / MEASURED_BURN_PER_CALL
+      const rescue = keys.some((o) => {
+        const q = o.access_key.permission
+        return q === 'FullAccess' || q?.FullAccess !== undefined
+      })
+      console.log(
+        `    headroom      ~${left} more call(s) at the measured testnet burn` +
+        `${rescue ? '; an operator key can re-key this account' : ' — AND NO FULL-ACCESS KEY TO RE-KEY IT'}`,
+      )
+      if (left < 50n) {
+        console.log('    ^ FAIL: fewer than 50 calls of allowance left; re-key before it locks out')
+        failures++
+      }
+    }
 
     // An empty method_names list means "any method on that contract". Passing
     // methodNames is optional in near-api-js, so this is a real footgun; the
