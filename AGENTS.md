@@ -192,6 +192,15 @@ baseline project, where it was the thing that made the evidence worth reading.
   **SOURCE MOVED**, which is a different failure from DIFFERS: the bytes and the
   local wasm still agree, it is the *source* that has left them behind. The
   check skips `contracts/integration/`, which no contract build reads.
+- **Banning a phrasing does not stop a number rotting; checking it does.** A
+  rule forbids "N Rust unit tests" and "N offline checks", and the README's
+  status table duly rotted as "74 unit tests" and "12 tests" — matching neither.
+  The real counts were 95 and 18. `check:docs` now COUNTS them: `#[test]` per
+  crate, and `#[tokio::test]` in the files `test:sandbox` names, with the file
+  list read out of `package.json` so adding `--test foo` updates the expectation
+  by itself. Both agree exactly with what the runners print. It also fails when
+  the count is *removed*, because a check that quietly stops checking is the
+  failure this repo keeps rediscovering.
 - **`build_info` naming an older commit than `HEAD` is not drift.** The bytes
   are pinned to the commit that built them, so they should not track `HEAD`.
   Do not redeploy to make the two match; the question worth asking is whether

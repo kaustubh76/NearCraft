@@ -166,10 +166,12 @@ const RETIRED_CLAIMS = [
   { pattern: /which is why a scoped key cannot sell/i,
     why: 'a scoped key sells through the non-payable market.sell under an approval' },
   // Not one stale number but the whole class. Hand-written test counts have now
-  // rotted FOUR times in this repository: eight at once in the claims audit,
-  // then 183, then 116, then 135 within a single day of each other. The command
-  // prints the count; a document that repeats it is a second source of truth
-  // with no way to stay true. So: do not write one down.
+  // rotted FIVE times in this repository: eight at once in the claims audit,
+  // then 183, then 116, then 135 within a single day of each other — and then
+  // the status table's own "74 unit tests" and "12 tests", which these two
+  // patterns do not match because neither says "Rust" or "offline". That is
+  // the limit of banning a phrasing: the next writer picks a different one.
+  // Counts that CAN be checked are now checked instead, further down.
   { pattern: /\b\d+ Rust unit tests?\b/i,
     why: 'a hand-written Rust unit-test count rots — npm run test:contracts prints it, so cite the command instead of a number' },
   { pattern: /\b\d+ offline (?:Node )?checks\b/i,
@@ -208,6 +210,67 @@ for (const doc of [...DOCS, 'web/market.html']) {
     // claim, never something they might say while making one.
     if (/not true|was false|was wrong|superseded|retired|declined|an earlier version|there was no such|no such file|never written|never built/i.test(near)) continue
     fail(doc, `makes a claim we retired: ${why}`)
+  }
+}
+
+// ------------------------------------------- test counts, checked not banned
+//
+// Hand-written test counts have now rotted FIVE times here. The RETIRED_CLAIMS
+// rules above ban two phrasings of a TOTAL, but the status table writes
+// "74 unit tests" and "12 tests", which neither pattern matches — and both were
+// wrong: the market crate had 95 and the sandbox suite 18.
+//
+// Banning the number is one answer. CHECKING it is a better one, because the
+// number is worth having and it is cheap to verify: a unit test is a `#[test]`
+// in that crate's `src`, and a sandbox test is a `#[tokio::test]` in the files
+// `test:sandbox` actually runs. Counted this way they agree exactly with what
+// the runners print — verified against both before this check was written.
+//
+// The sandbox file list is read out of `test:sandbox` itself rather than
+// written here, so adding `--test foo` updates the expected number instead of
+// silently making it stale. A count written down in two places is the problem;
+// this one is written down in none.
+async function countInRustFiles(dir, pattern, only = null) {
+  let n = 0
+  for (const entry of await readdir(new URL(dir, ROOT), { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      n += await countInRustFiles(`${dir}${entry.name}/`, pattern, only)
+      continue
+    }
+    if (!entry.name.endsWith('.rs')) continue
+    if (only && !only.includes(entry.name.replace(/\.rs$/, ''))) continue
+    const text = await readFile(new URL(`${dir}${entry.name}`, ROOT), 'utf8')
+    n += (text.match(pattern) ?? []).length
+  }
+  return n
+}
+
+const sandboxFiles = [...(pkg.scripts?.['test:sandbox'] ?? '').matchAll(/--test\s+(\S+)/g)].map((m) => m[1])
+
+const COUNTED_CLAIMS = [
+  { what: 'contracts/items unit tests', dir: 'contracts/items/src/', pattern: /#\[test\]/g,
+    claim: /`contracts\/items`[^\n]*?\b(\d+) unit tests\b/ },
+  { what: 'contracts/market unit tests', dir: 'contracts/market/src/', pattern: /#\[test\]/g,
+    claim: /`contracts\/market`[^\n]*?\b(\d+) unit tests\b/ },
+  { what: 'contracts/guard unit tests', dir: 'contracts/guard/src/', pattern: /#\[test\]/g,
+    claim: /`contracts\/guard`[^\n]*?\b(\d+) unit tests\b/ },
+  { what: 'sandbox integration tests', dir: 'contracts/integration/tests/', pattern: /#\[tokio::test\]/g,
+    only: sandboxFiles,
+    claim: /\*\*Sandbox integration tests\*\*[^\n]*?\b(\d+) tests\b/ },
+]
+
+const readmeText = await readFile(new URL('README.md', ROOT), 'utf8')
+for (const { what, dir, pattern, claim, only } of COUNTED_CLAIMS) {
+  const actual = await countInRustFiles(dir, pattern, only ?? null)
+  const m = readmeText.match(claim)
+  if (!m) {
+    // Not "no claim, no problem": the row was reworded and this check went
+    // blind, which is how a vacuous check is born.
+    fail('README.md', `no ${what} count found to check — the row was reworded, so this check now verifies nothing`)
+    continue
+  }
+  if (Number(m[1]) !== actual) {
+    fail('README.md', `claims ${m[1]} ${what}, but ${actual} exist`)
   }
 }
 
