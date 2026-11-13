@@ -279,6 +279,33 @@ const COUNTED_CLAIMS = [
   { what: 'Minecraft plugin commands', dir: 'minecraft/src/main/resources/',
     pattern: /^  [a-z]+:$/gm, only: ['plugin'], ext: '.yml',
     claim: /\b(\d+) in-game commands\b/ },
+  // NEP-245 Approval Management, counted from the contract rather than from
+  // the gate that checks it. `scripts/check-nep245.mjs` cannot help here: its
+  // list of required methods is hand-written, so for a while it reported
+  // "5/5" while missing `mt_token_approvals` entirely — the denominator was
+  // the implementation, which is a check that cannot fail.
+  //
+  // `all: true` because the real defect was two README rows DISAGREEING: one
+  // said 6/6 and the other still said 5/5, and checking only the first
+  // occurrence would have passed. Six is the spec's number and is fixed; the
+  // numerator is counted.
+  //
+  // The denominator is read too, and that is not fussiness. The first version
+  // of this check matched `Approval Management (\d+)/6` — so the row reading
+  // "5/5" did not match it AT ALL and the check passed while the stale row sat
+  // there. A regex that only recognises the correct answer cannot report a
+  // wrong one. Six is the spec's count and is asserted as a constant; the
+  // numerator is counted from the contract.
+  { what: 'NEP-245 Approval Management methods', dir: 'contracts/items/src/',
+    pattern: /pub fn (?:mt_approve|mt_revoke_all|mt_revoke|mt_is_approved|mt_token_approvals|mt_token_approval)\s*\(/g,
+    all: true, denominator: 6,
+    claim: /Approval Management \*{0,2}(\d+)\/(\d+)\b/g },
+  // Counted the moment a number for it was written down. The README said
+  // "twelve" while the source had thirteen, which is the same hand-written
+  // count rotting for the same reason as every one above it.
+  { what: 'market env::log_str lines', dir: 'contracts/market/src/',
+    pattern: /env::log_str\(/g,
+    claim: /\b(\d+) plain `env::log_str` lines\b/ },
 ]
 
 // 7. The Minecraft plugin must stay NEW code.
@@ -338,17 +365,28 @@ try {
   if (!/ENOENT/.test(e?.message ?? '')) fail('deployment.json', `could not be read: ${e.message}`)
 }
 
-for (const { what, dir, pattern, claim, only, ext } of COUNTED_CLAIMS) {
+for (const { what, dir, pattern, claim, only, ext, all, denominator } of COUNTED_CLAIMS) {
   const actual = await countInFiles(dir, pattern, only ?? null, ext ?? '.rs')
-  const m = readmeText.match(claim)
-  if (!m) {
+  // `all` checks EVERY place the number is written, not just the first. The
+  // README once carried the same count twice and the two disagreed, which a
+  // first-match check passes happily.
+  const found = all ? [...readmeText.matchAll(claim)] : [readmeText.match(claim)].filter(Boolean)
+  if (found.length === 0) {
     // Not "no claim, no problem": the row was reworded and this check went
     // blind, which is how a vacuous check is born.
     fail('README.md', `no ${what} count found to check — the row was reworded, so this check now verifies nothing`)
     continue
   }
-  if (Number(m[1]) !== actual) {
-    fail('README.md', `claims ${m[1]} ${what}, but ${actual} exist`)
+  for (const m of found) {
+    if (Number(m[1]) !== actual) {
+      fail('README.md', `claims ${m[1]} ${what}, but ${actual} exist`)
+    }
+    // An "N of M" claim where M is fixed by a spec, not by us. Reading only N
+    // let `5/5` slip through, because the regex that looked for `.../6` simply
+    // did not match the wrong row.
+    if (denominator !== undefined && Number(m[2]) !== denominator) {
+      fail('README.md', `claims ${m[1]}/${m[2]} ${what}, but the standard defines ${denominator}`)
+    }
   }
 }
 

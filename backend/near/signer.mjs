@@ -85,11 +85,46 @@ export function createAgentSigner({ policy, secretKey, rpcUrl = 'https://test.rp
     })
   }
 
+  /// The same check, made to actually happen.
+  ///
+  /// `verifyKeyScope` was written at the start and then never called from
+  /// anywhere — the audit found the definition, the export, and a comment at
+  /// `screen()` leaning on it, and no call site. So the one bound the agent
+  /// kept when no counterparty service was wired in was never checked against
+  /// the chain.
+  ///
+  /// Memoised for the ordinary path: one RPC per signer, not one per call.
+  ///
+  /// Memoised is NOT the same as permanent, and the difference matters. A key's
+  /// permission CAN widen in place — `DeleteKey(pk)` then `AddKey(pk,
+  /// FullAccess)` keeps the same public key and anyone holding the account's
+  /// full-access key can do it. So `approve()` below re-verifies rather than
+  /// reading this memo: a parked call waits on a person for an unbounded time,
+  /// and that is the one window long enough for the key underneath it to
+  /// change. Everywhere else the memo is read, because the gap between
+  /// authorising a call and signing it is microseconds.
+  ///
+  /// A failure is NOT cached. A node that was unreachable at the first call
+  /// says nothing about the key, and caching that would turn a blip into an
+  /// agent that never signs again.
+  let scopeCheck = null
+  function assertScope() {
+    if (!scopeCheck) {
+      scopeCheck = verifyKeyScope().catch((e) => {
+        scopeCheck = null
+        throw e
+      })
+    }
+    return scopeCheck
+  }
+
   /// Ask the counterparty service about whoever is about to be paid.
   ///
   /// `block` refuses outright. `warn` parks the call for a human. `allow`
-  /// proceeds. With no service wired in, this is skipped — and `verifyKeyScope`
-  /// still holds, so the agent is never unbounded, only less well informed.
+  /// proceeds. With no service wired in, this is skipped — and the key scope
+  /// check still holds, so the agent is never unbounded, only less well
+  /// informed. That sentence was false until `assertScope` was wired into both
+  /// signing paths: the check existed and nothing ran it.
   async function screen(intent, id) {
     if (!counterparty) return
     const subject = intent.args.merchant_id
@@ -120,6 +155,12 @@ export function createAgentSigner({ policy, secretKey, rpcUrl = 'https://test.rp
       log({ event: 'refused', agent: policy.agentId, code: refusal.code, detail: refusal.detail, request })
       throw refusal
     }
+
+    // After `authorize`, which is offline: an out-of-policy request must keep
+    // costing nothing. Before everything else, because a key that turned out
+    // to be full-access should stop the agent rather than be screened,
+    // approved and then used.
+    await assertScope()
 
     const id = intentId(intent)
     await screen(intent, id)
@@ -174,6 +215,12 @@ export function createAgentSigner({ policy, secretKey, rpcUrl = 'https://test.rp
     const held = awaitingHuman.get(id)
     if (!held) throw new PolicyRefusal('NO_SUCH_PENDING_DECISION', id)
     awaitingHuman.delete(id)
+
+    // Re-verified from the chain, not read from the memo. A person approving
+    // a trade is not a person approving the key it gets signed with, and this
+    // is the only path where enough time passes for that key to have been
+    // deleted and re-added wider underneath the decision.
+    await verifyKeyScope()
 
     if (counterparty) {
       const recheck = await counterparty.check(policy.agentId, held.intent.args.merchant_id)

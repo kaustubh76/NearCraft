@@ -606,3 +606,241 @@ test('a relayed call whose INNER action panics is reported as a failure, not a h
   // And the sale must not have half-happened.
   assert.equal(await held(), heldBefore, 'no materials may move when the pull fails')
 })
+
+test('two calls in flight for one player do not collide on the delegate nonce', async (t) => {
+  // A relayed call is signed by the PLAYER's scoped key, so it consumes the
+  // player's access-key nonce — not the relayer's. `createSignedMetaTransaction`
+  // reads that nonce from the chain and uses nonce+1, so two calls built
+  // concurrently for one player read the same number and build the same nonce.
+  // nearcore accepts the first and rejects the second.
+  //
+  // This is reachable from the product, not a contrivance: `scripts/mc-up.mjs`
+  // and the Minecraft plugin both let a player issue a second command before
+  // the first has landed, and the web client does not disable its buttons. The
+  // failure is loud, which is the right direction, but losing a player's action
+  // because they were quick is not behaviour to keep.
+  //
+  // Only a real node can show this. A stub cannot reject a stale nonce.
+  const sandbox = await Sandbox.start({})
+  t.after(() => sandbox.tearDown())
+
+  const provider = new JsonRpcProvider({ url: sandbox.rpcUrl })
+  const root = new Account(DEFAULT_ACCOUNT_ID, provider, DEFAULT_PRIVATE_KEY)
+
+  async function sub(name, funds) {
+    const key = KeyPair.fromRandom('ed25519')
+    await root.createSubAccount({
+      accountOrPrefix: name, publicKey: key.getPublicKey().toString(), nearToTransfer: funds,
+    })
+    return { id: `${name}.${DEFAULT_ACCOUNT_ID}`, key }
+  }
+
+  const items = await sub('items', near(10))
+  const market = await sub('market', near(20))
+  const merchant = await sub('ironmonger', near(2))
+  const relayer = await sub('relayer', near(50))
+  const player = await sub('player', near(1))
+
+  const itemsAcc = new Account(items.id, provider, items.key.toString())
+  const marketAcc = new Account(market.id, provider, market.key.toString())
+  await itemsAcc.deployContract(await wasm('nearcraft_items'))
+  await marketAcc.deployContract(await wasm('nearcraft_market'))
+  await itemsAcc.callFunction({ contractId: items.id, methodName: 'new', args: { owner_id: market.id }, gas: teraToGas('30') })
+  await marketAcc.callFunction({ contractId: market.id, methodName: 'new', args: { owner_id: root.accountId, items_contract: items.id }, gas: teraToGas('30') })
+  await marketAcc.callFunction({ contractId: items.id, methodName: 'mt_mint', args: { token_id: 'iron_ingot', amount: '100000', receiver_id: market.id }, gas: teraToGas('60') })
+  await root.callFunction({ contractId: market.id, methodName: 'register_merchant', args: { merchant_id: merchant.id, name: 'Ironmonger', floor: '0' }, gas: teraToGas('30') })
+  await root.callFunction({ contractId: market.id, methodName: 'fund_merchant', args: { merchant_id: merchant.id }, deposit: near(10), gas: teraToGas('30') })
+  await root.callFunction({ contractId: market.id, methodName: 'list_item', args: { merchant_id: merchant.id, item: 'iron_ingot', base_price: (near(1) / 10n).toString(), stock: '1000' }, gas: teraToGas('30') })
+  await root.callFunction({ contractId: market.id, methodName: 'fund_credit', args: { account_id: player.id }, deposit: near(5), gas: teraToGas('30') })
+
+  // A player who holds only a scoped key, which is the whole point.
+  const playerFull = new Account(player.id, provider, player.key.toString())
+  const scoped = KeyPair.fromRandom('ed25519')
+  await playerFull.signAndSendTransaction({
+    receiverId: player.id,
+    actions: [
+      actions.addFunctionCallAccessKey(scoped.getPublicKey(), market.id, ['buy_with_credit'], near(2)),
+      actions.deleteKey(player.key.getPublicKey()),
+    ],
+  })
+
+  const held = async () => BigInt(await provider.callFunction({
+    contractId: items.id, method: 'mt_balance_of', args: { account_id: player.id, token_id: 'iron_ingot' },
+  }))
+
+  const relay = createRelayer({
+    relayerAccountId: relayer.id,
+    relayerKey: relayer.key.toString(),
+    marketContract: market.id,
+    permittedMethods: ['buy_with_credit'],
+    rpcUrl: sandbox.rpcUrl,
+  })
+
+  const buy = (count) => relay.relay({
+    playerAccountId: player.id, playerKey: scoped.toString(),
+    methodName: 'buy_with_credit',
+    args: { merchant_id: merchant.id, item: 'iron_ingot', count },
+    gas: 120_000_000_000_000n,
+  })
+
+  // Both started before either is awaited. This is the race.
+  const results = await Promise.allSettled([buy(3), buy(4)])
+
+  console.log('\n--- two relays in flight for one player ---')
+  results.forEach((r, i) => console.log(
+    `  call ${i + 1}  ${r.status}${r.status === 'rejected' ? `  ${r.reason?.code ?? ''}: ${r.reason?.detail ?? r.reason?.message ?? ''}`.slice(0, 160) : ''}`,
+  ))
+  console.log(`  player holds  ${await held()} iron_ingot\n`)
+
+  const rejected = results.filter((r) => r.status === 'rejected')
+  assert.equal(rejected.length, 0,
+    `both relays should land; ${rejected.length} was rejected: ${rejected.map((r) => `${r.reason?.code}: ${r.reason?.detail ?? r.reason?.message}`).join(' | ')}`)
+  // And both actually delivered, rather than one silently doing nothing.
+  assert.equal(await held(), 7n, 'both purchases should have been delivered')
+})
+
+test('a sign-in that died half-way is resumed, not stranded forever', async (t) => {
+  // `signIn` is three transactions and the bootstrap full-access key used to
+  // be a local `const`. If step 2 threw — `mt_approve` panics on a token id
+  // that was never minted, which is a config mistake, not an exotic one — the
+  // key went with the stack frame. What was left on chain: an account that
+  // EXISTS, holding a live full-access key nobody holds. And because `signIn`
+  // only tests existence, every later login for that identity took the
+  // `created: false` branch and returned no key at all, so the play service
+  // answered 503 for that player forever. `npm run keys` reports exactly that
+  // shape as FAIL.
+  //
+  // It needs a real node: the account has to really exist, the approval has to
+  // really panic, and the key swap has to really land.
+  const sandbox = await Sandbox.start({})
+  t.after(() => sandbox.tearDown())
+
+  const provider = new JsonRpcProvider({ url: sandbox.rpcUrl })
+  const root = new Account(DEFAULT_ACCOUNT_ID, provider, DEFAULT_PRIVATE_KEY)
+
+  async function sub(name, funds) {
+    const key = KeyPair.fromRandom('ed25519')
+    await root.createSubAccount({
+      accountOrPrefix: name, publicKey: key.getPublicKey().toString(), nearToTransfer: funds,
+    })
+    return { id: `${name}.${DEFAULT_ACCOUNT_ID}`, key }
+  }
+
+  const items = await sub('items', near(10))
+  const market = await sub('market', near(20))
+
+  const itemsAcc = new Account(items.id, provider, items.key.toString())
+  const marketAcc = new Account(market.id, provider, market.key.toString())
+  await itemsAcc.deployContract(await wasm('nearcraft_items'))
+  await marketAcc.deployContract(await wasm('nearcraft_market'))
+  await itemsAcc.callFunction({ contractId: items.id, methodName: 'new', args: { owner_id: market.id }, gas: teraToGas('30') })
+  await marketAcc.callFunction({ contractId: market.id, methodName: 'new', args: { owner_id: root.accountId, items_contract: items.id }, gas: teraToGas('30') })
+  await marketAcc.callFunction({ contractId: items.id, methodName: 'mt_mint', args: { token_id: 'iron_ingot', amount: '1000', receiver_id: market.id }, gas: teraToGas('60') })
+
+  /// The store a real deployment supplies: gitignored, and holding a
+  /// full-access key, so nothing here is ever logged or returned.
+  const vault = new Map()
+  const bootstrapStore = {
+    async get(id) { return vault.get(id) ?? null },
+    async set(id, key) { vault.set(id, key) },
+    async delete(id) { vault.delete(id) },
+  }
+
+  const common = {
+    rootAccountId: DEFAULT_ACCOUNT_ID,
+    rootKey: DEFAULT_PRIVATE_KEY,
+    marketContract: market.id,
+    itemsContract: items.id,
+    playerMethods: ['buy_with_credit', 'sell', 'invest_with_credit'],
+    verifyIdentity: async (token) => ({ provider: 'seed', subject: String(token) }),
+    rpcUrl: sandbox.rpcUrl,
+    bootstrapStore,
+  }
+
+  // The misconfiguration: a material that was never minted. `mt_approve`
+  // panics on it, so step 2 fails after step 1 has already paid for an account.
+  const broken = createOnboarding({ ...common, sellableItems: ['mithril'] })
+  const accountId = broken.playerAccountId('seed', 'unlucky-player')
+
+  const died = await broken.signIn('unlucky-player').then(() => null, (e) => e)
+  assert.ok(died, 'step 2 was supposed to fail')
+
+  const strandedKeys = await broken.keyLimits(accountId)
+  console.log('\n--- a sign-in that died at step 2 ---')
+  console.log(`  account        ${accountId}`)
+  console.log(`  threw          ${died.code ?? died.name}`)
+  console.log(`  keys on chain  ${strandedKeys.length} (${strandedKeys.filter((k) => k.fullAccess).length} full-access)`)
+  console.log(`  key parked     ${vault.has(accountId)}`)
+
+  assert.equal(strandedKeys.filter((k) => k.fullAccess).length, 1,
+    'the account should be left holding the live full-access key — that is the state being recovered from')
+  assert.ok(vault.has(accountId), 'the bootstrap key must have been parked BEFORE the account was created')
+
+  // The config is fixed and the player signs in again. Same identity, so the
+  // same derived account — the one already sitting there half-finished.
+  const fixed = createOnboarding({ ...common, sellableItems: ['iron_ingot'] })
+  const session = await fixed.signIn('unlucky-player')
+
+  const after = await fixed.keyLimits(accountId)
+  console.log(`  resumed        ${session.resumed}`)
+  console.log(`  server key     ${session.serverKey ? 'issued' : 'MISSING'}`)
+  console.log(`  keys on chain  ${after.length} (${after.filter((k) => k.fullAccess).length} full-access)`)
+  console.log(`  key parked     ${vault.has(accountId)}\n`)
+
+  assert.equal(session.accountId, accountId, 'the same identity must land on the same account')
+  assert.equal(session.resumed, true, 'this completed an earlier attempt, and should say so')
+  assert.ok(session.serverKey, 'the whole point: a key comes back instead of a permanent 503')
+  assert.equal(after.filter((k) => k.fullAccess).length, 0, 'no full-access key may survive onboarding')
+  assert.equal(after.length, 1, 'exactly the one scoped key')
+  assert.deepEqual(after[0].methodNames, ['buy_with_credit', 'sell', 'invest_with_credit'])
+  assert.equal(after[0].receiverId, market.id)
+  assert.equal(vault.has(accountId), false, 'the parked key must be dropped once it is dead on chain')
+
+  // And the approval really landed this time, which is what makes the account
+  // able to sell. Read from the chain, not inferred from the absence of a throw.
+  const approved = await provider.callFunction({
+    contractId: items.id, method: 'mt_is_approved',
+    args: {
+      token_ids: ['iron_ingot'], approved_account_id: market.id,
+      amounts: ['1'], approval_ids: null, owner_id: accountId,
+    },
+  })
+  assert.equal(approved, true, 'the resumed sign-in must leave the market approved to pull materials')
+})
+
+test('without a store, a half-finished account behaves exactly as it always did', async (t) => {
+  // The resume is opt-in. Omit the store and this module stores nothing, which
+  // is what the three players onboarded before it existed depend on: they have
+  // no parked key, and must keep taking the `created: false` branch rather
+  // than being dragged down a resume path with no key to resume from.
+  const sandbox = await Sandbox.start({})
+  t.after(() => sandbox.tearDown())
+
+  const provider = new JsonRpcProvider({ url: sandbox.rpcUrl })
+  const root = new Account(DEFAULT_ACCOUNT_ID, provider, DEFAULT_PRIVATE_KEY)
+
+  const key = KeyPair.fromRandom('ed25519')
+  await root.createSubAccount({
+    accountOrPrefix: 'market', publicKey: key.getPublicKey().toString(), nearToTransfer: near(5),
+  })
+  const marketId = `market.${DEFAULT_ACCOUNT_ID}`
+
+  const onboarding = createOnboarding({
+    rootAccountId: DEFAULT_ACCOUNT_ID,
+    rootKey: DEFAULT_PRIVATE_KEY,
+    marketContract: marketId,
+    sellableItems: [],
+    playerMethods: ['buy_with_credit'],
+    verifyIdentity: async (token) => ({ provider: 'seed', subject: String(token) }),
+    rpcUrl: sandbox.rpcUrl,
+  })
+
+  const first = await onboarding.signIn('returning-player')
+  assert.equal(first.created, true)
+  assert.ok(first.serverKey)
+  assert.equal(first.resumed, false, 'a first sign-in resumes nothing')
+
+  const second = await onboarding.signIn('returning-player')
+  assert.equal(second.created, false, 'an existing account is not re-created')
+  assert.equal(second.serverKey, undefined, 'and with nothing stored there is no key to hand back')
+})

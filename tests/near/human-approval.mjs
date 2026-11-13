@@ -1,12 +1,21 @@
-// The warn -> human path. Offline: every assertion below lands before the
-// signer would touch the network, which is the point — a call awaiting a person
-// must not have been signed already.
+// The warn -> human path. Nothing here is ever signed or broadcast: every
+// assertion lands on a refusal or a parked decision, which is the point — a
+// call awaiting a person must not have been signed already.
+//
+// These tests used to need no network at all. They need one answer now,
+// because the signer verifies its own access key against the chain before it
+// will sign anything — `verifyKeyScope` had been written and then never
+// called, and wiring it in moved the first network touch ahead of screening.
+// So a local stub answers that one question and nothing else; see
+// ./stub-node.mjs. A key that is already wrong should stop the agent before a
+// person is asked to rule on a trade it could never make.
 
-import { test } from 'node:test'
+import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { agentPolicy } from '../../backend/near/policy.mjs'
 import { createAgentSigner, HumanApprovalRequired, PolicyRefusal } from '../../backend/near/signer.mjs'
 import { ALLOW, BLOCK, WARN } from '../../backend/near/counterparty.mjs'
+import { scopedTo, stubNode } from './stub-node.mjs'
 import { KeyPair } from 'near-api-js'
 
 /// Generated per run, never committed. Nothing here gets far enough to sign
@@ -40,8 +49,13 @@ const request = {
   args: { merchant_id: 'ironmonger.nearcraftmc.testnet', item: 'iron_ingot', count: 4 },
 }
 
+/// One stub for the file: every test here uses a correctly scoped key, because
+/// what is under test is the counterparty decision, not the key.
+const node = await stubNode(scopedTo(MARKET, ['buy_with_credit']))
+after(() => node.close())
+
 function signer(counterparty) {
-  return createAgentSigner({ policy, secretKey: THROWAWAY_KEY, counterparty })
+  return createAgentSigner({ policy, secretKey: THROWAWAY_KEY, counterparty, rpcUrl: node.rpcUrl })
 }
 
 test('block refuses before anything is signed', async () => {
@@ -110,6 +124,7 @@ test('an approval cannot override a counterparty that has since been blocked', a
     policy,
     secretKey: THROWAWAY_KEY,
     counterparty: service,
+    rpcUrl: node.rpcUrl,
   })
 
   await s.call(request).catch(() => {})
@@ -150,18 +165,21 @@ test('policy refusal still happens before the counterparty is even consulted', a
 })
 
 test('with no counterparty service wired in, screening is skipped not faked', async () => {
-  // Pointed at a closed port so this fails instantly instead of waiting on a
-  // real RPC timeout — a unit test that needs the internet is a liability.
   const s = createAgentSigner({
     policy,
     secretKey: THROWAWAY_KEY,
     counterparty: null,
-    rpcUrl: 'http://127.0.0.1:1',
+    rpcUrl: node.rpcUrl,
   })
-  // It gets past screening and fails reaching the node, which proves screening
+  // With a good key and no service, it should pass the scope check, skip
+  // screening entirely, and fail only when the stub cannot actually broadcast
+  // a transaction. What matters is which refusals do NOT appear: screening
   // neither silently refused nor silently approved.
   const err = await s.call(request).catch((e) => e)
+  assert.ok(err, 'it should have tried and failed at the transport, not been refused')
   assert.ok(!(err instanceof HumanApprovalRequired), 'must not invent a pending decision')
   assert.notEqual(err?.code, 'COUNTERPARTY_BLOCKED', 'must not invent a block')
-  assert.ok(err, 'it should have tried and failed at the transport, not been refused')
+  // And it really did get past the key check rather than stopping there.
+  assert.ok(!String(err?.code ?? '').startsWith('AGENT_KEY_'),
+    `a correctly scoped key should pass the scope check, got ${err?.code}`)
 })

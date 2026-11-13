@@ -86,6 +86,40 @@ export function createRelayer({
 
   const provider = new JsonRpcProvider({ url: rpcUrl })
   const allowed = new Set(permittedMethods)
+
+  /// One queue per player, because the nonce belongs to the player.
+  ///
+  /// A relayed call is signed by the PLAYER's scoped key, so it spends the
+  /// PLAYER's access-key nonce — the relayer's own nonce is never the
+  /// constraint, which is why this is keyed by account and not global. Two
+  /// players relay in parallel; one player's two calls do not.
+  ///
+  /// `createSignedMetaTransaction` reads that nonce from the chain and signs
+  /// nonce+1, so two calls built before either has landed sign the SAME nonce
+  /// and nearcore rejects the second: `Invalid delegate nonce (ak: 41000001,
+  /// delegate: 41000001)`, measured in the sandbox. Reachable from the product
+  /// — Minecraft and the web client both let a player act twice quickly.
+  ///
+  /// The critical section has to span sign AND submit. Serialising only the
+  /// signature would not help: the nonce advances when the transaction is
+  /// included, so a second signature taken before the first was submitted
+  /// reads the same stale number.
+  const queues = new Map()
+
+  function queued(accountId, work) {
+    const previous = queues.get(accountId) ?? Promise.resolve()
+    // `work` runs whether the previous call resolved or rejected: one player's
+    // failed relay must not wedge their next one.
+    const run = previous.then(work, work)
+    // The tail never rejects, or an unhandled rejection would be reported for
+    // every queued call that merely waited behind a failure.
+    const tail = run.then(() => {}, () => {})
+    queues.set(accountId, tail)
+    // Drop the key once nothing is behind it, so a long-lived service does not
+    // accumulate an entry per player who ever played.
+    tail.then(() => { if (queues.get(accountId) === tail) queues.delete(accountId) })
+    return run
+  }
   // Lazy: constructing a relayer should not derive a key, and an unrelayable
   // method should be refused before any signer is built.
   let relayer = null
@@ -103,30 +137,40 @@ export function createRelayer({
       const player = new Account(playerAccountId, provider, playerKey)
       const built = playerCall({ marketContract, methodName, args, gas })
 
-      let signed
-      try {
-        signed = await player.createSignedMetaTransaction(built)
-      } catch (e) {
-        throw new RelayRefusal('PLAYER_COULD_NOT_SIGN', e?.message ?? String(e))
-      }
+      // Queued per player: see `queued` above. The method check stays outside,
+      // so an unrelayable method is still refused immediately rather than
+      // waiting behind someone else's purchase.
+      const { outcome, relayerPaid } = await queued(playerAccountId, async () => {
+        let signed
+        try {
+          signed = await player.createSignedMetaTransaction(built)
+        } catch (e) {
+          throw new RelayRefusal('PLAYER_COULD_NOT_SIGN', e?.message ?? String(e))
+        }
 
-      const before = await this.balance(relayerAccountId)
-      // The wrapper is unwrapped here; see the note at the top of this file.
-      const outcome = await asRelayer().relayMetaTransaction(signed.signedDelegate)
-      const after = await this.balance(relayerAccountId)
+        const before = await this.balance(relayerAccountId)
+        // The wrapper is unwrapped here; see the note at the top of this file.
+        const sent = await asRelayer().relayMetaTransaction(signed.signedDelegate)
+        const after = await this.balance(relayerAccountId)
+        return { outcome: sent, relayerPaid: before - after }
+      })
 
       log({
         event: 'relayed', player: playerAccountId, methodName,
-        relayerPaid: (before - after).toString(),
+        relayerPaid: relayerPaid.toString(),
       })
 
       // The relayer paid either way — that is what being a relayer means — but
       // reporting success for a call that panicked would make every caller of
       // this function wrong in the same way.
+      //
+      // Outside the queue on purpose: the nonce is spent once the transaction
+      // is included, so the next call can start building while this one is
+      // still being judged.
       const failure = innerFailure(outcome)
       if (failure) throw new RelayRefusal('INNER_CALL_FAILED', failure)
 
-      return { outcome, relayerPaid: before - after }
+      return { outcome, relayerPaid }
     },
 
     async balance(accountId) {

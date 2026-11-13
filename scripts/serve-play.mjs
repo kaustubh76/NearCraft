@@ -155,6 +155,56 @@ if (!rootKey && rootKeyFile?.account_id && rootKeyFile.account_id !== manifest.r
   console.error(`  new players cannot be created until a key for ${manifest.root} is available.\n`)
 }
 
+// -------------------------------------------------- half-finished sign-ins
+//
+// `signIn` is three transactions, and the bootstrap full-access key that signs
+// steps 2 and 3 used to live only in a local variable. A failure in between —
+// `mt_approve` panicking on a mis-listed material is enough — lost that key
+// while it was still installed on the account, and because `signIn` only tests
+// whether the account EXISTS, every later login for that identity returned
+// `created: false` with no key. A permanent 503 for one player, and an account
+// left holding a live full-access key nobody holds.
+//
+// Parking the key makes that recoverable: the next sign-in finishes the job.
+//
+// A SEPARATE FILE from nearcraft-keys.json on purpose. These are FULL-ACCESS
+// keys and that file holds scoped ones; the play service reads that map to
+// decide what to sign with, and a full-access key sitting in it under a
+// slightly different suffix is one typo away from being used as a player's
+// key. Different risk, different file. Both are 0600 inside gitignored
+// .local/, and an entry is deleted the moment the key is destroyed on chain —
+// so in steady state this file is empty.
+const BOOTSTRAP_PATH = process.env.NEARCRAFT_BOOTSTRAP
+  ? new URL(`file://${process.env.NEARCRAFT_BOOTSTRAP}`)
+  : new URL('../.local/nearcraft-bootstrap.json', import.meta.url)
+
+let parkedKeys = {}
+try {
+  parkedKeys = JSON.parse(await readFile(BOOTSTRAP_PATH, 'utf8'))
+} catch { /* nothing parked is the normal state */ }
+
+if (Object.keys(parkedKeys).length > 0) {
+  console.log(`\n  ${Object.keys(parkedKeys).length} half-finished sign-in(s) parked; they will be`)
+  console.log('  completed when those players next sign in.\n')
+}
+
+async function writeParked() {
+  await writeFile(BOOTSTRAP_PATH, JSON.stringify(parkedKeys, null, 2) + '\n', { mode: 0o600 })
+}
+
+const bootstrapStore = {
+  async get(accountId) { return parkedKeys[accountId] ?? null },
+  async set(accountId, secret) {
+    parkedKeys[accountId] = secret
+    await writeParked()
+  },
+  async delete(accountId) {
+    if (!(accountId in parkedKeys)) return
+    delete parkedKeys[accountId]
+    await writeParked()
+  },
+}
+
 const onboarding = createOnboarding({
   rootAccountId: manifest.root,
   rootKey,
@@ -164,6 +214,7 @@ const onboarding = createOnboarding({
   playerMethods: cat.players?.methods ?? ['buy_with_credit', 'sell'],
   verifyIdentity,
   rpcUrl: manifest.rpc,
+  bootstrapStore,
 })
 
 const relayer = createRelayer({
@@ -195,6 +246,7 @@ async function saveKey(accountId, secret) {
   await writeFile(KEYS_FILE, JSON.stringify(keys, null, 2) + '\n', { mode: 0o600 })
   console.log(`  saved key for ${accountId} -> .local/nearcraft-keys.json`)
 }
+
 
 const play = createPlayService({
   deployment: manifest, keys, verifierKind, onboarding, relayer, reader, saveKey,

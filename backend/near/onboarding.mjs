@@ -106,6 +106,18 @@ export function createOnboarding({
   approvalDeposit = 10_000_000_000_000_000_000_000n,  // 0.01 NEAR for approval storage
   /// Standing allowance per material, so one approval lasts.
   sellAllowance = 1_000_000_000n,
+  /// Where to park the bootstrap key while sign-in is half-finished.
+  ///
+  /// Optional, and omitting it is exactly the old behaviour — this module
+  /// still stores nothing by itself, and the three players onboarded before
+  /// this existed have nothing stored, so they keep taking the
+  /// `created: false` branch as they always did.
+  ///
+  /// `{ get(accountId), set(accountId, secretKey), delete(accountId) }`, any
+  /// of them async. What it holds is a FULL-ACCESS key, so a real
+  /// implementation puts it somewhere gitignored and unreadable by anyone
+  /// else, and it is deleted the moment the key is destroyed on chain.
+  bootstrapStore = null,
   log = () => {},
 }) {
   if (typeof verifyIdentity !== 'function') {
@@ -125,6 +137,169 @@ export function createOnboarding({
       await provider.query({ request_type: 'view_account', finality: 'optimistic', account_id: accountId })
       return true
     } catch { return false }
+  }
+
+  async function accessKeys(accountId) {
+    const { keys } = await provider.query({
+      request_type: 'view_access_key_list', finality: 'optimistic', account_id: accountId,
+    })
+    return keys.map((k) => {
+      const p = k.access_key.permission
+      if (p === 'FullAccess' || p?.FullAccess !== undefined) {
+        return { publicKey: k.public_key, fullAccess: true }
+      }
+      return {
+        publicKey: k.public_key,
+        fullAccess: false,
+        receiverId: p.FunctionCall.receiver_id,
+        methodNames: p.FunctionCall.method_names ?? [],
+        allowance: p.FunctionCall.allowance ?? null,
+      }
+    })
+  }
+
+  /// Has the market already been granted its pull rights over every sellable
+  /// material? Read from the chain, because on a resume we cannot know how far
+  /// the previous attempt got.
+  ///
+  /// This matters more than it looks: `mt_approve` appends, so re-approving on
+  /// every resume would spend another entry in the approvals vector each time.
+  /// That vector is bounded now, so a resume loop could exhaust it.
+  async function alreadyApproved(accountId) {
+    if (sellableItems.length === 0) return true
+    try {
+      return await provider.callFunction({
+        contractId: itemsContract,
+        method: 'mt_is_approved',
+        args: {
+          token_ids: [...sellableItems],
+          approved_account_id: marketContract,
+          // 1 of each: any standing allowance at all counts as approved.
+          amounts: sellableItems.map(() => '1'),
+          approval_ids: null,
+          owner_id: accountId,
+        },
+      }) === true
+    } catch {
+      // Unreadable is not the same as approved. Re-approving costs a deposit
+      // and an entry; believing a failed read would cost the ability to sell.
+      return false
+    }
+  }
+
+  /// Steps 2 and 3, as one resumable unit.
+  ///
+  /// Split out of `signIn` so a half-finished account can re-enter here with
+  /// the parked bootstrap key instead of being stranded. `createdOutcome` is
+  /// null on a resume: the creation happened in an earlier process and its
+  /// hash is not ours to report.
+  ///
+  /// Everything below is signed with the bootstrap key, so the first thing it
+  /// does is establish that the key is still on the account.
+  async function finishSignIn(accountId, bootstrap, identity, createdOutcome) {
+    const resuming = createdOutcome === null
+    const bootstrapPublicKey = bootstrap.getPublicKey().toString()
+
+    if (resuming) {
+      // One state cannot be resumed, and it is worth naming rather than
+      // failing obscurely: step 3 landed, so the account is correctly
+      // restricted and holds NO full-access key — but the scoped key it was
+      // restricted to was generated in memory and never returned to anyone.
+      // The account is sound and unusable, and no key here can change that.
+      // Say so, and stop keeping a bootstrap key that no longer exists.
+      const keys = await accessKeys(accountId)
+      if (!keys.some((k) => k.fullAccess && k.publicKey === bootstrapPublicKey)) {
+        if (bootstrapStore) await bootstrapStore.delete(accountId)
+        throw new OnboardingError(
+          'ACCOUNT_ALREADY_RESTRICTED',
+          `${accountId} has no bootstrap key left, so its scoped key cannot be reissued`,
+        )
+      }
+      log({ event: 'resuming_signin', accountId, provider: identity.provider })
+    }
+
+    const asPlayer = new Account(accountId, provider, bootstrap.toString())
+    const scoped = KeyPair.fromRandom('ed25519')
+
+    // 2. Grant the market its pull rights, while a full-access key still
+    //    exists to attach the deposit.
+    //
+    // Skipped when the chain already says it was granted. `mt_approve`
+    // appends, so re-approving on a resume would spend another entry in a
+    // vector that is bounded — and pay a second storage deposit for nothing.
+    if (sellableItems.length > 0) {
+      if (!itemsContract) throw new OnboardingError('NO_ITEMS_CONTRACT', 'sellableItems needs itemsContract')
+      if (resuming && await alreadyApproved(accountId)) {
+        log({ event: 'market_already_approved', accountId, items: sellableItems.length })
+      } else {
+        await asPlayer.callFunction({
+          contractId: itemsContract,
+          methodName: 'mt_approve',
+          args: {
+            token_ids: [...sellableItems],
+            // A standing allowance, so one approval lasts rather than needing
+            // a fresh deposit per sale.
+            amounts: sellableItems.map(() => sellAllowance.toString()),
+            account_id: marketContract,
+            msg: null,
+          },
+          deposit: approvalDeposit,
+          gas: teraToGas('60'),
+        })
+        log({ event: 'market_approved', accountId, items: sellableItems.length })
+      }
+    }
+
+    // 3. Install the scoped key and destroy the full-access one — add before
+    //    delete, in one transaction, or a failure between them would leave an
+    //    account nobody can use.
+    const restrictedOutcome = await asPlayer.signAndSendTransaction({
+      receiverId: accountId,
+      actions: [
+        actions.addFunctionCallAccessKey(
+          scoped.getPublicKey(), marketContract, [...playerMethods], gasAllowance,
+        ),
+        actions.deleteKey(bootstrap.getPublicKey()),
+      ],
+    })
+    log({ event: 'player_restricted', accountId, methods: playerMethods })
+
+    // Only now. The key this was protecting no longer exists on chain, so
+    // keeping it would be holding dead full-access key material for nothing.
+    // After step 3, never before: a delete that ran earlier would re-open the
+    // exact window this whole mechanism exists to close.
+    if (bootstrapStore) await bootstrapStore.delete(accountId)
+
+    return Object.freeze({
+      accountId,
+      publicKey: scoped.getPublicKey().toString(),
+      /// The server holds this. The player never sees it, which is what makes
+      /// "no seed phrase" true rather than a slogan.
+      serverKey: scoped.toString(),
+      created: true,
+      /// True when this completed a sign-in an earlier attempt left unfinished.
+      /// `created` stays true because the caller's job is the same either way:
+      /// store the key.
+      resumed: resuming,
+      permittedMethods: Object.freeze([...playerMethods]),
+      approvedForSale: Object.freeze([...sellableItems]),
+      /// Where it happened, for a caller that retains evidence.
+      ///
+      /// Step 2 is absent on purpose: `callFunction` returns the contract's
+      /// parsed return value, not an outcome, and switching it to
+      /// `callFunctionRaw` to harvest a hash would change what a failed
+      /// approval does on the most load-bearing path in this repository. The
+      /// approval is proven by reading it back with `mt_token_approval`,
+      /// which is a stronger check than a hash anyway.
+      ///
+      /// `created` is null on a resume — that transaction belongs to an
+      /// earlier process, and reporting a hash we did not see would be worse
+      /// than reporting none.
+      transactions: Object.freeze({
+        created: hashOf(createdOutcome),
+        restricted: hashOf(restrictedOutcome),
+      }),
+    })
   }
 
   return Object.freeze({
@@ -175,14 +350,31 @@ export function createOnboarding({
       }
 
       const accountId = playerAccountId(identity.provider, identity.subject, rootAccountId)
+      const parked = bootstrapStore ? await bootstrapStore.get(accountId) : null
+
       if (await exists(accountId)) {
-        // Already onboarded. This module stores nothing, so the caller holds
-        // the scoped key; there is no key to hand back here.
-        return Object.freeze({ accountId, created: false, permittedMethods: Object.freeze([...playerMethods]) })
+        if (!parked) {
+          // Already onboarded. This module stores nothing by itself, so the
+          // caller holds the scoped key; there is no key to hand back here.
+          return Object.freeze({ accountId, created: false, permittedMethods: Object.freeze([...playerMethods]) })
+        }
+        // The account exists AND a bootstrap key is parked, which can only
+        // mean the last sign-in died between step 1 and step 3. Before this
+        // branch that state was terminal: the key was a local `const`, so it
+        // went with the stack frame, the account kept a live full-access key
+        // nobody held, and `exists()` sent every later login down the
+        // `created: false` path with no key to return — a permanent 503 for
+        // that identity, and exactly the state `npm run keys` reports as FAIL.
+        return await finishSignIn(accountId, KeyPair.fromString(parked), identity, null)
       }
 
       const bootstrap = KeyPair.fromRandom('ed25519')
-      const scoped = KeyPair.fromRandom('ed25519')
+
+      // Parked BEFORE the account is created, not after. The key is only worth
+      // keeping because the account might come to exist, and the gap this
+      // closes is precisely a crash between those two facts — so the write
+      // that makes the key recoverable has to happen first.
+      if (bootstrapStore) await bootstrapStore.set(accountId, bootstrap.toString())
 
       // 1. Create, fund, and install a temporary full-access key.
       //
@@ -199,86 +391,12 @@ export function createOnboarding({
       })
       log({ event: 'player_created', accountId, provider: identity.provider })
 
-      const asPlayer = new Account(accountId, provider, bootstrap.toString())
-
-      // 2. Grant the market its pull rights, while a full-access key still
-      //    exists to attach the deposit.
-      if (sellableItems.length > 0) {
-        if (!itemsContract) throw new OnboardingError('NO_ITEMS_CONTRACT', 'sellableItems needs itemsContract')
-        await asPlayer.callFunction({
-          contractId: itemsContract,
-          methodName: 'mt_approve',
-          args: {
-            token_ids: [...sellableItems],
-            // A standing allowance, so one approval lasts rather than needing
-            // a fresh deposit per sale.
-            amounts: sellableItems.map(() => sellAllowance.toString()),
-            account_id: marketContract,
-            msg: null,
-          },
-          deposit: approvalDeposit,
-          gas: teraToGas('60'),
-        })
-        log({ event: 'market_approved', accountId, items: sellableItems.length })
-      }
-
-      // 3. Install the scoped key and destroy the full-access one — add before
-      //    delete, in one transaction, or a failure between them would leave an
-      //    account nobody can use.
-      const restrictedOutcome = await asPlayer.signAndSendTransaction({
-        receiverId: accountId,
-        actions: [
-          actions.addFunctionCallAccessKey(
-            scoped.getPublicKey(), marketContract, [...playerMethods], gasAllowance,
-          ),
-          actions.deleteKey(bootstrap.getPublicKey()),
-        ],
-      })
-      log({ event: 'player_restricted', accountId, methods: playerMethods })
-
-      return Object.freeze({
-        accountId,
-        publicKey: scoped.getPublicKey().toString(),
-        /// The server holds this. The player never sees it, which is what makes
-        /// "no seed phrase" true rather than a slogan.
-        serverKey: scoped.toString(),
-        created: true,
-        permittedMethods: Object.freeze([...playerMethods]),
-        approvedForSale: Object.freeze([...sellableItems]),
-        /// Where it happened, for a caller that retains evidence.
-        ///
-        /// Step 2 is absent on purpose: `callFunction` returns the contract's
-        /// parsed return value, not an outcome, and switching it to
-        /// `callFunctionRaw` to harvest a hash would change what a failed
-        /// approval does on the most load-bearing path in this repository. The
-        /// approval is proven by reading it back with `mt_token_approval`,
-        /// which is a stronger check than a hash anyway.
-        transactions: Object.freeze({
-          created: hashOf(createdOutcome),
-          restricted: hashOf(restrictedOutcome),
-        }),
-      })
+      return await finishSignIn(accountId, bootstrap, identity, createdOutcome)
     },
+
 
     /// What this account may actually do, read back from the chain rather than
     /// asserted — the same check `npm run keys` performs for agents.
-    async keyLimits(accountId) {
-      const { keys } = await provider.query({
-        request_type: 'view_access_key_list', finality: 'optimistic', account_id: accountId,
-      })
-      return keys.map((k) => {
-        const p = k.access_key.permission
-        if (p === 'FullAccess' || p?.FullAccess !== undefined) {
-          return { publicKey: k.public_key, fullAccess: true }
-        }
-        return {
-          publicKey: k.public_key,
-          fullAccess: false,
-          receiverId: p.FunctionCall.receiver_id,
-          methodNames: p.FunctionCall.method_names ?? [],
-          allowance: p.FunctionCall.allowance ?? null,
-        }
-      })
-    },
+    keyLimits: accessKeys,
   })
 }
