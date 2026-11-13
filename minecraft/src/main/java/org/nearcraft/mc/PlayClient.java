@@ -136,10 +136,16 @@ public final class PlayClient {
     return get("/api/market", query);
   }
 
+  /**
+   * The session id travels as a bearer token, not as a query parameter.
+   *
+   * It can buy, sell and invest on the player's behalf, and a query string is
+   * written into the access log of every server and proxy the request crosses.
+   * The market reads above keep their query parameters, because an item name
+   * and a count are not credentials.
+   */
   public Response me(String sessionId) {
-    Map<String, String> query = new LinkedHashMap<>();
-    query.put("sessionId", sessionId);
-    return get("/api/me", query);
+    return get("/api/me", new LinkedHashMap<>(), sessionId);
   }
 
   // ---------------------------------------------------------------- writes
@@ -193,6 +199,10 @@ public final class PlayClient {
   // ------------------------------------------------------------- transport
 
   private Response get(String path, Map<String, String> query) {
+    return get(path, query, null);
+  }
+
+  private Response get(String path, Map<String, String> query, String sessionId) {
     StringBuilder url = new StringBuilder(base).append(path);
     boolean first = true;
     for (Map.Entry<String, String> e : query.entrySet()) {
@@ -202,12 +212,13 @@ public final class PlayClient {
          .append('=')
          .append(URLEncoder.encode(e.getValue() == null ? "" : e.getValue(), StandardCharsets.UTF_8));
     }
-    HttpRequest request = HttpRequest.newBuilder(URI.create(url.toString()))
+    HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(url.toString()))
         .timeout(READ_TIMEOUT)
-        .header("Accept", "application/json")
-        .GET()
-        .build();
-    return send(request);
+        .header("Accept", "application/json");
+    if (sessionId != null) {
+      request = request.header("Authorization", "Bearer " + sessionId);
+    }
+    return send(request.GET().build());
   }
 
   private Response post(String path, Map<String, Object> body) {

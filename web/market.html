@@ -159,9 +159,16 @@ function quoteTable(item, rows, canTrade) {
 const PLAY = { health: null, sessionId: null, accountId: null, nearAtSignIn: null, refresh: null };
 
 async function api(method, path, body) {
+  // The session id goes in a header, never in the URL. A query string is
+  // written to the access log of every server and proxy it crosses, and it
+  // lands in browser history and in a Referer — and this id can buy, sell and
+  // invest on behalf of the player. POST bodies are not logged that way, so
+  // they are left alone; the header wins on the server either way.
+  const headers = { 'Content-Type': 'application/json' };
+  if (PLAY.sessionId) headers.Authorization = 'Bearer ' + PLAY.sessionId;
   const res = await fetch(path, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: method === 'POST' ? JSON.stringify(body || {}) : undefined,
   });
   const json = await res.json().catch(() => ({}));
@@ -249,7 +256,7 @@ async function signIn() {
     const out = await api('POST', '/api/session', { token });
     PLAY.sessionId = out.sessionId;
     PLAY.accountId = out.accountId;
-    PLAY.me = await api('GET', '/api/me?sessionId=' + encodeURIComponent(out.sessionId));
+    PLAY.me = await api('GET', '/api/me');
     PLAY.nearAtSignIn = PLAY.me.near;
     renderPlay();
     if (PLAY.refresh) await PLAY.refresh();
@@ -266,7 +273,7 @@ async function trade(act, merchantId, item, button) {
     const out = await api('POST', '/api/' + act, {
       sessionId: PLAY.sessionId, merchantId: merchantId, item: item, count: 1,
     });
-    PLAY.me = await api('GET', '/api/me?sessionId=' + encodeURIComponent(PLAY.sessionId));
+    PLAY.me = await api('GET', '/api/me');
     // The delta is reported by the service, measured either side of the call on
     // the chain. Printing it rather than claiming it is the whole point.
     renderPlay(act + ' ok — ' + out.hash + ' — that call moved your balance by ' +

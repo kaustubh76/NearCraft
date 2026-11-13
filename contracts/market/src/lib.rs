@@ -1064,6 +1064,27 @@ impl Market {
             "this shelf does not need restocking"
         );
         require!(units > 0, "this merchant cannot afford a single unit right now");
+        // A restock has to actually clear the trigger, or it re-arms itself.
+        //
+        // Without this, a merchant too poor to close the gap bought whatever
+        // `spare / cost_per_unit` allowed: the shelf rose a little, stayed
+        // under RESTOCK_TRIGGER_STOCK, and the trigger stayed armed with the
+        // treasury now near its floor. Not a loop within a block — the next
+        // call panics above — but a ratchet across time, because `restock` is
+        // permissionless and anyone can convert the merchant's earnings into
+        // shelf stock the moment they land. Spare never climbs back above
+        // `buy_price`, so `is_closed` keeps reporting closed and the merchant
+        // refuses every player trying to sell to it, for good.
+        //
+        // Refusing instead lets the merchant keep its cash, go on earning from
+        // players who buy FROM it, and restock when it can refill the shelf for
+        // real — or be rescued by `invest`, which is the recovery path the game
+        // already describes.
+        require!(
+            listing.stock.0 + units >= pricing::RESTOCK_TRIGGER_STOCK,
+            "this merchant cannot afford to restock past the trigger, and a partial \
+             restock would leave it armed — let it earn, or invest in it"
+        );
 
         let cost = cost_per_unit * units;
 
@@ -1383,6 +1404,18 @@ impl Market {
         self.credits.insert(who.clone(), U128(current + amount));
     }
 
+    /// Move spare out of a treasury, for tests that need a merchant in a
+    /// specific financial position. Owner-only and `#[cfg(test)]`, so it is not
+    /// part of the deployed surface — `npm run check:nep245` reads the ABI, and
+    /// this never reaches it.
+    #[cfg(test)]
+    pub fn drain_treasury_for_test(&mut self, merchant_id: AccountId, amount: u128) {
+        self.assert_owner();
+        let mut merchant = self.merchants.get(&merchant_id).cloned().expect("unknown merchant");
+        merchant.treasury = U128(merchant.treasury.0 - amount);
+        self.merchants.insert(merchant_id, merchant);
+    }
+
     fn assert_owner(&self) {
         require!(env::predecessor_account_id() == self.owner_id, "owner only");
     }
@@ -1682,6 +1715,16 @@ mod tests {
         // Read AFTER `list_item`, which resets the shelf: taking the baseline
         // before it measured the restock against the previous shelf and
         // underflowed.
+        //
+        // And funded first, because the restock above spent most of the
+        // treasury and a restock must now be able to clear the trigger rather
+        // than dribble — see
+        // `a_restock_that_cannot_reach_the_trigger_is_refused`. It is a payable
+        // entry point, so it is one more thing deposited.
+        ctx(owner(), BASE * 40);
+        m.fund_merchant(ironmonger());
+        deposited += BASE * 40;
+        conserved(&m, deposited, paid_out, "after refunding the merchant");
         ctx(owner(), 0);
         m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(8));
         let treasury_before = m.merchant_treasury_for(ironmonger());
@@ -2198,6 +2241,15 @@ mod tests {
         ctx(owner(), 0);
         m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(16));
         let after_drain = m.basis_of(ironmonger(), IRON.to_string()).0;
+
+        // Fund it first. The first restock spent most of the treasury, and a
+        // restock must now be able to clear RESTOCK_TRIGGER_STOCK rather than
+        // dribble out whatever is left — see
+        // `a_restock_that_cannot_reach_the_trigger_is_refused`. The subject
+        // here is the BASIS accumulating, so the merchant is simply given the
+        // means to restock rather than the rule being relaxed for it.
+        ctx(owner(), BASE * 100);
+        m.fund_merchant(ironmonger());
 
         ctx(player(), 0);
         let _ = m.restock(ironmonger(), IRON.to_string());
@@ -3261,6 +3313,67 @@ mod tests {
             "now the house is paid for the goods it supplied"
         );
         conserved(&m, banked, 0, "after a mint that landed");
+    }
+
+    /// A restock that cannot reach the trigger must be refused, not dribbled.
+    ///
+    /// `restock` is permissionless. When the merchant could not afford the full
+    /// gap, `restock_plan` returned whatever `spare / cost_per_unit` allowed —
+    /// so the shelf rose a little, stayed under `RESTOCK_TRIGGER_STOCK`, and
+    /// the trigger stayed ARMED. The merchant's spare was now near zero.
+    ///
+    /// That is not a loop inside one block: the very next call panics on "cannot
+    /// afford a single unit". It is a ratchet across time. Every yocto the
+    /// merchant earns above its floor plus one unit's cost can be converted to
+    /// shelf stock by anyone, the moment it lands. Spare therefore never climbs
+    /// back above `buy_price`, `is_closed` keeps reporting closed, and the
+    /// merchant refuses every player who tries to sell to it — permanently.
+    /// Money is conserved the whole time; availability is not.
+    ///
+    /// The fix is to refuse rather than dribble. A merchant that cannot afford
+    /// to reach the trigger keeps its cash, goes on earning from players who
+    /// BUY from it, and restocks once it can actually refill the shelf — or is
+    /// rescued by `invest`, which is the recovery path the game already has.
+    #[test]
+    fn a_restock_that_cannot_reach_the_trigger_is_refused() {
+        let mut m = thin_market();
+
+        // Drain the treasury to just under what reaching the trigger costs.
+        // thin_market lists 10 on the shelf, so the gap to the trigger is 22.
+        let stock = m.quote(ironmonger(), IRON.to_string(), 1).stock.0;
+        let per_unit = pricing::restock_plan(
+            BASE, stock, m.quote(ironmonger(), IRON.to_string(), 1).demand_bps.0, u128::MAX,
+        ).1;
+        let need = per_unit * (pricing::RESTOCK_TRIGGER_STOCK - stock);
+        let floor = m.merchant(ironmonger()).unwrap().floor.0;
+
+        // Leave it able to afford SOME units but not enough to clear the
+        // trigger — the exact window the griefer used to live in.
+        let keep = floor + need - per_unit;
+        let treasury = m.merchant_treasury_for(ironmonger());
+        assert!(treasury > keep, "fixture should start richer than the window");
+        ctx(owner(), 0);
+        m.drain_treasury_for_test(ironmonger(), treasury - keep);
+
+        let spare = m.merchant_treasury_for(ironmonger()) - floor;
+        let affordable = spare / per_unit;
+        assert!(affordable > 0, "the merchant must be able to afford something, or this proves nothing");
+        assert!(
+            stock + affordable < pricing::RESTOCK_TRIGGER_STOCK,
+            "and still not enough to clear the trigger: {stock} + {affordable} must be under {}",
+            pricing::RESTOCK_TRIGGER_STOCK,
+        );
+
+        ctx(player(), 0);
+        let before = m.merchant_treasury_for(ironmonger());
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            m.restock(ironmonger(), IRON.to_string())
+        }));
+        assert!(outcome.is_err(), "a restock that leaves the shelf under the trigger must be refused");
+        assert_eq!(
+            m.merchant_treasury_for(ironmonger()), before,
+            "and it must cost the merchant nothing",
+        );
     }
 
     /// The other half: a pull that succeeds pays the seller, and the ledger is

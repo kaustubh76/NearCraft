@@ -485,8 +485,12 @@ async function chainHoldings() {
     })
     if (!signIn.ok) return null
     const { sessionId } = await signIn.json()
-    const me = await fetch(`${SERVICE}/api/me?sessionId=${encodeURIComponent(sessionId)}`,
-      { signal: AbortSignal.timeout(30000) })
+    // Header, not query string: the session id can trade on the player's
+    // behalf, and a URL ends up in access logs.
+    const me = await fetch(`${SERVICE}/api/me`, {
+      headers: { Authorization: `Bearer ${sessionId}` },
+      signal: AbortSignal.timeout(30000),
+    })
     return me.ok ? await me.json() : null
   } catch {
     return null

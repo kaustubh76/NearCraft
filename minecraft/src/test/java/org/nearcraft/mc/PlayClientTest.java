@@ -19,6 +19,10 @@ public final class PlayClientTest {
   static volatile String lastPath;
   static volatile String lastMethod;
   static volatile String lastBody;
+  /** The Authorization header the stub saw, or null. Captured so a test can
+   *  prove the session id arrived OUT of the URL rather than merely trusting
+   *  that it left it. */
+  static volatile String lastAuth;
 
   private static int status = 200;
   private static String reply = "{}";
@@ -87,11 +91,19 @@ public final class PlayClientTest {
       // body for GETs. Sending these as a JSON body would silently read nothing.
       h.equals("market sends its arguments as query parameters",
           "/api/market?item=iron_ingot&count=2", lastPath);
+      h.equals("and carries no credential, because it needs none", null, lastAuth);
       h.equals("a merchant row survives", "Ironmonger",
           Json.text(Json.asObject(Json.asList(market.body.get("merchants")).get(0)), "name", ""));
 
       client.me("sess-1");
-      h.equals("me carries the session id", "/api/me?sessionId=sess-1", lastPath);
+      // The session id is a bearer credential: it can buy, sell and invest on
+      // the player's behalf. A query string is written into the access log of
+      // every server and proxy a request crosses, so it travels in a header.
+      // Both halves are asserted — that it IS in the header, and that it is
+      // NOT in the URL — because moving it without removing it would leak just
+      // as much while looking fixed.
+      h.equals("me does not put the session id in the URL", "/api/me", lastPath);
+      h.equals("me sends the session id as a bearer token", "Bearer sess-1", lastAuth);
 
       // ------------------------------------------------------------ writes
       reply = "{\"sessionId\":\"s-9\",\"accountId\":\"p-1.testnet\",\"permittedMethods\":[\"sell\"]}";
@@ -183,6 +195,7 @@ public final class PlayClientTest {
     String query = exchange.getRequestURI().getQuery();
     lastPath = exchange.getRequestURI().getPath() + (query == null ? "" : "?" + query);
     lastBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+    lastAuth = exchange.getRequestHeaders().getFirst("Authorization");
     byte[] out = reply.getBytes(StandardCharsets.UTF_8);
     exchange.getResponseHeaders().add("Content-Type", "application/json");
     exchange.sendResponseHeaders(status, out.length);

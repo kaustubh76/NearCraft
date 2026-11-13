@@ -269,7 +269,29 @@ const server = createServer(async (req, res) => {
   if (url.pathname.startsWith('/api/')) {
     // Query parameters for reads, a JSON body for writes, merged into one plain
     // object so the service never has to know it is behind HTTP.
-    const body = { ...Object.fromEntries(url.searchParams), ...(req.method === 'POST' ? await readBody(req) : {}) }
+    const query = Object.fromEntries(url.searchParams)
+
+    // The session id is a bearer credential, so it travels in a header and not
+    // in the URL. A query string is written to the access log of every proxy
+    // and server it passes, and it lands in browser history and in a Referer —
+    // so a read-only GET was quietly leaving a token that can buy, sell and
+    // invest on behalf of a player in half a dozen logs.
+    //
+    // DELETED from the query, not merely also accepted from the header. Leaving
+    // the old path working would make this change cosmetic: the browser and the
+    // plugin would keep sending it in the URL and nothing would say so. If a
+    // caller still puts it there it is dropped on the floor and the request is
+    // refused as unauthenticated, which is a loud failure rather than a silent
+    // one.
+    delete query.sessionId
+    const auth = req.headers.authorization ?? ''
+    const bearer = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length).trim() : null
+
+    const body = {
+      ...query,
+      ...(req.method === 'POST' ? await readBody(req) : {}),
+      ...(bearer ? { sessionId: bearer } : {}),
+    }
     const out = await play.handle(req.method, url.pathname, body)
     res.writeHead(out.status, { 'Content-Type': 'application/json; charset=utf-8' })
     res.end(JSON.stringify(out.body))
