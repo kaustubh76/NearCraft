@@ -34,6 +34,7 @@
     "play:oidc": "OIDC_ISSUER=http://127.0.0.1:8090 OIDC_AUDIENCE=nearcraft-dev OIDC_JWKS_URI=http://127.0.0.1:8090/.well-known/jwks.json OIDC_PROVIDER=seed node scripts/serve-play.mjs",
     "oidc:dev": "node scripts/oidc-dev.mjs",
     "oidc:verify": "node scripts/oidc-verify.mjs",
+    "oidc:google": "node scripts/oidc-google.mjs",
     "check:docs": "node scripts/check-docs.mjs",
     "live:player": "node scripts/live-player.mjs",
     "live:onboard": "node scripts/live-onboard.mjs",

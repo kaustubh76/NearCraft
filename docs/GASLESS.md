@@ -167,8 +167,29 @@ JSON, which is NEAR's normal convention for 64-bit values.
   "Not enough balance", so a documented refusal could never fire.
 
 - **Still not established:** a token **Google itself issued**. That needs a
-  browser and a consent screen, and `npm run oidc:verify -- "<token>"` settles
-  it in one command against Google's live JWKS.
+  browser and a consent screen. Two commands will settle it against Google's
+  live JWKS, and the gap stays open until one of them has run:
+
+  - `npm run oidc:google -- --onboard` runs the ordinary authorization-code
+    flow with PKCE against a loopback redirect, exchanges the code at Google's
+    token endpoint, verifies the `id_token`, and creates the NEAR account that
+    login owns. The client secret is read into memory for the exchange and sent
+    to exactly one place over TLS; everything this script prints is passed
+    through a redactor, so the secret cannot leak from the one error path
+    nobody thought about. The `nonce` it generates is checked, which binds the
+    token to that run.
+  - `pbpaste | npm run oidc:google -- --paste --onboard` takes a token obtained
+    elsewhere — the OAuth Playground is the usual source — on **stdin**, never
+    as an argv, because a bearer token in argv is visible in `ps` and lands in
+    shell history. On this path there is no nonce to check, since the run did
+    not ask for the token; rather than compare `undefined` to `undefined` and
+    call it a pass, the check is **skipped and said out loud**, and what that
+    costs is printed: signature, issuer, audience and expiry are established,
+    replay from another request is not.
+
+  Neither prints or records the token, the Google subject, or the email. The
+  only thing retained is the account id, which is `sha256("google:<subject>")`
+  truncated — one way, so it reveals nothing about the login.
 
 - **A real login cannot reach Minecraft, measured:** a Google id token is about
   977 characters and the game carries 256. So the browser mints a single-use,
