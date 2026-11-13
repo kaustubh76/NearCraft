@@ -26,6 +26,7 @@
 // "cannot read properties of undefined (reading 'senderId')".
 
 import { Account, JsonRpcProvider, actions, teraToGas } from 'near-api-js'
+import { innerFailure } from './outcome.mjs'
 
 export class RelayRefusal extends Error {
   constructor(code, detail) {
@@ -66,16 +67,7 @@ export function playerCall({ marketContract, methodName, args, gas = DEFAULT_GAS
 /// Found live, not imagined: a player's `sell` panicked on a malformed
 /// approval_id and the play service answered 200 with a transaction hash. The
 /// player would have seen "sold" and still been holding the iron.
-export function innerFailure(outcome) {
-  for (const receipt of outcome?.receipts_outcome ?? []) {
-    const failure = receipt?.outcome?.status?.Failure
-    if (failure) {
-      const panic = failure?.ActionError?.kind?.FunctionCallError?.ExecutionError
-      return panic ?? JSON.stringify(failure)
-    }
-  }
-  return null
-}
+export { innerFailure }
 
 export function createRelayer({
   relayerAccountId,

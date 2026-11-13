@@ -7,8 +7,9 @@
 import { Account, JsonRpcProvider, KeyPair } from 'near-api-js'
 import { authorize, intentId, PolicyRefusal } from './policy.mjs'
 import { ALLOW, BLOCK, WARN } from './counterparty.mjs'
+import { assertInnerSuccess, InnerCallFailed, transactionHash } from './outcome.mjs'
 
-export { PolicyRefusal }
+export { PolicyRefusal, InnerCallFailed }
 
 /// Raised when a counterparty check came back `warn`: the call is parked and a
 /// human has to decide. Deliberately a distinct type from `PolicyRefusal` — a
@@ -24,10 +25,10 @@ export class HumanApprovalRequired extends Error {
   }
 }
 
-/// The transaction hash out of a raw outcome, whichever shape the RPC used.
-export function transactionHash(outcome) {
-  return outcome?.transaction?.hash ?? outcome?.transaction_outcome?.id ?? null
-}
+/// Re-exported from `outcome.mjs`, which is now the single home for "did this
+/// actually succeed?". Kept exported here because scripts import it from this
+/// module and there is no reason to make them move.
+export { transactionHash }
 
 /// Gas for one `buy_with_credit`, which makes one cross-contract call and one
 /// callback. Drawn from the key's allowance, which is gas-only.
@@ -126,19 +127,32 @@ export function createAgentSigner({ policy, secretKey, rpcUrl = 'https://test.rp
     pending = id
     log({ event: 'authorized', agent: policy.agentId, intent: id })
     try {
-      const outcome = await account.callFunctionRaw({
+      // `assertInnerSuccess`, not a bare await. v7 throws only on the
+      // TOP-LEVEL status, and a contract that rolls its own failure back — as
+      // `on_items_delivered` does — leaves that status SuccessValue. Without
+      // this line a rolled-back purchase was logged as `settled` and
+      // `scripts/agent-run.mjs` asserted on it as proof the run worked.
+      const outcome = assertInnerSuccess(await account.callFunctionRaw({
         contractId: intent.contractId,
         methodName: intent.methodName,
         args: intent.args,
         gas: GAS,
         deposit: 0n,
-      })
+      }))
       log({ event: 'settled', agent: policy.agentId, intent: id })
       return outcome
     } catch (error) {
-      // Deliberately does NOT clear `pending`: an uncertain send must be
-      // reconciled against this same intent, never replaced by a fresh one.
-      log({ event: 'uncertain', agent: policy.agentId, intent: id, error: String(error?.message ?? error) })
+      // A rolled-back call is not an UNCERTAIN one. We know exactly what
+      // happened: it landed, the inner call failed, the contract unwound it.
+      // Logging that as uncertain would invite a reconciliation that has
+      // nothing to reconcile.
+      const settled = error instanceof InnerCallFailed
+      log({
+        event: settled ? 'rolled_back' : 'uncertain',
+        agent: policy.agentId, intent: id,
+        error: String(error?.message ?? error),
+        ...(settled ? { hash: transactionHash(error.outcome) } : {}),
+      })
       throw error
     } finally {
       if (pending === id) pending = null
@@ -172,10 +186,16 @@ export function createAgentSigner({ policy, secretKey, rpcUrl = 'https://test.rp
     pending = id
     log({ event: 'human_approved', agent: policy.agentId, intent: id })
     try {
-      const outcome = await account.callFunctionRaw({
+      // The order here is load-bearing. `assertInnerSuccess` throws BEFORE
+      // `recordSuccess`, because `recordSuccess` increments the counter
+      // `counterparty.score()` reads for INTERACTIONS_FOR_TRUST — so without
+      // it, a purchase the contract rolled back earned the counterparty trust
+      // towards clearing itself without a human next time. A failed trade must
+      // buy nothing.
+      const outcome = assertInnerSuccess(await account.callFunctionRaw({
         contractId: held.intent.contractId, methodName: held.intent.methodName,
         args: held.intent.args, gas: GAS, deposit: 0n,
-      })
+      }))
       log({ event: 'settled', agent: policy.agentId, intent: id, afterHumanApproval: true })
       if (counterparty?.recordSuccess) {
         await counterparty.recordSuccess(policy.agentId, held.intent.args.merchant_id, 0)

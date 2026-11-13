@@ -480,3 +480,129 @@ test('the play service runs the whole loop on a real node, and the player pays n
   assert.equal(me.body.holdings.iron_ingot, '1', 'bought two, sold one')
   assert.equal(me.body.fullAccessKeys, 0, 'still holding no full-access key after trading')
 })
+
+// ---------------------------------------------------------------------------
+// The two-layer problem, fed a REAL receipt.
+//
+// `backend/near/outcome.mjs` scans `receipts_outcome[].outcome.status.Failure`
+// and digs out `ActionError.kind.FunctionCallError.ExecutionError`. That path
+// existed for weeks and NO test, fixture or script ever fed it nearcore JSON —
+// `grep -rn innerFailure\|receipts_outcome` returned three lines: the
+// definition, its loop, and its one call site.
+//
+// The test that looked like coverage, `tests/near/play.mjs:272`, stubs the whole
+// relayer and throws a pre-made INNER_CALL_FAILED. It proves the service maps a
+// code to 502. It exercises no parsing at all. Every relayed call in the tests
+// above succeeds, and the one `assert.rejects` in this file is a SUBMISSION
+// refusal, which fails the outer transaction — the opposite case.
+//
+// So the field path that stands between a player and "sold!" while they still
+// hold the iron was never checked against the shape it parses. This checks it,
+// against a real nearcore node, through the real relayer module.
+test('a relayed call whose INNER action panics is reported as a failure, not a hash', async (t) => {
+  const sandbox = await Sandbox.start({})
+  t.after(() => sandbox.tearDown())
+
+  const provider = new JsonRpcProvider({ url: sandbox.rpcUrl })
+  const root = new Account(DEFAULT_ACCOUNT_ID, provider, DEFAULT_PRIVATE_KEY)
+
+  async function sub(name, funds) {
+    const key = KeyPair.fromRandom('ed25519')
+    await root.createSubAccount({
+      accountOrPrefix: name, publicKey: key.getPublicKey().toString(), nearToTransfer: funds,
+    })
+    return { id: `${name}.${DEFAULT_ACCOUNT_ID}`, key }
+  }
+
+  const items = await sub('items', near(10))
+  const market = await sub('market', near(20))
+  const merchant = await sub('ironmonger', near(2))
+  const relayer = await sub('relayer', near(50))
+  const player = await sub('player', near(1))
+
+  const itemsAcc = new Account(items.id, provider, items.key.toString())
+  const marketAcc = new Account(market.id, provider, market.key.toString())
+  await itemsAcc.deployContract(await wasm('nearcraft_items'))
+  await marketAcc.deployContract(await wasm('nearcraft_market'))
+  await itemsAcc.callFunction({ contractId: items.id, methodName: 'new', args: { owner_id: market.id }, gas: teraToGas('30') })
+  await marketAcc.callFunction({ contractId: market.id, methodName: 'new', args: { owner_id: root.accountId, items_contract: items.id }, gas: teraToGas('30') })
+  await marketAcc.callFunction({ contractId: items.id, methodName: 'mt_mint', args: { token_id: 'iron_ingot', amount: '100000', receiver_id: market.id }, gas: teraToGas('60') })
+  await root.callFunction({ contractId: market.id, methodName: 'register_merchant', args: { merchant_id: merchant.id, name: 'Ironmonger', floor: '0' }, gas: teraToGas('30') })
+  await root.callFunction({ contractId: market.id, methodName: 'fund_merchant', args: { merchant_id: merchant.id }, deposit: near(10), gas: teraToGas('30') })
+  await root.callFunction({ contractId: market.id, methodName: 'list_item', args: { merchant_id: merchant.id, item: 'iron_ingot', base_price: (near(1) / 10n).toString(), stock: '1000' }, gas: teraToGas('30') })
+
+  await marketAcc.callFunction({
+    contractId: items.id, methodName: 'mt_transfer',
+    args: { receiver_id: player.id, token_id: 'iron_ingot', amount: '50', approval: null, memo: null },
+    deposit: 1n, gas: teraToGas('30'),
+  })
+
+  // Onboard properly: a real approval exists, so the only thing wrong below is
+  // the id. That matters — a MISSING approval panics on a different line, and
+  // this test is about the one a real player hit in production.
+  const playerFull = new Account(player.id, provider, player.key.toString())
+  await playerFull.callFunction({
+    contractId: items.id, methodName: 'mt_approve',
+    args: { token_ids: ['iron_ingot'], amounts: ['1000000'], account_id: market.id, msg: null },
+    deposit: near(1) / 100n, gas: teraToGas('60'),
+  })
+  const scoped = KeyPair.fromRandom('ed25519')
+  await playerFull.signAndSendTransaction({
+    receiverId: player.id,
+    actions: [
+      actions.addFunctionCallAccessKey(scoped.getPublicKey(), market.id, ['buy_with_credit', 'sell'], near(2)),
+      actions.deleteKey(player.key.getPublicKey()),
+    ],
+  })
+
+  const held = async () => BigInt(await provider.callFunction({
+    contractId: items.id, method: 'mt_balance_of', args: { account_id: player.id, token_id: 'iron_ingot' },
+  }))
+  const creditOf = async () => BigInt(await provider.callFunction({
+    contractId: market.id, method: 'credit_of', args: { account_id: player.id },
+  }))
+
+  const relay = createRelayer({
+    relayerAccountId: relayer.id,
+    relayerKey: relayer.key.toString(),
+    marketContract: market.id,
+    permittedMethods: ['buy_with_credit', 'sell'],
+    rpcUrl: sandbox.rpcUrl,
+  })
+
+  const heldBefore = await held()
+
+  // The exact production bug: a real approval, a stale id. nearcore runs the
+  // outer transaction successfully — it was well formed, signed and paid for —
+  // and the mt_transfer receipt inside it panics.
+  let caught = null
+  try {
+    await relay.relay({
+      playerAccountId: player.id, playerKey: scoped.toString(),
+      methodName: 'sell',
+      // A STRING, not a number: `approval_id` is near-sdk's U64, which
+      // deserializes from a JSON string. Passing 999_999 bare made the call
+      // panic on deserialization instead — which still proved the receipt walk
+      // works, but tested the wrong panic.
+      args: { merchant_id: merchant.id, item: 'iron_ingot', count: 10, approval_id: '999999' },
+      gas: 120_000_000_000_000n,
+    })
+  } catch (e) { caught = e }
+
+  console.log('\n--- a relayed call whose inner action panicked ---')
+  console.log(`  threw      ${caught ? `${caught.code}: ${caught.detail ?? caught.message}` : 'NOTHING'}`)
+  console.log(`  materials  ${heldBefore} -> ${await held()}`)
+  console.log(`  credit     ${await creditOf()}\n`)
+
+  assert.ok(caught, 'the relayer must not return normally for a call whose inner action panicked')
+  assert.equal(caught.code, 'INNER_CALL_FAILED',
+    `expected INNER_CALL_FAILED, got ${caught.code}: ${caught.message}`)
+  // The contract's OWN words have to survive the receipt walk. If the field
+  // path is wrong, `innerFailure` falls back to JSON.stringify of the whole
+  // failure object and this is what notices.
+  assert.match(String(caught.detail ?? caught.message), /approval_id does not match the current approval/,
+    'the contract\'s panic text must reach the caller, not a stringified blob')
+
+  // And the sale must not have half-happened.
+  assert.equal(await held(), heldBefore, 'no materials may move when the pull fails')
+})

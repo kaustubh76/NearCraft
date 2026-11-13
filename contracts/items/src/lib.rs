@@ -150,7 +150,30 @@ trait MultiTokenResolver {
     ) -> Vec<U128>;
 }
 
-#[near(contract_state)]
+/// A pagination offset that cannot silently wrap.
+///
+/// `usize` is 32 bits on wasm32, so `from_index.0 as usize` truncates a u128:
+/// an offset of 2^32 became 0 and handed back the FIRST page to a caller asking
+/// for one far past the end. Saturating instead means an absurd offset skips
+/// everything and returns empty, which is what was actually asked for.
+fn clamp_index(from_index: Option<U128>) -> usize {
+    from_index.map(|i| usize::try_from(i.0).unwrap_or(usize::MAX)).unwrap_or(0)
+}
+
+/// NEP-330 contract metadata.
+///
+/// `#[near]` emits `nep330` on its own and nothing else, so for as long as this
+/// was left bare the chain reported `standards: [nep330]` for a contract that
+/// implements NEP-245 and emits NEP-297 events. SourceScan, NearBlocks and any
+/// indexer deciding how to read this contract all read that field, and it was
+/// understating what is here.
+///
+/// The versions are the ones the specs name: nep-0245 pins its event envelope
+/// at `1.0.0`, and NEP-297 is `1.0.0`.
+#[near(contract_state, contract_metadata(
+    standard(standard = "nep245", version = "1.0.0"),
+    standard(standard = "nep297", version = "1.0.0"),
+))]
 #[derive(PanicOnDefault)]
 pub struct Items {
     /// May mint and burn. Set once at init.
@@ -542,6 +565,40 @@ impl Items {
         }
     }
 
+    /// Every owner's approvals for one material, paginated.
+    ///
+    /// The sixth method in nep-0245/ApprovalManagement.md, and the one this
+    /// contract was missing. `mt_token_approval` answers for one named owner;
+    /// this enumerates every owner who has approved anybody for the material,
+    /// which an indexer cannot reconstruct from the singular form — it would
+    /// have to already know the owners it is trying to discover.
+    ///
+    /// `npm run check:nep245` reported "approval management: 5/5 present"
+    /// throughout, because its own list of required methods was missing this
+    /// one too. The implementation was its own denominator.
+    pub fn mt_token_approvals(
+        &self,
+        token_id: String,
+        from_index: Option<U128>,
+        limit: Option<u64>,
+    ) -> Vec<TokenApproval> {
+        let start = clamp_index(from_index);
+        let limit = limit.unwrap_or(u64::MAX) as usize;
+        // Collected first because `mt_token_approval` borrows `self` again.
+        let owners: Vec<AccountId> = self
+            .approvals
+            .keys()
+            .filter(|key| key.token_id == token_id)
+            .skip(start)
+            .take(limit)
+            .map(|key| key.owner_id.clone())
+            .collect();
+        owners
+            .into_iter()
+            .map(|owner_id| self.mt_token_approval(token_id.clone(), owner_id))
+            .collect()
+    }
+
     // ------------------------------------------------------------------ views
 
     pub fn mt_token(&self, token_ids: Vec<String>) -> Vec<Option<Token>> {
@@ -574,7 +631,7 @@ impl Items {
     // ------------------------------------------------ Enumeration extension
 
     pub fn mt_tokens(&self, from_index: Option<U128>, limit: Option<u64>) -> Vec<Token> {
-        let start = from_index.map(|i| i.0 as usize).unwrap_or(0);
+        let start = clamp_index(from_index);
         let limit = limit.unwrap_or(u64::MAX) as usize;
         self.supply
             .keys()
@@ -595,7 +652,7 @@ impl Items {
         from_index: Option<U128>,
         limit: Option<u64>,
     ) -> Vec<Token> {
-        let start = from_index.map(|i| i.0 as usize).unwrap_or(0);
+        let start = clamp_index(from_index);
         let limit = limit.unwrap_or(u64::MAX) as usize;
         self.supply
             .keys()
@@ -780,7 +837,10 @@ mod tests {
         let logs = get_logs();
         let last = logs.last().unwrap();
         assert!(last.contains(r#""event":"mt_transfer""#));
-        assert!(last.contains(r#""old_owner_id":"alice""#) || last.contains("old_owner_id"));
+        // Strictly. This read `|| last.contains("old_owner_id")`, and the right
+        // disjunct subsumes the left — so it passed for the WRONG owner, and
+        // the strict half it was written to check never bound.
+        assert!(last.contains(r#""old_owner_id":"alice""#), "the event must name the real old owner");
         assert!(last.contains(r#""memo":"wages""#));
     }
 
@@ -857,12 +917,88 @@ mod tests {
 
         // The event names who acted, since it was not the owner.
         let last = get_logs().last().unwrap().clone();
-        assert!(last.contains(r#""authorized_id":"charlie""#) || last.contains("authorized_id"), "got: {last}");
+        // Strictly, for the same reason as the `old_owner_id` one above: the
+        // `|| contains("authorized_id")` this used to carry subsumed the real
+        // check, so it passed whatever the id said.
+        assert!(last.contains(r#""authorized_id":"charlie""#), "got: {last}");
     }
 
     /// Our reading of the spec's "nullify approvals on success" for fungible
     /// amounts: decrement, do not wipe. Otherwise a standing operator approval
     /// would be impossible, which is the whole use case.
+    /// The sixth Approval Management method, which did not exist until the
+    /// conformance checker was taught to ask for it.
+    #[test]
+    fn every_owner_s_approvals_for_one_material_can_be_enumerated() {
+        let mut c = stocked();
+        // Two different owners, each approving the market for the same material.
+        setup(accounts(0), 1);
+        c.mt_transfer(accounts(1), IRON.to_string(), U128(100), None, None);
+        // accounts(3), not accounts(2) — market() IS accounts(2), and a
+        // self-approval is refused.
+        c.mt_transfer(accounts(3), IRON.to_string(), U128(100), None, None);
+        setup(accounts(1), 1);
+        c.mt_approve(vec![IRON.to_string()], vec![U128(30)], market(), None);
+        setup(accounts(3), 1);
+        c.mt_approve(vec![IRON.to_string()], vec![U128(40)], market(), None);
+        // And one on a DIFFERENT material, which must not show up.
+        setup(accounts(0), 1);
+        c.mt_transfer(accounts(1), OAK.to_string(), U128(10), None, None);
+        setup(accounts(1), 1);
+        c.mt_approve(vec![OAK.to_string()], vec![U128(5)], market(), None);
+
+        let all = c.mt_token_approvals(IRON.to_string(), None, None);
+        assert_eq!(all.len(), 2, "both owners of the material, and only them");
+        let mut owners: Vec<String> = all.iter().map(|a| a.approval_owner_id.to_string()).collect();
+        owners.sort();
+        assert_eq!(owners, vec![accounts(1).to_string(), accounts(3).to_string()]);
+        for entry in &all {
+            assert!(entry.approved_account_ids.contains_key(&market()));
+        }
+
+        // Pagination, which is what the signature exists for.
+        assert_eq!(c.mt_token_approvals(IRON.to_string(), None, Some(1)).len(), 1);
+        assert_eq!(c.mt_token_approvals(IRON.to_string(), Some(U128(1)), None).len(), 1);
+        assert!(c.mt_token_approvals(IRON.to_string(), Some(U128(2)), None).is_empty());
+        assert!(
+            c.mt_token_approvals("nothing_like_this".to_string(), None, None).is_empty(),
+            "a material nobody has approved anything for is empty, not an error"
+        );
+    }
+
+    /// An offset past the end must return nothing, not wrap to the start.
+    ///
+    /// `from_index.0 as usize` truncates, and 2^32 is the offset that breaks it
+    /// on wasm32 where `usize` is 32 bits. **This test used 2^32 first and
+    /// passed either way** — unit tests run on the 64-bit host, where 2^32 fits
+    /// in a `usize` and nothing truncates. A check that cannot fail, written
+    /// while fixing checks that cannot fail.
+    ///
+    /// 2^64 discriminates on both targets: `as usize` makes it 0 on a 64-bit
+    /// host, which is the first page, and `usize::try_from` refuses it. So this
+    /// now fails against the old cast everywhere it can be run.
+    #[test]
+    fn an_absurd_pagination_offset_returns_nothing_rather_than_the_first_page() {
+        let mut c = stocked();
+        setup(accounts(0), 1);
+        c.mt_transfer(accounts(1), IRON.to_string(), U128(100), None, None);
+        setup(accounts(1), 1);
+        c.mt_approve(vec![IRON.to_string()], vec![U128(30)], market(), None);
+
+        // `(1u128 << 64) as usize` is 0 on a 64-bit host and 0 on wasm32 too,
+        // so this one offset catches the bug on either target.
+        let wraps_to_zero = U128(1u128 << 64);
+        assert!(c.mt_token_approvals(IRON.to_string(), Some(wraps_to_zero), None).is_empty(),
+            "an offset of 2^64 must skip past the end, not wrap to the first page");
+        assert!(c.mt_tokens(Some(wraps_to_zero), None).is_empty(), "same for mt_tokens");
+        assert!(c.mt_tokens_for_owner(accounts(1), Some(wraps_to_zero), None).is_empty(),
+            "and for mt_tokens_for_owner");
+        // 2^32 is the offset that breaks wasm32 specifically. It cannot fail
+        // here, and is asserted anyway so the wasm target is covered if these
+        // ever run there.
+        assert!(c.mt_token_approvals(IRON.to_string(), Some(U128(1u128 << 32)), None).is_empty());
+    }
+
     #[test]
     fn an_approval_is_decremented_by_what_was_spent_and_removed_when_exhausted() {
         let mut c = stocked();

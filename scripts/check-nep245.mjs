@@ -25,8 +25,15 @@ const NEP245_ENUMERATION = ['mt_tokens', 'mt_tokens_for_owner']
 /// Approval Management. Implemented because a player holding only a
 /// function-call access key cannot attach the 1 yoctoNEAR a transfer needs, so
 /// without approvals they could buy but never sell. See docs/GASLESS.md.
+///
+/// SIX methods, not five. This list said five for as long as it existed, and
+/// `mt_token_approvals` — the paginated one — was missing from both the list and
+/// the contract. So the check reported "approval management: 5/5 present" with
+/// the implementation as its own denominator, which is a check that cannot
+/// fail. Read from nep-0245/ApprovalManagement.md, not from what we built.
 const NEP245_APPROVAL = [
-  'mt_approve', 'mt_revoke', 'mt_revoke_all', 'mt_is_approved', 'mt_token_approval',
+  'mt_approve', 'mt_revoke', 'mt_revoke_all', 'mt_is_approved',
+  'mt_token_approval', 'mt_token_approvals',
 ]
 
 /// Modifiers that are load-bearing rather than cosmetic.

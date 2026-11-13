@@ -22,8 +22,8 @@ column before the description.
 | `GAME_LOOP.md` — the game loop on paper | **Done.** Required by the `games` prompt before any code. |
 | `RULES.md` — round rules + sequence diagram | **Done.** Required by the `swarms` prompt before any code. |
 | `BASELINE.md` + hash-verified baseline import | **Done, machine-checked.** `npm run verify:baseline` |
-| `contracts/items` — NEP-245 materials | **Built and tested.** 29 unit tests. NEP-245 core 10/10 + Enumeration 2/2 + Approval Management 5/5, verified against the compiled ABI. Three spec ambiguities are decided and disclosed in the module header, including that `mt_is_approved` takes an explicit `owner_id` — the spec's signature names none, which a multi-token cannot answer. |
-| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 95 unit tests (the pricing rule, the payout rollbacks, restocking, investment and the money invariant). |
+| `contracts/items` — NEP-245 materials | **Built and tested.** 31 unit tests. NEP-245 core 10/10 + Enumeration 2/2 + Approval Management **6/6**, verified against the compiled ABI. Three spec ambiguities are decided and disclosed in the module header, including that `mt_is_approved` takes an explicit `owner_id` — the spec's signature names none, which a multi-token cannot answer. |
+| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 97 unit tests (the pricing rule, the payout rollbacks, restocking, investment and the money invariant — including the interleaved one that caught `sell` crediting a seller before the materials moved). |
 | `contracts/guard` — the shared blocklist, on-chain | **Built and tested.** 13 unit tests. Public, attributed by the runtime, not deletable by us. |
 | `backend/near/counterparty.mjs` — allow/warn/block | **Built and tested.** 23 tests. Pure scoring, no API key, no indexer. |
 | `backend/near` — signer, policy, warn→human approval | **Built and tested.** 59 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
