@@ -38,6 +38,11 @@ export class OnboardingError extends Error {
 /// is 32 bits — ample for a game, and it keeps the id short enough to read out.
 const ID_BYTES = 4
 
+/// The transaction hash nearcore reports, under either of the two names the
+/// RPC uses for it. Same shape as `transactionHash` in signer.mjs; duplicated
+/// rather than imported so this module keeps depending on nothing of ours.
+const hashOf = (outcome) => outcome?.transaction?.hash ?? outcome?.transaction_outcome?.id ?? null
+
 /// Derive a player account id from a verified identity.
 ///
 /// The provider is part of the preimage, so the same email address at two
@@ -151,7 +156,11 @@ export function createOnboarding({
       const scoped = KeyPair.fromRandom('ed25519')
 
       // 1. Create, fund, and install a temporary full-access key.
-      await root().signAndSendTransaction({
+      //
+      // The outcomes are kept so a caller can say WHERE this happened. An
+      // account that exists is proof on its own, but a hash is what an explorer
+      // takes, and `scripts/live-onboard.mjs` retains both.
+      const createdOutcome = await root().signAndSendTransaction({
         receiverId: accountId,
         actions: [
           actions.createAccount(),
@@ -187,7 +196,7 @@ export function createOnboarding({
       // 3. Install the scoped key and destroy the full-access one — add before
       //    delete, in one transaction, or a failure between them would leave an
       //    account nobody can use.
-      await asPlayer.signAndSendTransaction({
+      const restrictedOutcome = await asPlayer.signAndSendTransaction({
         receiverId: accountId,
         actions: [
           actions.addFunctionCallAccessKey(
@@ -207,6 +216,18 @@ export function createOnboarding({
         created: true,
         permittedMethods: Object.freeze([...playerMethods]),
         approvedForSale: Object.freeze([...sellableItems]),
+        /// Where it happened, for a caller that retains evidence.
+        ///
+        /// Step 2 is absent on purpose: `callFunction` returns the contract's
+        /// parsed return value, not an outcome, and switching it to
+        /// `callFunctionRaw` to harvest a hash would change what a failed
+        /// approval does on the most load-bearing path in this repository. The
+        /// approval is proven by reading it back with `mt_token_approval`,
+        /// which is a stronger check than a hash anyway.
+        transactions: Object.freeze({
+          created: hashOf(createdOutcome),
+          restricted: hashOf(restrictedOutcome),
+        }),
       })
     },
 

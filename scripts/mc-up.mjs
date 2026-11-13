@@ -27,6 +27,7 @@ import { spawn } from 'node:child_process'
 import { createServer } from 'node:net'
 import { mkdir, readFile, statfs, writeFile } from 'node:fs/promises'
 import { javaHome, fetchPinned, runtime } from './mc-java.mjs'
+import { playerAccountId } from '../backend/near/onboarding.mjs'
 
 const ROOT = new URL('..', import.meta.url)
 const args = process.argv.slice(2)
@@ -43,6 +44,10 @@ const PORT = Number(value('--port', '8080'))
 const SERVICE = `http://127.0.0.1:${PORT}`
 const ISSUER_PORT = Number(value('--issuer-port', '8090'))
 const SPAWN_ATTEMPTS = Number(value('--attempts', '3'))
+/// Which identity to sign in as. From config/catalog.json, so the subject and
+/// the manifest's player list have a single source rather than two.
+const catalog = JSON.parse(await readFile(new URL('config/catalog.json', ROOT), 'utf8'))
+const TOKEN = value('--token', catalog.players?.demo_subject ?? 'player-1')
 /// One round trip costs the merchant's spread. Measured from the live quotes:
 /// 0.004 out, 0.0032 back.
 const ROUND_TRIP_COST = 0.0008
@@ -104,6 +109,7 @@ const check = (what, ok, detail = '', fix = '') => {
 
 log(`\n=== NearCraft: bringing it up ===\n`)
 log(`  mode      ${SANDBOX ? 'local sandbox' : 'live testnet'}${OIDC ? ', real OIDC login' : ', seeded login'}${KEEP ? ', staying up' : ''}`)
+log(`  identity  ${TOKEN}`)
 log('')
 
 let home = null
@@ -199,14 +205,32 @@ if (!SANDBOX) {
       `npm run topup -- --from stonecutter --account ${manifest.relayer.account_id} is NOT the fix; the relayer needs NEAR, not credit. Use a faucet.`)
   } catch (e) { check('the relayer can pay gas', false, e.message) }
 
-  const player = manifest.players?.[0]?.account_id
-  if (player) {
+  // The account this run will ACTUALLY sign in as, derived from the identity it
+  // is about to present — not `players[0]`.
+  //
+  // Those were the same account right up until a second player existed, and
+  // then they silently diverged: the pre-flight would clear players[0]'s budget
+  // while the bot spent a different player's, so a run could pass its own
+  // affordability check and then fail on an empty balance three minutes later.
+  // A pure local hash, so this costs no round trip.
+  //
+  // `seed` is the right provider label for both modes here: --oidc runs the
+  // local issuer with OIDC_PROVIDER=seed (see below), so the derivation is the
+  // same either way. A real provider would label it differently and derive a
+  // different account, which is why that label is pinned once and never moved.
+  const player = playerAccountId('seed', TOKEN, manifest.root)
+  const recorded = (manifest.players ?? []).some((p) => p.account_id === player)
+  check('the login maps to a player the manifest records', recorded, `${TOKEN} -> ${player}`,
+    `deployment.json records [${(manifest.players ?? []).map((p) => p.account_id).join(', ')}]. ` +
+    `Either pass --token <subject>, or onboard this one: npm run live:onboard -- --seed ${TOKEN}`)
+
+  if (recorded) {
     try {
       const credit = Number(await view(manifest.contracts.market, 'credit_of', { account_id: player })) / 1e24
       const runs = Math.floor(credit / ROUND_TRIP_COST)
       check('the player can afford this run', runs >= 1,
         `${credit.toFixed(7)} NEAR, about ${runs} round trip(s)`,
-        `npm run topup -- --to ${TOPUP_TARGET}`)
+        `npm run topup -- --account ${player} --to ${TOPUP_TARGET}`)
     } catch (e) { check('the player can afford this run', false, e.message) }
   }
 }
@@ -333,7 +357,8 @@ try {
     while (attempt < SPAWN_ATTEMPTS && !passed) {
       attempt++
       log(`\n  --- proving it${attempt > 1 ? `, attempt ${attempt}` : ''} ---\n`)
-      const { child, lines } = script('mc-bot.mjs', ['--service', SERVICE, ...(OIDC ? ['--oidc'] : [])])
+      const { child, lines } = script('mc-bot.mjs',
+        ['--service', SERVICE, '--token', TOKEN, ...(OIDC ? ['--oidc'] : [])])
       child.stdout.on('data', (d) => process.stdout.write(d))
       child.stderr.on('data', (d) => process.stderr.write(d))
       const code = await new Promise((resolve) => child.on('close', resolve))

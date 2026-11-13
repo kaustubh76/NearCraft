@@ -1,0 +1,49 @@
+
+  real token -> p-d370098b.nearcraftmc.testnet
+  JWKS fetched over HTTP 1 time(s) from http://127.0.0.1:58350/.well-known/jwks.json
+
+✔ a genuine token is verified over a real HTTP JWKS fetch, and derives the account (293.876792ms)
+  15 refusals, each reported by its own code
+
+✔ the service names WHICH check refused, and picks the status from it (191.127625ms)
+  an unreachable JWKS is a 502, reached through the real fetch
+
+✔ a JWKS the provider will not serve is OUR failure, not the caller's (65.970042ms)
+✔ the seed verifier is never reachable once OIDC is configured (0.52325ms)
+  provider "google" -> p-07cbf779.nearcraftmc.testnet
+  provider unset    -> p-54903fc4.nearcraftmc.testnet   (the issuer URL is the label)
+
+✔ the provider label is half of every account id, so changing it moves everyone (4.916875ms)
+✔ a well-formed token resolves to a provider and a subject (3.822542ms)
+✔ the provider label defaults to the issuer and can be overridden (1.163333ms)
+✔ aud may be an array, as some providers send it (1.033417ms)
+✔ alg: none is refused — a token with no signature at all (0.587917ms)
+✔ an HMAC alg is refused — the public key is public, so it is not a secret (1.219708ms)
+✔ a tampered signature is refused (1.016125ms)
+✔ a tampered subject is refused — the signature covers it (0.985667ms)
+✔ a token signed by the wrong key is refused (379.3635ms)
+✔ a token for another application is refused, however valid (3.039458ms)
+✔ a token from another issuer is refused (6.564834ms)
+✔ an expired token is refused (4.975833ms)
+✔ a token that never expires is refused (17.13575ms)
+✔ a token not yet valid is refused (4.740958ms)
+✔ small clock skew is tolerated, because clocks differ (2.493292ms)
+✔ a malformed token is refused before anything is parsed (0.339667ms)
+✔ a token with no kid is refused rather than guessed at (6.678458ms)
+✔ an empty subject is refused — it would collide every login onto one account (2.833833ms)
+✔ an unknown kid triggers one refetch, which is how rotation works (3.797791ms)
+✔ a kid that is genuinely absent is refused, and does not hammer the provider (1.81475ms)
+✔ the JWKS is cached, so a second token does not refetch (6.494417ms)
+✔ an unreachable or broken JWKS is refused, never treated as no keys (5.132ms)
+✔ one unusable key in the JWKS does not poison a rotation (2.849875ms)
+✔ a verifier with no issuer or audience refuses to exist (0.676583ms)
+✔ the identity it returns is exactly what onboarding.signIn consumes (3.444291ms)
+✔ two different subjects from one provider get different accounts (9.32ms)
+ℹ tests 30
+ℹ suites 0
+ℹ pass 30
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 775.085125

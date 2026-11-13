@@ -29,8 +29,17 @@ import { createWriteStream } from 'node:fs'
 import { mkdir, copyFile, writeFile, rm } from 'node:fs/promises'
 import { fetchPinned, javaHome, run, ROOT, TMP, runtime } from './mc-java.mjs'
 
+import { readFile } from 'node:fs/promises'
+
 import { createRequire } from 'node:module'
 const require$ = createRequire(import.meta.url)
+
+/// Which seeded identity to sign in as, from config/catalog.json rather than
+/// from a literal here. A subject written in this file and an account id
+/// written in deployment.json are two hand-written facts that must agree, and
+/// the moment a second player existed they stopped agreeing.
+const catalog = JSON.parse(await readFile(new URL('../config/catalog.json', import.meta.url), 'utf8'))
+const DEMO_SUBJECT = catalog.players?.demo_subject ?? 'player-1'
 
 const args = process.argv.slice(2)
 const flag = (name) => args.includes(name)
@@ -44,12 +53,21 @@ const PLUGINS = new URL('plugins/', SERVER)
 const JAR = new URL('NearCraft.jar', TMP)
 const PORT = Number(value('--port', '25566'))
 const SERVICE = value('--service', 'http://127.0.0.1:8080')
-const TOKEN = value('--token', 'player-1')
+const TOKEN = value('--token', DEMO_SUBJECT)
 const MERCHANT = value('--merchant', 'ironmonger')
 const ITEM = value('--item', 'iron_ingot')
 const COUNT = Number(value('--count', '1'))
 const USERNAME = value('--username', 'nearcraft_bot')
 const OIDC = flag('--oidc')
+/// Which account the session actually owns, set from /api/me rather than
+/// derived here and hoped to match.
+///
+/// Declared UP HERE, not beside the function that assigns it: `chainHolding()`
+/// is called from top-level code hundreds of lines above that function, and a
+/// `let` is in its temporal dead zone until the line declaring it is evaluated.
+/// Assigning it from there would have thrown ReferenceError on every run.
+let playedAs = null
+
 const BOOT_TIMEOUT_MS = 10 * 60 * 1000
 const SPAWN_TIMEOUT_MS = 90 * 1000
 
@@ -442,6 +460,10 @@ async function codeFromRealToken() {
 /** How many of the traded item the CHAIN says this player holds, as a number. */
 async function chainHolding() {
   const me = await chainHoldings()
+  // Which account actually traded. Recorded because the evidence named the
+  // server, the client and the protocol but not the player — unambiguous while
+  // exactly one player existed, and ambiguous the moment three did.
+  if (me?.accountId) playedAs = me.accountId
   // null, not 0. "Could not read the chain" and "holds none" are different
   // facts, and conflating them turned a working purchase into a failed check.
   if (!me?.holdings) return null
@@ -511,6 +533,8 @@ if (failed === 0 && PUBLIC_CHAINS.has(network)) {
     client: `mineflayer ${runtime.bot.mineflayer} speaking ${runtime.bot.protocol} through ViaVersion ${runtime.artifacts.ViaVersion.version}`,
     username: USERNAME,
     online_mode: false,
+    player: playedAs,
+    explorer: playedAs ? `https://testnet.nearblocks.io/address/${playedAs}` : null,
     login: OIDC ? 'real RS256 token, verified over a live JWKS, exchanged for a one-time code' : 'seeded subject',
     checks: findings,
   }

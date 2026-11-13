@@ -237,12 +237,24 @@ off the chain on every call, so a player can check what is held for them.
 panel simply does not appear. That is the version a judge can run from a clean
 clone.
 
-One honest limit: the live deployment cannot onboard a **new** player, because
-the root account is below the gas headroom needed to create one. The service
-says `ROOT_UNDERFUNDED` and names the faucet. The full new-player path —
-create, approve while a bootstrap key still exists, install the scoped key and
-delete the bootstrap one in the same transaction — is exercised against a real
-node in `tests/near/gasless.mjs`.
+This used to carry one honest limit: the live deployment could not onboard a
+**new** player, because the root account was below the gas headroom needed to
+create one, so sign-in answered `ROOT_UNDERFUNDED` and named the faucet. Root
+was funded and `npm run live:onboard` now does it on the public chain.
+[`2FNytLGE…`](https://testnet.nearblocks.io/txns/2FNytLGEDMPRBjrf5TsYZBsT1ZVWrMu8uCUKeDKmCbp5)
+created `p-62b0b243.nearcraftmc.testnet` with a temporary full-access key; the
+market was granted its NEP-245 pull rights while that key still existed; and
+[`6fe1RTHS…`](https://testnet.nearblocks.io/txns/6fe1RTHSf1sxH8LYRbC8ko3pQLgMF9feXZfBVn6S8f5t)
+installed the scoped key and deleted the full-access one in the same
+transaction. Read back from the chain: zero full-access keys, one function-call
+key, exactly the three methods the catalog lists, and an approval over all eight
+sellable materials. Root paid 0.107115 NEAR. The same path is still exercised
+against a local node in `tests/near/gasless.mjs`, which is where it is cheap to
+run it repeatedly.
+
+`ROOT_UNDERFUNDED` remains in the service and is still correct code — it simply
+no longer fires. It is driven by `tests/near/play.mjs` against the real nearcore
+message, which is where it was found to be unreachable in the first place.
 
 ### And this paragraph was true while `deployment.json` said otherwise
 

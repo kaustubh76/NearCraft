@@ -171,10 +171,20 @@ over HTTP, exchanged for a code, claimed in-game, and then a purchase settled on
 NEAR with the ingot landing in a real inventory.
 
 **Disclosed:** `npm run play:oidc` labels the local issuer `seed`, so a verified
-subject of `player-1` derives the account that already exists and holds credit.
-The label is a namespace string and the verification is entirely real, but with
-a different label this derives a *new* account and the live root has no balance
-to create one. Funding root is the alternative.
+subject derives the same account a seeded login would. The label is a namespace
+string and the verification is entirely real, but a *different* label derives a
+*different* account — which is why that label is pinned once and never moved.
+
+That used to be a hard limit, because a new account could not be created: the
+live root was below the gas headroom. It no longer is. `npm run live:onboard`
+creates one on the public chain, and `npm run mc:up` then plays it — which is how
+`p-62b0b243.nearcraftmc.testnet` came to exist and to hold iron. The demo's
+identity now lives in `config/catalog.json` as `demo_subject`, because a subject
+hard-coded in a script and an account id recorded in `deployment.json` are two
+hand-written facts that have to agree, and the moment a second player existed
+they stopped agreeing: `mc:up` pre-flighted `players[0]`'s budget while the bot
+spent a different player's. It now derives the account from the identity it is
+about to present and refuses to start if the manifest does not record it.
 
 ## What it is not
 

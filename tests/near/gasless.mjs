@@ -338,11 +338,15 @@ test('the play service runs the whole loop on a real node, and the player pays n
   // composing the real onboarding, the real relayer and the real market
   // reader, driven exactly as scripts/serve-play.mjs drives it.
   //
-  // It also covers the one path live testnet cannot: creating a NEW player.
-  // That needs the root account to fund an account plus gas headroom, and the
-  // live root is below it — so onboarding's three-transaction bootstrap, the
-  // approval granted while a bootstrap key still exists, and the deletion of
-  // that key are only ever exercised here.
+  // It also covers creating a NEW player: onboarding's three-transaction
+  // bootstrap, the approval granted while a bootstrap key still exists, and the
+  // deletion of that key in the same transaction that installs the scoped one.
+  //
+  // That used to be the ONLY place this ran, because the live root account was
+  // below the gas headroom needed to create an account. Root was funded and
+  // `npm run live:onboard` now does it on public testnet too. This stays
+  // because a local node is where it is cheap to run repeatedly, and because
+  // 0.1 NEAR per account is a poor way to pay for a test.
   const sandbox = await Sandbox.start({})
   t.after(() => sandbox.tearDown())
 

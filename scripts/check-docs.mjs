@@ -304,6 +304,40 @@ if (await exists('minecraft/')) {
 }
 
 const readmeText = await readFile(new URL('README.md', ROOT), 'utf8')
+
+// 8b. What the deployment actually contains, counted from the manifest.
+//
+// The README said "5 merchants, 2 agents, 1 player" for weeks, and it was true
+// when written. The moment a second player was onboarded it became false, and
+// nothing noticed — a hand-written count that rots is the single most repeated
+// defect in this repository's history, so this one is derived. Same
+// anti-vacuity trap as the counts above: rewording the row fails the check
+// rather than silently disabling it.
+const MANIFEST_CLAIMS = [
+  { what: 'merchants', key: 'merchants', claim: /\b(\d+) merchants\b/ },
+  { what: 'agents', key: 'agents', claim: /\b(\d+) agents\b/ },
+  { what: 'players', key: 'players', claim: /\b(\d+) players?\b(?!\.md)/ },
+]
+try {
+  const deployed = JSON.parse(await readFile(new URL('deployment.json', ROOT), 'utf8'))
+  for (const { what, key, claim } of MANIFEST_CLAIMS) {
+    const actual = (deployed[key] ?? []).length
+    const m = readmeText.match(claim)
+    if (!m) {
+      fail('README.md', `no ${what} count found to check — the row was reworded, so this check now verifies nothing`)
+      continue
+    }
+    if (Number(m[1]) !== actual) {
+      fail('README.md', `claims ${m[1]} ${what}, but deployment.json records ${actual}`)
+    }
+    commandsChecked++
+  }
+} catch (e) {
+  // No manifest is a legitimate state for a fresh clone, and this check has
+  // nothing to say about it. A malformed one is not.
+  if (!/ENOENT/.test(e?.message ?? '')) fail('deployment.json', `could not be read: ${e.message}`)
+}
+
 for (const { what, dir, pattern, claim, only, ext } of COUNTED_CLAIMS) {
   const actual = await countInFiles(dir, pattern, only ?? null, ext ?? '.rs')
   const m = readmeText.match(claim)

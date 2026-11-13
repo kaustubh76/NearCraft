@@ -121,7 +121,7 @@
   ],
   "agent_gas_allowance_note": "Measured in the sandbox: a function-call key's allowance is checked as a per-call ceiling against PREPAID gas and drawn down by gas actually burned. A 60 TGas call needs ~0.2 NEAR of headroom and burns ~0.007 NEAR, so 2 NEAR permits many calls. The earlier 0.25 would have left almost no margin. Never use max_gas() from an agent key: 300 TGas demands ~1 NEAR.",
   "guard": {
-    "note": "The public blocklist agents report to. Without it deployed, counterparty.mjs falls into its `unavailable` branch and screening silently degrades — so deploy must create it.",
+    "note": "The public blocklist agents report to. Without it deployed, counterparty.mjs falls into its `unavailable` branch and screening silently degrades \u2014 so deploy must create it.",
     "fund_near": "3"
   },
   "players": {
@@ -144,8 +144,12 @@
     "budget_near": "2",
     "gas_allowance_near": "2",
     "seed_subjects": [
-      "player-1"
-    ]
+      "player-1",
+      "player-2",
+      "player-3"
+    ],
+    "demo_subject": "player-3",
+    "demo_subject_note": "Which seeded identity the Minecraft demo signs in as. It lives here, beside seed_subjects, because a subject hard-coded in a script and an account id recorded in deployment.json are two hand-written facts that have to agree, and this repository has been bitten by that class of bug more than once. scripts/mc-up.mjs derives the account from this subject and refuses to run if the result is not a player the manifest records. A real OIDC login has no subject that could be written here \u2014 that would be personal data \u2014 so --token overrides it."
   },
   "relayer": {
     "prefix": "relayer",
@@ -155,6 +159,6 @@
       "sell",
       "invest_with_credit"
     ],
-    "note": "Pays gas so a player never sees a gas prompt (NEP-366 meta transactions). Funded for GAS ONLY — it holds no spend budget and signs nothing of its own. gas_near is real NEAR and is NOT scaled by NEAR_ECONOMY_SCALE: 0.05 is below one 60 TGas call's prepaid cost, which is the three-pots trap in AGENTS.md. permitted_methods is the relayer's OWN allowlist — a relayer that submits anything is an open faucet for whoever asks. invest_with_credit is on the list because a player holding only a scoped key cannot pay for its own gas, so relaying is the ONLY way it can back a merchant — a method the player key permits but the relayer refuses is a method that does not exist for that player."
+    "note": "Pays gas so a player never sees a gas prompt (NEP-366 meta transactions). Funded for GAS ONLY \u2014 it holds no spend budget and signs nothing of its own. gas_near is real NEAR and is NOT scaled by NEAR_ECONOMY_SCALE: 0.05 is below one 60 TGas call's prepaid cost, which is the three-pots trap in AGENTS.md. permitted_methods is the relayer's OWN allowlist \u2014 a relayer that submits anything is an open faucet for whoever asks. invest_with_credit is on the list because a player holding only a scoped key cannot pay for its own gas, so relaying is the ONLY way it can back a merchant \u2014 a method the player key permits but the relayer refuses is a method that does not exist for that player."
   }
 }

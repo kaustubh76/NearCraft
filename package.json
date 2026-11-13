@@ -36,6 +36,7 @@
     "oidc:verify": "node scripts/oidc-verify.mjs",
     "check:docs": "node scripts/check-docs.mjs",
     "live:player": "node scripts/live-player.mjs",
+    "live:onboard": "node scripts/live-onboard.mjs",
     "live:stake": "node scripts/live-stake.mjs",
     "topup": "node scripts/topup.mjs",
     "verify:deployed": "node scripts/verify-deployed.mjs",

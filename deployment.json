@@ -44,6 +44,24 @@
   ],
   "players": [
     {
+      "account_id": "p-62b0b243.nearcraftmc.testnet",
+      "permitted_methods": [
+        "buy_with_credit",
+        "sell",
+        "invest_with_credit"
+      ],
+      "function_call_public_key": "ed25519:G1EqfQ3bzBBcWU4EXnj79ybaMj97Zs18n5MWL5ww9bgJ"
+    },
+    {
+      "account_id": "p-6928989e.nearcraftmc.testnet",
+      "permitted_methods": [
+        "buy_with_credit",
+        "sell",
+        "invest_with_credit"
+      ],
+      "function_call_public_key": "ed25519:GmaW6Y9biNiz7Xhz8y3CTYUpUjhe5yxgW384pRt37pTh"
+    },
+    {
       "account_id": "p-1d6a3c5d.nearcraftmc.testnet",
       "permitted_methods": [
         "buy_with_credit",

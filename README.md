@@ -28,7 +28,7 @@ column before the description.
 | `backend/near/counterparty.mjs` — allow/warn/block | **Built and tested.** 23 tests. Pure scoring, no API key, no indexer. |
 | `backend/near` — signer, policy, warn→human approval | **Built and tested.** 59 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
 | **Sandbox integration tests** | **Built and passing.** A real local NEAR node via `near-workspaces`. 18 tests: 4 prove a restricted key's limits *at the protocol level*, 9 cover the cross-contract buy/sell/rollback paths, the economy, the money invariant and solvency, 3 the state migration (including bricking a contract with a plain redeploy and rescuing it), 1 that every view is callable *as a view*, and 1 that the node starts. These counts are checked by `npm run check:docs` against the tests that actually exist — they had rotted to 74 and 12. |
-| **Deployed to NEAR testnet** | **Yes.** `items.nearcraftmc.testnet`, `market.nearcraftmc.testnet`, `guard.nearcraftmc.testnet` — 5 merchants, 2 agents, 1 player. `npm run reads` and `npm run keys` query it with no credentials. |
+| **Deployed to NEAR testnet** | **Yes.** `items.nearcraftmc.testnet`, `market.nearcraftmc.testnet`, `guard.nearcraftmc.testnet` — 5 merchants, 2 agents, 3 players. `npm run reads` and `npm run keys` query it with no credentials. |
 | The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls — **135 real transactions in 26.4s** on a real nearcore node — 5.1 trades a second, measured over three runs — buyers running concurrently. `npm run sim` |
 | `web/market.html` | **Built, reads the live chain, and is playable.** Every merchant's ask, bid, stock band and the contract's own reason string, read from the deployed contract over public RPC with no API key. Falls back to the retained simulation snapshot when offline, and says which it is showing. With `npm run play` behind it the page also signs players in and trades: buy and sell on each row, and a strip showing your NEAR balance before and after every call. 16 tests. `npm run web` / `npm run play` |
 | **A real stake in a merchant on public testnet** | **Done.** [`CwWMeG5t…`](https://testnet.nearblocks.io/txns/CwWMeG5txLAobS7dozomcBqKBZturJ7iKiY21e3FDEUG) — 0.05 NEAR staked in the Ironmonger and recorded by the contract, then [`8s6e5vqw…`](https://testnet.nearblocks.io/txns/8s6e5vqwysZj8pMRubF8TkngzZ5erfr7EMdvUyr1pJYA), a gasless purchase whose margin repaid 0.005924 NEAR of it. `ledger_total` rose by exactly the stake and the purchase moved it by nothing. `npm run live:stake`, retained in `evidence/live/`. |
@@ -36,7 +36,8 @@ column before the description.
 | `npm run agent` — an agent shopping end to end | **Built and runnable.** An agent with a scoped key on a real node: an unknown merchant parked for a human, the same merchant clearing itself once trust accrued, and a prompt-injected objective **blocked** by the on-chain guard. |
 | `AGENTS.md` | **Written.** Repo instructions and the claims policy, for the AI judges the organisers named. |
 | `evidence/` | **Built.** `npm run evidence` retains each check's real output with its exit code and an output hash. Failures are kept, not edited out. |
-| Social / email login | **Built and tested.** [`backend/near/oidc.mjs`](backend/near/oidc.mjs) — JWKS fetch, JWT signature verification, `iss`/`aud`/`exp`/`nbf`/`sub` checks. 25 offline tests including `alg: none`, the HMAC confusion attack, a swapped payload and a token minted for another application. **Not configured against a real provider**, so the demo onboards seeded identities. |
+| Social / email login | **Built and tested.** [`backend/near/oidc.mjs`](backend/near/oidc.mjs) — JWKS fetch, JWT signature verification, `iss`/`aud`/`exp`/`nbf`/`sub` checks. 25 offline tests including `alg: none`, the HMAC confusion attack, a swapped payload and a token minted for another application. A Google client id **is** configured, in gitignored `.local/oidc.json`, and `/api/health` reports `verifier: "oidc"`. `tests/near/oidc-runtime.mjs` drives the real verifier with its default global `fetch` against a real `node:http` JWKS inside the real service, and asserts fifteen refusals **by code** at the service boundary. What is still disclosed is one step narrower: **no token Google itself issued has been through it**, because obtaining one needs a browser and a consent screen. `npm run oidc:verify` settles that in one command. |
+| **A brand-new player onboarded on public testnet** | **Done.** [`2FNytLGE…`](https://testnet.nearblocks.io/txns/2FNytLGEDMPRBjrf5TsYZBsT1ZVWrMu8uCUKeDKmCbp5) created [`p-62b0b243.nearcraftmc.testnet`](https://testnet.nearblocks.io/address/p-62b0b243.nearcraftmc.testnet) from a login, and [`6fe1RTHS…`](https://testnet.nearblocks.io/txns/6fe1RTHSf1sxH8LYRbC8ko3pQLgMF9feXZfBVn6S8f5t) installed its scoped key and **deleted the full-access one in the same transaction**. Read back from the chain: zero full-access keys, one function-call key, exactly the three methods the catalog lists, an approval over all eight sellable materials. Root paid 0.107115 NEAR; the player paid nothing and never saw a key. `npm run mc:up` then played that account in Minecraft, 9 of 9. This README disclosed for weeks that it could not be done, because root held 0.091081 NEAR against a 0.107607 cost. `npm run live:onboard`, retained in `evidence/live/`. |
 | Gasless play — no seed phrase, no popup, no gas prompt | **Built and measured on public testnet.** `npm run live:player`: a player holding **no full-access key at all** buys and sells on NEAR testnet and its balance moves by **exactly 0** — the relayer pays. Reproduced twice, hashes retained in `evidence/live/`. Also `npm run test:gasless` on a local node — three tests, the third a key-less player **backing a merchant** for nothing — plus the relayer and onboarding tests. [docs/GASLESS.md](docs/GASLESS.md) |
 | The money invariant | **Built and tested.** `sum(treasuries) + sum(credits) == deposited − paid out`, asserted after **every one** of the contract's fourteen money-moving calls, so a failure names the step rather than the session. Proved by injecting a real leak — a sale that credits the seller without debiting the treasury — which the test catches as "the ledger drifted after sell" with the 1.66 NEAR created from nothing. Plus the half a unit test cannot see: a sandbox test that the market's own NEAR balance always covers what it owes, across buys, a sale, an investment and a real withdrawal. `docs/RECAPITALIZATION.md`'s own formula for this was **wrong** — it double-counted stakes — and is corrected there. |
 | Reopening a broke merchant — the prompt's own sentence | **Built and tested.** The `games` prompt ends its description with "it closes its shop **until someone invests in it**". `market.invest(merchant_id)` is payable and permissionless; `market.invest_with_credit` is **non-payable** so a player holding one scoped key can call it at all — without that the mechanic would be unreachable for exactly the players it is for. `invest` returns whether the shop reopened, and says so in its log rather than claiming success when the amount fell short. A funder gets back the shop — a closed merchant will not buy from you, so the player holding iron is exactly the person who wants the ironmonger funded — **and now the stake too**: it is recorded, and half of every later sale's margin repays it until the claim is settled. That is the design in [docs/RECAPITALIZATION.md](docs/RECAPITALIZATION.md), which needed new contract state and the migration to carry it, and both now exist. Covered by `backing_tests` in [contracts/market/src/pricing.rs](contracts/market/src/pricing.rs) for the arithmetic, the `invest`/`backer`/`basis` tests in [contracts/market/src/lib.rs](contracts/market/src/lib.rs) for the behaviour, and one end-to-end run on a real node in [contracts/integration/tests/economy.rs](contracts/integration/tests/economy.rs). **And it has now run on public testnet**: `worker-1` staked 0.05 NEAR in the Ironmonger ([`CwWMeG5t…`](https://testnet.nearblocks.io/txns/CwWMeG5txLAobS7dozomcBqKBZturJ7iKiY21e3FDEUG)), `ledger_total` rose by exactly that and nothing else, and the next gasless purchase ([`8s6e5vqw…`](https://testnet.nearblocks.io/txns/8s6e5vqwysZj8pMRubF8TkngzZ5erfr7EMdvUyr1pJYA)) repaid 0.005924 NEAR of it out of the margin — stake, sale, repayment, on a public chain. `npm run live:stake` reproduces it and asserts every step. Two things it does not claim are in that script's header: it is signed with a **full-access operator key**, because `invest` is payable and a scoped key cannot attach a deposit; and the margin is **larger than the design intends**, because most live stock predates the migration that introduced cost recording, so an unknown cost reads as a zero one. The script prints the cost it used and says which case it hit. |
@@ -105,15 +106,48 @@ and the key it holds cannot transfer NEAR, cannot add another key, and can call
 only its named methods on one contract. `npm run web` serves the same page
 read-only with no credentials at all, and the play panel simply does not appear.
 
-Two honest limits on the live deployment, both of which the service names
+**A login becomes a brand-new account, and that is now measured on the public
+chain.** This section used to disclose the opposite: creating an account costs
+0.107607 NEAR, the root account held 0.091081, so sign-in answered
+`ROOT_UNDERFUNDED` and named the faucet, and the three-transaction bootstrap
+had only ever run against a local node in `tests/near/gasless.mjs`. Root was
+funded. `npm run live:onboard -- --seed player-3` then ran the real runtime path
+— it spawns the service and posts to `/api/session` exactly as a browser does,
+rather than calling the onboarding module directly:
+
+1. [`2FNytLGE…`](https://testnet.nearblocks.io/txns/2FNytLGEDMPRBjrf5TsYZBsT1ZVWrMu8uCUKeDKmCbp5)
+   created and funded [`p-62b0b243.nearcraftmc.testnet`](https://testnet.nearblocks.io/address/p-62b0b243.nearcraftmc.testnet)
+   with a temporary full-access key.
+2. The market was granted its NEP-245 pull rights over every sellable material
+   **while that key still existed** — a player holding only a function-call key
+   can never attach the deposit `mt_approve` needs, so the approval has to
+   happen here or never.
+3. [`6fe1RTHS…`](https://testnet.nearblocks.io/txns/6fe1RTHSf1sxH8LYRbC8ko3pQLgMF9feXZfBVn6S8f5t)
+   installed the scoped key and **deleted the full-access one in the same
+   transaction** — in that order, in one batch, or the account would lock itself
+   out between the two.
+
+Read back from the chain afterwards, not taken from the reply: **zero**
+full-access keys, exactly one function-call key bound to the market granting
+exactly the three methods `config/catalog.json` lists, and an approval over all
+eight sellable materials. Root paid 0.107115 NEAR. The player paid nothing and
+never saw a key, so there is no seed phrase to show — not by our restraint, but
+because no full-access key for that account exists anywhere any more. Then
+`npm run mc:up` played that account in Minecraft, 9 checks of 9. Both records
+are in `evidence/live/`.
+
+The first run of that script **reported a catastrophe that had not happened**:
+one full-access key, no scoped key, no methods. It had read the account with
+`finality: 'final'`, which lags `optimistic` by a block or two, immediately
+after the third transaction — so it observed the account one transaction in the
+past and was about to call a correct onboarding broken. The read now polls
+until the chain settles, and returns what it last saw on timeout rather than
+throwing, so a genuinely broken onboarding still fails. Same bug class as the
+wait that did not wait.
+
+One honest limit remains on the live deployment, and the service names it
 rather than failing obscurely:
 
-- It cannot onboard a **new** player. That needs the root account to fund an
-  account plus gas headroom, and the live root is below it, so sign-in answers
-  `ROOT_UNDERFUNDED` and names the faucet. Signing in as the existing player
-  works, and the full new-player path — create, approve while a bootstrap key
-  still exists, then install the scoped key and delete the bootstrap one in the
-  same transaction — runs against a real node in `tests/near/gasless.mjs`.
 - The demo player's **spend budget is finite**, and this document used to say
   only the contract owner could top it up. **That was wrong.**
   `market.fund_credit` has no `assert_owner()` — `register_merchant` directly
@@ -390,10 +424,15 @@ checked, a swapped payload is refused, and a perfectly valid token minted for a
 **different** application is refused. No new dependency — Node's `crypto` does
 JWKS import and verification on its own.
 
-What is left is not code: nobody has configured a real provider's client id, so
-the deployed demo still onboards seeded `seed:` identities. The verifier is
-built and tested; pointing it at Google or Apple is an operator step, and until
-someone does that we have no screenshot of a real login to show.
+What is left is not code, and it is now one step narrower than this paragraph
+used to claim. It said nobody had configured a real provider's client id. **That
+is no longer true**: a Google client id sits in gitignored `.local/oidc.json`,
+`/api/health` reports `verifier: "oidc"`, and `tests/near/oidc-runtime.mjs`
+drives the real verifier over a real HTTP JWKS inside the real service. What
+remains is that **no token Google itself issued has been verified**, because
+obtaining one needs a browser and a consent screen. `npm run oidc:verify` takes
+a pasted `id_token` and settles it against Google's live JWKS in one command;
+until someone runs it, that sentence stands.
 
 **On the Minecraft integration,** with two earlier statements of our own
 corrected rather than quietly edited.

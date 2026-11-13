@@ -351,6 +351,11 @@ export function createPlayService({
             verifier: verifierKind,
             permittedMethods: scoped?.methodNames ?? [],
             fullAccessKeys: limits.filter((k) => k.fullAccess).length,
+            // Present only on the run that CREATED the account, because only
+            // that run had anything to send. A caller retaining evidence needs
+            // somewhere an explorer can be pointed at; a returning player has
+            // no new transactions and gets no field.
+            ...(result.transactions ? { transactions: result.transactions } : {}),
           })
         }
 
