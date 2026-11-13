@@ -14,7 +14,9 @@ access-key primitives. Tracks entered: **`games`** and **`security`**.
 ## Run every check
 
 Needs Rust and Node 22+. Nothing here needs a NEAR account, a faucet, an API
-key or a Minecraft server.
+key or a Minecraft server. The Minecraft plugin is the one exception and it is
+kept out of `npm test` on purpose: `npm run mc:test` needs a JDK, so a clone
+without one records that check as *skipped* rather than failing.
 
 ```sh
 npm install
@@ -37,7 +39,20 @@ npm run sim                        # 20 buyers, 5 merchants, scripted, no model 
 npm run evidence                   # re-record every check's real output
 ```
 
-`npm run agent` is the single best summary of what this project does.
+And the Minecraft side, which needs a JDK rather than the wasm:
+
+```sh
+brew install openjdk@25           # Paper 26.3 refuses anything older
+npm run mc:test                   # the plugin's Java checks, offline, ~2s
+npm run play                      # in another terminal — the plugin is its client
+npm run mc:server -- --token player-1 --trade
+```
+
+`npm run agent` is the single best summary of what this project does, and
+`npm run mc:server -- --token player-1 --trade` is the one that looks like a
+game: a Paper server boots, the plugin loads, and a sale settles on testnet
+while the player's balance moves by zero. It downloads a 55 MiB server jar and
+spends live balance, so it is not part of any suite.
 
 Against the live deployment on public testnet (no credentials needed for the
 reads):
@@ -92,8 +107,12 @@ baseline project, where it was the thing that made the evidence worth reading.
   it were changed in the same commit that built it — which is the rule working,
   not an exception to it. What remains disclosed: no provider client id is
   configured, so no real token has been verified. The
-  Minecraft settlement path is not ported. `games` requirement 4 is not "a week
-  in a minute". These are stated in `README.md` and must stay stated.
+  Minecraft settlement path now exists as NEW code in `minecraft/` and has
+  settled a real sale on testnet from a server console — but EthCraft's plugin
+  is still **not** ported, no human player has joined a server, and the plugin's
+  inventory moves are not atomic with the chain. `games` requirement 4 is not "a
+  week in a minute". These are stated in `README.md` and `docs/MINECRAFT.md` and
+  must stay stated.
 - **Keep failures.** `evidence/runs/` records a failing check exactly like a
   passing one. A check that cannot run is recorded as `skipped` with a reason —
   skipped and failed are different facts and conflating them misleads twice.

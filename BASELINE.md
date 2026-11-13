@@ -50,10 +50,19 @@ context compaction; two reserve-then-reconcile spend ledgers.
 
 **EthCraft's Paper plugin is not vendored here, and no part of it was ported.**
 An earlier version of this file described it as "a partial port rather than a
-byte-identical copy, and the diff is the new part" — there was no such diff,
-because there is no Java in this repository at all. The in-game menus and item
-delivery remain prior work sitting in the EthCraft repo; repointing their
-settlement calls at NEAR is unbuilt, and `README.md` states what that costs.
+byte-identical copy, and the diff is the new part" — there was no such diff, and
+there still is none, because nothing was copied.
+
+There **is** Java in this repository now, and it is new work written in the
+window: `minecraft/`, a small Paper plugin that settles through the play
+service. It is not a port and shares no code with EthCraft's plugin — every
+class, including its JSON reader, was written here. That is enforced rather than
+promised: `npm run check:docs` fails if any file under `minecraft/` so much as
+carries EthCraft's package name, for the same reason `verify:baseline` hashes
+the vendored files. EthCraft's in-game menus, item delivery, inventory escrow,
+voice and property protection remain prior work sitting in the EthCraft repo and
+are **not** here in any form; `README.md` and `docs/MINECRAFT.md` state what the
+new plugin does and what it still does not.
 
 ## Written in the window — the judged work
 
@@ -71,8 +80,14 @@ settlement calls at NEAR is unbuilt, and `README.md` states what that costs.
   New. (An earlier version of this file promised this as `sim/fastforward.mjs`
   "against the deployed testnet contracts". It is Rust, it runs against a
   sandbox, and there is no `sim/` directory.)
-- `web/market.html` — read-only market page, reading the deployed contracts live
-  over public RPC with a retained sandbox snapshot as its offline fallback. New.
+- `web/market.html` — the market page, reading the deployed contracts live over
+  public RPC with a retained sandbox snapshot as its offline fallback; playable
+  with `npm run play` behind it. New.
+- `minecraft/` — a Paper plugin that settles trades on NEAR from inside the
+  game, as a client of the play service. New, and written from nothing: it
+  shares no code with EthCraft's plugin, which is why it sits under a different
+  directory name. Six classes and no external dependency — the JSON reader and
+  the yoctoNEAR formatter are written here rather than pulled in.
 - `tests/near/` — policy refusal, prompt-injection refusal, pricing. New.
 - `GAME_LOOP.md`, `RULES.md`, this file, `README.md`. New.
 

@@ -154,7 +154,10 @@ JSON, which is NEAR's normal convention for 64-bit values.
   and tested (`backend/near/oidc.mjs`, 25 offline tests), but no provider client
   id is configured, so nothing here has verified a token Google actually issued.
   That is configuration rather than code, and it is the last external
-  dependency. No Minecraft client is involved in any of it either.
+  dependency. No Minecraft *client* is involved in any of it either — though a
+  Minecraft *server* now is: the plugin in `minecraft/` drives this same relayed
+  path from a Paper console, and the player's balance still moves by exactly
+  zero. See [MINECRAFT.md](MINECRAFT.md).
 
 ## A side effect worth naming: relaying prevents lock-out
 

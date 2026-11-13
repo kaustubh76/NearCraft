@@ -1,0 +1,7 @@
+# Where the NearCraft play service is listening (npm run play).
+#
+# Plain http is accepted ONLY for loopback. Every call after sign-in carries a
+# session id, which is bearer authority over a player's account, so sending one
+# across a network in clear text is refused at startup — use https for a
+# remote service. See PlayClient.normaliseBase.
+service: 'http://127.0.0.1:8080'

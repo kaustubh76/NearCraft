@@ -1,0 +1,24 @@
+name: NearCraft
+version: '0.1.0'
+main: org.nearcraft.mc.NearCraftPlugin
+api-version: '1.21.11'
+description: An agent economy settled on NEAR, played from inside Minecraft.
+website: https://github.com/kaustubh76/NearCraft
+author: NearCraft
+commands:
+  nearcraft:
+    description: Sign in, check the service, or run the console selftest.
+    usage: /nearcraft <link|status|selftest>
+    aliases: [nc]
+  market:
+    description: What the merchants are quoting for a material, with the contract's own reason.
+    usage: /market <item> [count]
+  buy:
+    description: Buy a material with credit. Relayed, so you pay no gas.
+    usage: /buy <merchant> <item> [count]
+  sell:
+    description: Sell a material you are carrying. Relayed, so you pay no gas.
+    usage: /sell <merchant> <item> [count]
+  wallet:
+    description: Your credit, holdings, and exactly what your key is allowed to do.
+    usage: /wallet

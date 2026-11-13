@@ -43,7 +43,7 @@ column before the description.
 | Merchant restocking — "an economy that evolves without a dev patch" | **Built and tested.** `market.restock(merchant_id, item)` is **permissionless and non-payable**, so anyone may refill a thin shelf and a scoped key can do it. The merchant pays out of its own treasury at the bid it *would post for the restocked shelf* — provably below what it sells for, so a restock can never be a loss — and never spends into its floor. It **mints** the goods through `items.mt_mint`, so a shelf never claims stock the contract does not hold; a sandbox test on a real node proves the market's NEP-245 balance rises by exactly the units added. 13 tests. |
 | Payout rollbacks | **Built and tested.** `withdraw` and `withdraw_treasury` used to zero the ledger and then fire a bare transfer with no callback: a failed payout debited the claimant and delivered nothing, and the market silently kept money it no longer accounted for. Both now roll back. 3 unit tests. |
 | NEP-245 Approval Management | **Built and tested.** 10 unit tests. Implemented because without it a key-less player could buy but never sell. |
-| Minecraft plugin settlement path | **Not built**, and not startable here — no Java runtime on this machine and the Paper jar lives on the operator host. The note below also corrects our own earlier estimate of the work. |
+| Minecraft plugin settlement path | **Built, and settled on public testnet from inside a Minecraft server.** `npm run mc:server -- --token player-1 --trade` boots a hash-pinned Paper 26.3 build 231 with a new plugin loaded, signs in from the server console, and sells iron: credit rose **0.0048768 → 0.0080768 NEAR**, exactly the bid the Ironmonger had posted two commands earlier, holdings fell 3 → 2, and the player's NEAR balance moved by **0** ([`H6HpWytt…`](https://testnet.nearblocks.io/txns/H6HpWyttACf9g1PE2HBZpzNLkEAwedFxzM1vY5EaZixt)). A later run did the **round trip** — `/sell` then `/buy` in one session — and the credit moved by exactly the merchant's spread (+0.0032 the bid, then −0.004 the ask), holdings ended where they started, and both NEAR deltas were 0 ([`4Dmr8LKk…`](https://testnet.nearblocks.io/txns/4Dmr8LKkJYtRYVAmg3RfxfJQoq6g9TeQp4SkaparWJPP), [`5pPhhd4h…`](https://testnet.nearblocks.io/txns/5pPhhd4h9H7wb3sv9bYM1C3TkrhbmiaW4wF9w1vGHhwE)). The plugin is a client of the play service and **holds no keys, no signer and no chain code**; 5 in-game commands, 1277 lines of new Java, 84 Java checks offline. It is **not** a port of EthCraft's plugin and no line of it was copied — `check:docs` fails if any file under `minecraft/` carries that package name. What it does not do is move blocks for a player who joined: there is no Minecraft account here, so the console drove it. [docs/MINECRAFT.md](docs/MINECRAFT.md) |
 | Sealed-bid rounds (`swarms`) | **Not built, and that track is not entered.** See below. |
 
 **Live on NEAR testnet.** The contracts below are deployed and queryable by
@@ -61,7 +61,17 @@ npm run keys      # every agent AND player key: receiver, method list, allowance
 npm run verify:deployed   # the code on chain hashes to the wasm this repo builds
 npm run web       # the market page, reading those same contracts live in a browser
 npm run play      # the same page, playable: sign in and trade (needs .local/ keys)
+npm run mc:test   # the Minecraft plugin's Java checks, offline (needs a JDK)
+npm run mc:server # Paper + the plugin, driven from its console (downloads 55 MiB)
 ```
+
+**`npm run mc:server` is the same loop inside Minecraft.** It fetches a
+hash-pinned Paper 26.3 build 231, builds and installs the plugin, boots the
+server and runs the commands from the console. Add `--token player-1 --trade`
+and it signs in and sells iron on public testnet. The plugin holds no keys: it
+calls the same play service the browser does. [docs/MINECRAFT.md](docs/MINECRAFT.md)
+has the transcript and the limits — chiefly that no human player has joined,
+because there is no Minecraft account on this machine.
 
 **`npm run play` is the whole loop in a browser.** Sign in with any string —
 the account id is derived from the login, so the same identity always lands on
@@ -356,28 +366,38 @@ the deployed demo still onboards seeded `seed:` identities. The verifier is
 built and tested; pointing it at Google or Apple is an operator step, and until
 someone does that we have no screenshot of a real login to show.
 
-**On the Minecraft integration:** the game world, its menus and its item
-delivery are baseline — they exist and they work, on Unichain. What is *not*
-done is repointing their settlement calls at NEAR, and this README previously
-estimated that as "about six edit sites in one file". **That estimate was too
-low, and here is the correction.** Six is the GUI side. The validation itself,
-`InventoryMarketplace.gameOrder`, enforces `chainId == 1301`, an 18-decimal
-`totalBaseUnits` cross-check, a `0x[a-fA-F0-9]{40}` address, Privy consent
-nonces and a ten-state order machine — all EVM-shaped. Repointing it at NEAR is
-a rewrite of the order flow, not an edit pass.
+**On the Minecraft integration,** with two earlier statements of our own
+corrected rather than quietly edited.
 
-Two hard blockers, both verified rather than assumed: building the plugin needs
-a hash-pinned Paper jar and its bootstrapped library tree, which exist only on
-the operator host; and **this machine has no Java runtime at all**, so nothing
-Java could be compiled or tested here even in extract. Writing a port we could
-not compile would put unverified code into a submission whose whole claim is
-that everything in it was checked, so we did not write one.
+*The first correction.* This README said **"this machine has no Java runtime at
+all"**, and used that to explain why no Minecraft code was written. It was
+wrong. Homebrew's `openjdk@11` was installed the whole time, merely unlinked, so
+`/usr/bin/java` fell through to the macOS stub that prints "Unable to locate a
+Java Runtime". The obstacle was a PATH entry. One `brew install openjdk@25`
+later there is a plugin, and `docs/MINECRAFT.md` is the write-up.
 
-**No live NEAR gameplay has been recorded, and nothing here should be read as
-implying one.** The `games` track is entered on what is actually demonstrated:
-NEP-245 materials, one readable price rule, merchant reasoning the contract
-itself produces, a measured key-less buy and sell, a real testnet transaction,
-and a full economy run anyone can reproduce.
+*The second correction stands.* An earlier version estimated repointing
+EthCraft's plugin at NEAR as "about six edit sites in one file". Six is the GUI
+side. The validation itself, `InventoryMarketplace.gameOrder`, enforces
+`chainId == 1301`, an 18-decimal `totalBaseUnits` cross-check, a
+`0x[a-fA-F0-9]{40}` address, Privy consent nonces and a ten-state order machine
+— all EVM-shaped. Repointing it is a rewrite of the order flow, not an edit
+pass, and that is still true. So it was **not** repointed. What exists instead
+is a new, small plugin in `minecraft/` that settles through the play service,
+and EthCraft's 5,201 lines of world, menus, escrow, item delivery, voice and
+property protection **remain unported**.
+
+**What is now demonstrated, and what is still not.** A Paper server boots with
+the plugin, reads live merchant quotes with the contract's own reason strings,
+signs a player in, and settles a sale on public testnet with the player's NEAR
+balance moving by exactly zero. **No human player has joined that server** —
+there is no Minecraft account on this machine, so every command was driven from
+the server console, and the one thing a console cannot do is carry an inventory.
+The plugin prints that gap itself rather than hiding it. The `games` track is
+entered on what is actually demonstrated: NEP-245 materials, one readable price
+rule, merchant reasoning the contract itself produces, a measured key-less buy
+and sell, a real testnet transaction, a full economy run anyone can reproduce,
+and now a settlement that starts at a Minecraft server console.
 
 ---
 
@@ -799,15 +819,22 @@ NEAR testnet
 
 backend/
 ├── baseline/   vendored unchanged: agent loop, tool registry + validator, model router, spend ledgers
-└── near/       new: function-call-key signer, policy refusal, market/items wrappers, relayer
+└── near/       new: function-call-key signer, policy refusal, market/items wrappers, relayer, play service
+
+minecraft/      new: a small Paper plugin that settles through the play service.
+                Holds no keys and no chain code. NOT a port of EthCraft's plugin
+                and shares no code with it — check:docs enforces that.
 
 contracts/integration/tests/
                 a real local nearcore node: access-key limits, the cross-contract
                 economy, and the scripted no-model-calls simulation
 ```
 
-There is no `plugin/` directory. The Minecraft settlement path is not ported —
-see the note above for why, and for what that costs the `games` track.
+There is no `plugin/` directory, and that is not an oversight: EthCraft's
+plugin lives in a directory of that name and **none of it is vendored or
+ported**. The Minecraft code here is new, in `minecraft/`, deliberately under a
+different name so the two cannot be confused. See the note above for what it
+settles and what it still does not do.
 
 **Two key models, and the difference is deliberate.** A *player's* account ends
 up holding exactly one scoped key and no full-access key — `onboarding.mjs`

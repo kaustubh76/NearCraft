@@ -63,6 +63,8 @@ const CHECKS = [
   { topic: 'cross-contract-economy', cmd: 'cargo', args: ['test', '-p', 'nearcraft-integration', '--test', 'economy', '--', '--nocapture'],
     cwd: 'contracts', requiresWasm: true,
     proves: 'Buy, the rollback on a failed delivery, a sale through mt_transfer_call, a closed merchant refusing and the resolver refunding, withdrawals moving real NEAR, and a BACKER earning its stake back: it invests in a restocked merchant, that merchant is REFUSED when it tries to withdraw the principal it was just lent, and the next sale pays the backer half its margin as withdrawable credit, to the yoctoNEAR.' },
+  { topic: 'minecraft-plugin', cmd: 'node', args: ['scripts/mc-test.mjs'], requiresJdk: true,
+    proves: 'The Minecraft plugin compiles against the hash-pinned Paper 26.3 build 231 API on JDK 25, and its 84 Java checks pass with no Minecraft and no network. The substance is the refusals: a strict JSON reader that rejects every relaxation a lenient parser would offer (trailing commas, unquoted keys, comments, NaN, trailing bytes, a raw control character that could smuggle an extra line into game chat) and bounds both nesting depth and input length, because it parses bytes off a socket; a client that REFUSES to send a session id over plain http to anything but loopback, since a session id is bearer authority over a player account; a bounded body read so a game server cannot be made to exhaust its heap by whatever answered on that port; and amounts rendered by string arithmetic rather than through a double, which would silently round a 24-decimal yoctoNEAR balance. Three of those were deliberately broken to confirm they fail — plain http allowed everywhere, the size bound removed, and any answer counted as success — and each went red before being restored. What this does NOT prove is that the plugin loads on a server; npm run mc:server does that, and has.' },
 ]
 
 function run({ cmd, args, cwd }) {
@@ -86,7 +88,22 @@ async function wasmBuilt() {
   return true
 }
 
+/// A JDK is not needed by anything else here, so a clone without one records the
+/// Minecraft check as skipped rather than failed — the same treatment wasm gets.
+async function jdkPresent() {
+  try {
+    const { javaHome } = await import('./mc-java.mjs')
+    await javaHome()
+    return true
+  } catch { return false }
+}
+
 const haveWasm = await wasmBuilt()
+const haveJdk = await jdkPresent()
+if (!haveJdk) {
+  console.log('note: no JDK found, so the Minecraft plugin check will be recorded as skipped.')
+  console.log('      install one with `brew install openjdk@25` to capture it.\n')
+}
 if (!haveWasm) {
   console.log('note: contracts are not built, so wasm-dependent checks will be recorded as skipped.')
   console.log('      run `npm run build:contracts` first to capture them.\n')
@@ -98,7 +115,14 @@ for (const check of CHECKS) {
   await mkdir(dir, { recursive: true })
 
   let record
-  if (check.requiresWasm && !haveWasm) {
+  if (check.requiresJdk && !haveJdk) {
+    record = {
+      topic: check.topic, status: 'skipped',
+      reason: 'no JDK on this machine; run `brew install openjdk@25` and re-run to capture this check',
+      command: [check.cmd, ...check.args].join(' '), proves: check.proves,
+    }
+    console.log(`skip  ${check.topic}`)
+  } else if (check.requiresWasm && !haveWasm) {
     record = {
       topic: check.topic, status: 'skipped',
       reason: 'contracts not built; run npm run build:contracts',
@@ -144,9 +168,22 @@ async function liveTransactions() {
       // the first version of this assumed one shape and would have indexed a
       // later one as a row of `undefined`.
       if (r.transactions) {
-        const described = r.player
-          ? `${r.player} bought and sold ${r.count}x ${r.item} holding ${r.player_full_access_keys} full-access keys, paying ${r.player_near_delta_yocto === '0' ? 'nothing' : `${r.player_near_delta_yocto} yocto`}; relayer paid ${r.relayer_paid_yocto} yocto`
-          : (r.note ?? `${Object.keys(r.transactions).join(' then ')} on ${r.merchant ?? 'the market'}`)
+        // Branch on the FIELDS, not on the record kind.
+        //
+        // The previous version branched on `r.player` alone and the comment
+        // above claimed that fixed the undefined-row problem. It did not: the
+        // stake record also carries a `player`, so it rendered as "bought and
+        // sold 3x iron_ingot holding undefined full-access keys, paying
+        // undefined yocto; relayer paid undefined yocto" — and that string was
+        // committed in evidence/SUMMARY.json. Twice now a new record shape has
+        // been indexed as undefineds by code written to prevent exactly that,
+        // so this no longer tries to recognise shapes at all: it builds the
+        // sentence, and if any field was missing the record describes itself
+        // with its own note instead.
+        const fromFields =
+          `${r.player} bought and sold ${r.count}x ${r.item} holding ${r.player_full_access_keys} full-access keys, paying ${r.player_near_delta_yocto === '0' ? 'nothing' : `${r.player_near_delta_yocto} yocto`}; relayer paid ${r.relayer_paid_yocto} yocto`
+        const fallback = r.note ?? `${Object.keys(r.transactions).join(' then ')} on ${r.merchant ?? 'the market'}`
+        const described = fromFields.includes('undefined') ? fallback : fromFields
         return {
           transactions: Object.fromEntries(
             Object.entries(r.transactions).map(([k, v]) => [k, v.hash]),
@@ -186,7 +223,7 @@ const summary = {
     'Those live reads are VIEW calls only. No check in this script sends a transaction, so no record below is evidence of live write behaviour.',
     'Live write behaviour is evidenced separately, by the retained records in evidence/live/ — each names real transaction hashes on public testnet that anyone can open on an explorer. Those come from npm run live:agent (an agent purchase under a scoped key, screened and human-approved), npm run live:player (a player with NO full-access key buying and selling while its balance moves by exactly zero), and npm run live:stake (a real stake in a merchant, recorded by the contract and repaid out of the margin on a real gasless purchase). Both are deliberately outside this script because they spend real testnet balance.',
     'The live deployment runs at a reduced economy scale (see economy_scale in deployment.json); its figures are not the full-size economy the sandbox runs.',
-    'No Minecraft gameplay is recorded; the plugin is not exercised by any check here.',
+    'The minecraft-plugin check runs the plugin\'s Java checks offline against a stub HTTP server. It does NOT boot a Minecraft server: that is npm run mc:server, which is outside this script because it downloads a 55 MiB Paper jar and spends live testnet balance. No gameplay by a human player is recorded anywhere, because there is no Minecraft account on this machine; every in-game command evidenced here was issued from the server console.',
     'A passing check establishes what its own output shows and nothing wider.',
   ],
   live_transactions: await liveTransactions(),

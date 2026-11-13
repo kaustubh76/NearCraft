@@ -150,4 +150,8 @@ not the deployment, and a week is arithmetic we had not done. At the measured
 rate a week of a quiet five-merchant town is about five minutes, not one — the
 README works that out and declines the claim.
 
-That is the economy. The Minecraft client is how a human plays it.
+That is the economy. The Minecraft client is how a human plays it — and as of
+`minecraft/` there is a plugin that settles it: a Paper server with it loaded
+sold iron on public testnet for a player who paid no gas. A human has not yet
+played through it, because this machine has no Minecraft account; the commands
+were run from the server console. See [docs/MINECRAFT.md](docs/MINECRAFT.md).

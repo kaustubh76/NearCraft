@@ -1,0 +1,77 @@
+{
+  "note": "Every Minecraft artifact this repository downloads, pinned by content hash. Nothing is vendored: the jars are fetched into .tmp/ and verified before use, so a clone stays small and a tampered mirror is caught rather than compiled against. The server build and the API build are the SAME build (26.3 build 231), so the plugin is compiled against exactly the server it is tested on.",
+  "java": {
+    "minimum": 25,
+    "install": "brew install openjdk@25",
+    "home": "/opt/homebrew/opt/openjdk@25",
+    "why": "Paper 26.3 refuses to start on anything older. macOS ships a /usr/bin/java stub that is not a JVM at all, so this path is used explicitly rather than trusting PATH."
+  },
+  "compileClasspath": [
+    "paper-api",
+    "adventure-key",
+    "adventure-api",
+    "annotations",
+    "jspecify",
+    "checker-qual",
+    "guava",
+    "bungeecord-chat"
+  ],
+  "artifacts": {
+    "paper-api": {
+      "version": "26.3.build.231-stable",
+      "sha256": "f0df9e7faccd38fabcdf4d2e6a243649cabc11f0a19fec100b43d7357369fb22",
+      "url": "https://repo.papermc.io/repository/maven-public/io/papermc/paper/paper-api/26.3.build.231-stable/paper-api-26.3.build.231-stable.jar",
+      "use": "compile only"
+    },
+    "adventure-key": {
+      "version": "5.2.0",
+      "sha256": "0184d173200e2eef8fbc791f622d1d58fd459f8930c616b5a4fe79e83eda6c55",
+      "url": "https://repo.papermc.io/repository/maven-public/net/kyori/adventure-key/5.2.0/adventure-key-5.2.0.jar",
+      "use": "compile only \u2014 Paper's own supertypes reference it, so javac needs it even though this plugin does not"
+    },
+    "adventure-api": {
+      "version": "5.2.0",
+      "sha256": "7e52fe7190be3e87b3b3f71712cfa12315fcd27109f302a7b440c12f01fae827",
+      "url": "https://repo.papermc.io/repository/maven-public/net/kyori/adventure-api/5.2.0/adventure-api-5.2.0.jar",
+      "use": "compile only \u2014 CommandSender is an Audience"
+    },
+    "annotations": {
+      "version": "26.0.2",
+      "sha256": "2037be378980d3ba9333e97955f3b2cde392aa124d04ca73ce2eee6657199297",
+      "url": "https://repo.papermc.io/repository/maven-public/org/jetbrains/annotations/26.0.2/annotations-26.0.2.jar",
+      "use": "compile only \u2014 Paper annotates its API with @NotNull, and javac must resolve the annotation type"
+    },
+    "jspecify": {
+      "version": "1.0.0",
+      "sha256": "1fad6e6be7557781e4d33729d49ae1cdc8fdda6fe477bb0cc68ce351eafdfbab",
+      "url": "https://repo.papermc.io/repository/maven-public/org/jspecify/jspecify/1.0.0/jspecify-1.0.0.jar",
+      "use": "compile only"
+    },
+    "checker-qual": {
+      "version": "4.2.3",
+      "sha256": "f868f731f6e37db3e1c2140d06016477989959a2d13fc5bed9c46760cffd5ba0",
+      "url": "https://repo.papermc.io/repository/maven-public/org/checkerframework/checker-qual/4.2.3/checker-qual-4.2.3.jar",
+      "use": "compile only"
+    },
+    "guava": {
+      "version": "33.6.0-jre",
+      "sha256": "dc573e1fca4fd5454f4a5fd3d7da2df03002876a4175bafc14a95980dd7713b3",
+      "url": "https://repo.papermc.io/repository/maven-public/com/google/guava/guava/33.6.0-jre/guava-33.6.0-jre.jar",
+      "use": "compile only \u2014 Bukkit returns a Multimap from Material.getItemAttributes"
+    },
+    "bungeecord-chat": {
+      "version": "1.21-R0.2-deprecated+build.21",
+      "sha256": "ce930b3ee048520a0ab538eb8d1627b301367fc1b300837235387aded6d89ba1",
+      "url": "https://repo.papermc.io/repository/maven-public/net/md-5/bungeecord-chat/1.21-R0.2-deprecated+build.21/bungeecord-chat-1.21-R0.2-deprecated+build.21.jar",
+      "use": "compile only \u2014 sendMessage is overloaded on BaseComponent, so javac must see the type to pick the String overload"
+    },
+    "paper": {
+      "version": "26.3",
+      "build": 231,
+      "sha256": "a836a016be7ac52352eb3a1efb6857bb42ee73a6c78d46e292f7e87742edb0e6",
+      "url": "https://fill-data.papermc.io/v1/objects/a836a016be7ac52352eb3a1efb6857bb42ee73a6c78d46e292f7e87742edb0e6/paper-26.3-231.jar",
+      "use": "the server npm run mc:server boots"
+    }
+  },
+  "client": "1.21.11"
+}

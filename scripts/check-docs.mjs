@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 const ROOT = new URL('../', import.meta.url)
 const DOCS = ['README.md', 'AGENTS.md', 'GAME_LOOP.md', 'RULES.md', 'BASELINE.md',
               'docs/GASLESS.md', 'docs/SECURITY_SIGNALS.md', 'docs/PROVENANCE.md',
+              'docs/MINECRAFT.md',
               'docs/RECAPITALIZATION.md']
 
 const failures = []
@@ -156,7 +157,8 @@ const RETIRED_CLAIMS = [
     why: 'the contracts are deployed and the page reads them live' },
   // Retired by the claims audit. Each of these was in the docs and false.
   { pattern: /the diff is the new part/i,
-    why: 'no Java is vendored here, so there is no plugin diff to point at' },
+    why: 'the Java in minecraft/ is new code, not a diff against EthCraft\'s plugin — ' +
+         'nothing was copied, so there is no diff to point at and never was' },
   { pattern: /and the sealed-bid round coordinator/i,
     why: 'the coordinator was never built and the swarms track is not entered' },
   { pattern: /read-only live market and round page/i,
@@ -261,7 +263,45 @@ const COUNTED_CLAIMS = [
   // rather than waiting for this one to rot too.
   { what: 'web/market.html tests', dir: 'tests/near/', pattern: /^test\(/gm, only: ['web'], ext: '.mjs',
     claim: /`web\/market\.html`[^\n]*?\b(\d+) tests\b/ },
+  // The Minecraft plugin. Counted from the day it was written, for the same
+  // reason: a Java suite is one more place a hand-written number can rot, and
+  // this one is not even run by `npm test` (it needs a JDK), so nothing else
+  // would notice.
+  { what: 'Minecraft plugin Java checks', dir: 'minecraft/src/test/java/org/nearcraft/mc/',
+    pattern: /\bh\.(?:equals|check|refuses)\(/g, ext: '.java',
+    claim: /\b(\d+) Java checks\b/ },
+  // Lines, not tests. A table of six per-class line counts in docs/MINECRAFT.md
+  // had drifted before it was ever committed (458 written as "~400"), so there
+  // is now one number and it is counted.
+  { what: 'lines of plugin Java', dir: 'minecraft/src/main/java/',
+    pattern: /\n/g, ext: '.java',
+    claim: /\b(\d+) lines of new Java\b/ },
+  { what: 'Minecraft plugin commands', dir: 'minecraft/src/main/resources/',
+    pattern: /^  [a-z]+:$/gm, only: ['plugin'], ext: '.yml',
+    claim: /\b(\d+) in-game commands\b/ },
 ]
+
+// 7. The Minecraft plugin must stay NEW code.
+//
+// Copying a file out of EthCraft's plugin would make it baseline work, which
+// the eligibility disclosure in BASELINE.md says was not done. That is the kind
+// of claim that must be enforced rather than promised, so: nothing under
+// minecraft/ may carry EthCraft's package name.
+async function scanForEthCraft(dir) {
+  let hits = []
+  for (const entry of await readdir(new URL(dir, ROOT), { withFileTypes: true })) {
+    if (entry.isDirectory()) { hits.push(...(await scanForEthCraft(`${dir}${entry.name}/`))); continue }
+    const text = await readFile(new URL(`${dir}${entry.name}`, ROOT), 'utf8')
+    if (/org\.agentcity|org\/agentcity/.test(text)) hits.push(`${dir}${entry.name}`)
+  }
+  return hits
+}
+if (await exists('minecraft/')) {
+  for (const hit of await scanForEthCraft('minecraft/')) {
+    fail('BASELINE.md', `${hit} carries EthCraft's package name; BASELINE.md says no part of that plugin was ported`)
+  }
+  commandsChecked++
+}
 
 const readmeText = await readFile(new URL('README.md', ROOT), 'utf8')
 for (const { what, dir, pattern, claim, only, ext } of COUNTED_CLAIMS) {

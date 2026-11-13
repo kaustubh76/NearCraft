@@ -22,3 +22,9 @@ dist/
 # os / editor
 .DS_Store
 *.swp
+
+# Minecraft build and runtime. Every jar here is fetched and hash-verified from
+# config/minecraft-runtime.json, so none of it belongs in the repository: a
+# 55 MiB server jar in a clone is not provenance, it is weight.
+.tmp/
+*.jar
