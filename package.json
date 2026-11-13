@@ -41,6 +41,7 @@
     "live:stake": "node scripts/live-stake.mjs",
     "topup": "node scripts/topup.mjs",
     "verify:deployed": "node scripts/verify-deployed.mjs",
+    "snapshot": "node scripts/snapshot-live.mjs",
     "redeploy": "node scripts/redeploy.mjs",
     "build:reproducible": "cargo near build reproducible-wasm --manifest-path contracts/items/Cargo.toml && cargo near build reproducible-wasm --manifest-path contracts/market/Cargo.toml && cargo near build reproducible-wasm --manifest-path contracts/guard/Cargo.toml && cargo near abi --locked --manifest-path contracts/items/Cargo.toml && cargo near abi --locked --manifest-path contracts/market/Cargo.toml && cargo near abi --locked --manifest-path contracts/guard/Cargo.toml",
     "check:java-wiring": "node scripts/check-java-wiring.mjs"

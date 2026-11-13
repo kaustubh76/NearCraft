@@ -270,11 +270,47 @@ for (const who of [...agents, ...players]) {
   console.log(`  ${who.account_id.padEnd(34)} ${fromYocto(credit).padStart(10)} NEAR remaining`)
 }
 
+// Half-finished sign-ins, which are the one state where an account in this
+// deployment legitimately holds a FULL-ACCESS key.
+//
+// `signIn` is three transactions, and between the first and the last the player
+// account carries a temporary full-access key. If the run dies in between, that
+// key stays installed and the service parks it so the next sign-in can finish
+// the job. A parked key is therefore an exact, operator-visible signal that an
+// account is sitting in that window — and this audit exists to say which
+// accounts hold a full-access key, so it has to say this one too.
+//
+// In steady state the file is absent or empty. Only account IDS are read; no
+// key material is read, printed, or counted here.
+let parked = {}
+try {
+  parked = JSON.parse(await readFile(new URL('../.local/nearcraft-bootstrap.json', import.meta.url), 'utf8'))
+} catch { /* absent is the normal state */ }
+const parkedIds = Object.keys(parked)
+if (parkedIds.length) {
+  console.log('\nHalf-finished sign-ins (each holds a live full-access key)\n')
+  for (const id of parkedIds) {
+    const keys = await p.query({
+      request_type: 'view_access_key_list', finality: 'optimistic', account_id: id,
+    }).then((r) => r.keys, () => [])
+    const full = keys.filter((k) => {
+      const perm = k.access_key.permission
+      return perm === 'FullAccess' || perm?.FullAccess !== undefined
+    })
+    console.log(`  ${id}`)
+    console.log(`    ${full.length} full-access key(s) on chain, bootstrap parked for resume`)
+    console.log('    this account will be finished by its next sign-in; until then it is')
+    console.log('    NOT in the state this audit claims for a player.')
+  }
+  console.log()
+}
+
 // Say what was audited, not just that it passed. A bare "all correct" is what
 // made the empty-manifest case look like a success.
 const summary =
   `${agents.length} agent(s) and ${players.length} player(s) audited, ` +
-  `${operatorKeys} operator key(s) disclosed`
+  `${operatorKeys} operator key(s) disclosed` +
+  (parkedIds.length ? `, ${parkedIds.length} half-finished sign-in(s)` : '')
 console.log(
   failures
     ? `\n${failures} key check(s) FAILED  (${summary})\n`
