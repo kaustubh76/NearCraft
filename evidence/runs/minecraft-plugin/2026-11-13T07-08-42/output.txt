@@ -1,0 +1,14 @@
+
+--- Json ---
+Json: 65 passed, 0 failed
+
+--- PlayClient ---
+PlayClient: 36 passed, 0 failed
+
+--- Orders ---
+Orders: 33 passed, 0 failed
+
+--- Sessions ---
+Sessions: 38 passed, 0 failed
+
+all Java checks passed

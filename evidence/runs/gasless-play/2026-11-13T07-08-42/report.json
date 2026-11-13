@@ -1,0 +1,12 @@
+{
+  "topic": "gasless-play",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 27811,
+  "command": "node --test tests/near/gasless.mjs",
+  "cwd": ".",
+  "proves": "On a real nearcore node, a player holding only a function-call access key buys goods and pays nothing: the player balance delta is exactly 0 and the relayer pays. It also SELLS: a player with no full-access key at all sells under a NEP-245 approval through the non-payable market.sell, and pays nothing. Records that a delegate action's inner call cannot carry a deposit, which is why selling cannot go through mt_transfer_call. And it BACKS a merchant for free: a relayed invest_with_credit records a 1 NEAR stake against the player, who pays nothing. invest is #[payable], so a scoped key could never reach it — without the non-payable twin the mechanic the games prompt describes would be unreachable for exactly the players it is for. The fourth test drives backend/near/play.mjs — the service a browser actually talks to — composing the real onboarding, relayer and market reader exactly as scripts/serve-play.mjs does: it signs a NEW player in, buys two and sells one, and the balance delta for that player is still exactly 0 while the service reports that same 0 rather than asserting it. That path also covers what live testnet cannot, because the live root account is below the gas headroom to create an account: the three-transaction onboarding bootstrap, the NEP-245 approval granted while a temporary full-access key still exists, and the deletion of that key in the same transaction that installs the scoped one. After trading, the player still holds zero full-access keys.",
+  "output_sha256": "c2743a029f32369c2f88fd1fb903d55a81be6f9b4fe71a8a041d1dd9b604e8a6",
+  "output_bytes": 1496,
+  "recorded_at": "2026-11-13T07:09:35.104Z"
+}
