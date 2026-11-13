@@ -65,6 +65,14 @@ const GAS_FOR_MT_ON_TRANSFER: Gas = Gas::from_tgas(25);
 /// Fire-and-forget notification to a newly approved account.
 const GAS_FOR_MT_ON_APPROVE: Gas = Gas::from_tgas(10);
 
+/// How many distinct accounts one owner may have approved for one material.
+///
+/// Every transfer on that (material, owner) pair deserializes this whole list,
+/// so an unbounded one is a balance that eventually cannot move. `guard` bounds
+/// its per-subject reports for the same reason — see MAX_REPORTS_PER_SUBJECT —
+/// and this is the same defence in the contract that was missing it.
+const MAX_APPROVALS_PER_TOKEN: usize = 64;
+
 /// NEP-245 core token view. `owner_id` is `None` for fungible-style tokens,
 /// which every NearCraft material is — stock is a shared supply, not a unique item.
 #[near(serializers = [json, borsh])]
@@ -389,7 +397,14 @@ impl Items {
                 .enumerate()
                 .map(|(i, _)| {
                     let sent = amounts[i].0;
-                    returned.get(i).map(|u| u.0.min(sent)).unwrap_or(0)
+                    // A SHORT answer refunds. `unwrap_or(0)` here meant "the
+                    // receiver kept everything", so a receiver returning fewer
+                    // figures than it was sent — a bug or a choice — silently
+                    // kept materials it never claimed. An over-long answer is
+                    // clamped just below; the two directions are now
+                    // symmetrical, and the default is the one that does not
+                    // cost the sender.
+                    returned.get(i).map(|u| u.0.min(sent)).unwrap_or(sent)
                 })
                 .collect(),
             // Receiver panicked or the call failed: refund everything.
@@ -464,7 +479,26 @@ impl Items {
             let mut entries = self.approvals.get(&key).cloned().unwrap_or_default();
             match entries.iter().position(|(who, _, _)| who == &account_id) {
                 Some(at) => entries[at] = (account_id.clone(), amount.0, approval_id),
-                None => entries.push((account_id.clone(), amount.0, approval_id)),
+                None => {
+                    // Bounded, the way `guard` bounds its reports.
+                    //
+                    // Re-approving the SAME spender replaces its entry above,
+                    // so this list only grows with distinct spenders — and
+                    // only the owner can grow their own, since `owner_id` is
+                    // the predecessor. So this is self-inflicted rather than a
+                    // way to attack someone else, and it is worth saying so
+                    // rather than overstating it.
+                    //
+                    // It still needs a bound: every later transfer on this
+                    // pair deserializes the whole vector, so an account could
+                    // put its own materials permanently out of reach. A limit
+                    // that refuses is better than a balance that cannot move.
+                    require!(
+                        entries.len() < MAX_APPROVALS_PER_TOKEN,
+                        "too many approvals for this material; revoke one first"
+                    );
+                    entries.push((account_id.clone(), amount.0, approval_id));
+                }
             }
             self.approvals.insert(key, entries);
         }
@@ -1268,6 +1302,79 @@ mod tests {
         assert_eq!(used, vec![U128(0)]);
         assert_eq!(c.mt_balance_of(accounts(0), IRON.to_string()), U128(1_000));
         assert_eq!(c.mt_balance_of(accounts(1), IRON.to_string()), U128(0));
+    }
+
+    /// The approvals list is bounded, and the bound is reached by a test
+    /// rather than asserted in a comment.
+    ///
+    /// Every `mt_transfer` on a (material, owner) pair deserializes this whole
+    /// vector, so an unbounded one is a balance that eventually cannot move.
+    /// Only the owner can grow their own list — `mt_approve` takes `owner_id`
+    /// from the predecessor — so this is self-inflicted rather than a way to
+    /// attack somebody else. It is still worth refusing: a limit a caller can
+    /// see beats materials nobody can shift.
+    #[test]
+    fn approvals_for_one_material_are_bounded() {
+        let mut c = stocked();
+        for i in 0..MAX_APPROVALS_PER_TOKEN {
+            setup(accounts(0), 1);
+            let spender: AccountId = format!("spender-{i}.near").parse().unwrap();
+            c.mt_approve(vec![IRON.to_string()], vec![U128(10)], spender, None);
+        }
+        assert_eq!(
+            c.mt_token_approval(IRON.to_string(), accounts(0)).approved_account_ids.len(),
+            MAX_APPROVALS_PER_TOKEN,
+            "the bound should be reachable, or this test proves nothing",
+        );
+
+        // One more is refused rather than silently appended.
+        setup(accounts(0), 1);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.mt_approve(vec![IRON.to_string()], vec![U128(10)], accounts(2), None)
+        }));
+        assert!(result.is_err(), "the 65th distinct approval must be refused");
+
+        // And re-approving someone already on the list still works, because
+        // that replaces an entry instead of growing the vector.
+        setup(accounts(0), 1);
+        let existing: AccountId = "spender-0.near".parse().unwrap();
+        c.mt_approve(vec![IRON.to_string()], vec![U128(99)], existing, None);
+    }
+
+    /// A receiver that answers with too FEW entries must not keep the rest.
+    ///
+    /// `mt_on_transfer` returns one "unused" figure per token id. An over-long
+    /// claim is clamped — `resolve_transfer_clamps_a_lying_receiver` covers
+    /// that — but a SHORT answer was read as zero unused, which means "the
+    /// receiver kept everything". So a receiver that returned fewer entries
+    /// than it was sent, whether through a bug or on purpose, silently kept
+    /// materials it never claimed.
+    ///
+    /// Zero is the wrong default in the one direction that costs the sender.
+    /// A missing answer is not a claim; it refunds.
+    #[test]
+    fn a_short_answer_from_a_receiver_refunds_rather_than_forfeits() {
+        let mut c = stocked();
+        setup(accounts(0), 1);
+        c.mt_transfer(accounts(1), IRON.to_string(), U128(10), None, None);
+        c.mt_transfer(accounts(1), OAK.to_string(), U128(200), None, None);
+
+        // Two tokens sent, ONE figure returned. Nothing is said about OAK.
+        let used = c.mt_resolve_transfer(
+            accounts(0),
+            accounts(1),
+            vec![IRON.to_string(), OAK.to_string()],
+            vec![U128(10), U128(200)],
+            Ok(vec![U128(4)]),
+        );
+
+        assert_eq!(used[0], U128(6), "the figure that WAS given is honoured: 4 of 10 refunded");
+        assert_eq!(
+            used[1], U128(0),
+            "and the one that was not given refunds in full rather than being kept"
+        );
+        assert_eq!(c.mt_balance_of(accounts(1), OAK.to_string()), U128(0), "the oak came back");
+        assert_eq!(c.mt_balance_of(accounts(0), OAK.to_string()), U128(500));
     }
 
     /// A receiver cannot claim back more than it was sent, even if it lies.

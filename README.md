@@ -22,8 +22,8 @@ column before the description.
 | `GAME_LOOP.md` — the game loop on paper | **Done.** Required by the `games` prompt before any code. |
 | `RULES.md` — round rules + sequence diagram | **Done.** Required by the `swarms` prompt before any code. |
 | `BASELINE.md` + hash-verified baseline import | **Done, machine-checked.** `npm run verify:baseline` |
-| `contracts/items` — NEP-245 materials | **Built and tested.** 31 unit tests. NEP-245 core 10/10 + Enumeration 2/2 + Approval Management **6/6**, verified against the compiled ABI. Three spec ambiguities are decided and disclosed in the module header, including that `mt_is_approved` takes an explicit `owner_id` — the spec's signature names none, which a multi-token cannot answer. |
-| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 97 unit tests (the pricing rule, the payout rollbacks, restocking, investment and the money invariant — including the interleaved one that caught `sell` crediting a seller before the materials moved). |
+| `contracts/items` — NEP-245 materials | **Built and tested.** 33 unit tests. NEP-245 core 10/10 + Enumeration 2/2 + Approval Management **6/6**, verified against the compiled ABI. Three spec ambiguities are decided and disclosed in the module header, including that `mt_is_approved` takes an explicit `owner_id` — the spec's signature names none, which a multi-token cannot answer. |
+| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 102 unit tests (the pricing rule, the payout rollbacks, restocking, investment and the money invariant — including the three interleaved ones that caught `sell`, `buy` and `restock` each paying somebody before the goods had moved). |
 | `contracts/guard` — the shared blocklist, on-chain | **Built and tested.** 13 unit tests. Public, attributed by the runtime, not deletable by us. |
 | `backend/near/counterparty.mjs` — allow/warn/block | **Built and tested.** 23 tests. Pure scoring, no API key, no indexer. |
 | `backend/near` — signer, policy, warn→human approval | **Built and tested.** 59 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
@@ -577,7 +577,7 @@ and a line; none of them is claimed to be harmless.
   ABI, which is real, but only method names and modifiers — no parameters, no
   types, no return types, no view/call kind. A contract implementing every
   method with the wrong semantics passes it. Semantics rest on the unit tests.
-- **`market` emits 13 plain `env::log_str` lines**, none of them NEP-297
+- **`market` emits 12 plain `env::log_str` lines**, none of them NEP-297
   events and none shape-asserted. `items` is the contract with a real event
   envelope.
 - **`verifyKeyScope` is never called** (`backend/near/signer.mjs`). It exists to

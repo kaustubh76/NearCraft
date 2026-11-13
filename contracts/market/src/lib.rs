@@ -682,7 +682,9 @@ impl Market {
         let paid = env::attached_deposit().as_yoctonear();
         let buyer_id = env::predecessor_account_id();
 
-        let merchant = self.merchants.get(&merchant_id).cloned().expect("unknown merchant");
+        // The merchant must exist, but nothing of it is read here any more: the
+        // payment does not touch its treasury until the goods have arrived.
+        require!(self.merchants.contains_key(&merchant_id), "unknown merchant");
         let key = ListingKey { merchant_id: merchant_id.clone(), item: item.clone() };
         let listing = self.listings.get(&key).cloned().expect("this merchant does not deal in that material");
 
@@ -693,7 +695,11 @@ impl Market {
         let total = unit_price(listing.base_price.0, listing.stock.0, demand).saturating_mul(units);
         require!(paid >= total, "attached deposit is below the quoted total");
 
-        // Shelf down, demand up, treasury credited.
+        // Shelf down, demand up — and the payment held, not paid.
+        //
+        // It used to land in the merchant's treasury right here, which made it
+        // withdrawable as real NEAR before the delivery had even been
+        // attempted. See `on_items_delivered`.
         self.listings.insert(
             key,
             Listing {
@@ -703,9 +709,6 @@ impl Market {
                 ..listing
             },
         );
-        let mut merchant = merchant;
-        merchant.treasury = U128(merchant.treasury.0 + total);
-        self.merchants.insert(merchant_id.clone(), merchant);
 
         // Overpayment comes straight back as credit.
         if paid > total {
@@ -727,6 +730,13 @@ impl Market {
         #[callback_result] result: Result<(), PromiseError>,
     ) -> bool {
         if result.is_ok() {
+            // The merchant is paid HERE, once the goods have actually moved.
+            //
+            // Before `attribute_margin`, deliberately: that reads
+            // `treasury - floor` to size a backer's payout, and the treasury it
+            // has always read included this sale. Paying after would quietly
+            // shrink every repayment.
+            self.add_to_treasury(merchant_id.clone(), paid.0);
             self.attribute_margin(&merchant_id, &item, count.0, paid.0);
             return true;
         }
@@ -742,37 +752,20 @@ impl Market {
                 },
             );
         }
-        if let Some(mut merchant) = self.merchants.get(&merchant_id).cloned() {
-            // DISCLOSED, not fixed: this clamp can still bite.
-            //
-            // The buyer's deposit went into the treasury, and `withdraw_treasury`
-            // can send it back out as real NEAR before this callback lands. If it
-            // did, there is less here than `paid` and the clamp absorbs the
-            // difference while the buyer is credited in full below — the contract
-            // then owes more than it holds.
-            //
-            // The sell side had the same shape and was fixed properly, by not
-            // promising anything until the goods arrive. The buy side cannot be
-            // fixed that way: the buyer's NEAR is already inside this contract
-            // and they are owed it back whatever the merchant has done since. The
-            // real remedy is to RESERVE in-flight funds so they cannot be
-            // withdrawn, which needs new contract state and therefore a state
-            // migration — see README.
-            //
-            // Until then the shortfall is at least loud. It used to be silent,
-            // which is how a clamp becomes a money bug: `saturating_sub` cannot
-            // fail, so nothing ever said it had happened.
-            let shortfall = paid.0.saturating_sub(merchant.treasury.0);
-            if shortfall > 0 {
-                env::log_str(&format!(
-                    "SOLVENCY WARNING: refunding {} to {buyer_id} but {merchant_id}'s treasury is \
-                     {} short — it was withdrawn while this purchase was in flight",
-                    paid.0, shortfall
-                ));
-            }
-            merchant.treasury = U128(merchant.treasury.0.saturating_sub(paid.0));
-            self.merchants.insert(merchant_id, merchant);
-        }
+        // Nothing to take back from the merchant, because nothing was given to
+        // it. That is the whole fix.
+        //
+        // This used to debit the treasury with `saturating_sub` while crediting
+        // the buyer in full. `withdraw_treasury` only needs `treasury > floor`,
+        // so the payment could have left the contract as real NEAR before this
+        // callback ran — and then the clamp absorbed the difference silently
+        // and `ledger_total` rose above the NEAR actually held.
+        //
+        // It was written up as unfixable without reserving in-flight funds in
+        // new state, and that was wrong: `withdraw_treasury` can only pay out
+        // what is IN the treasury, so money never put there is already
+        // reserved. No new field, no migration — the same shape as the fix the
+        // sell side got.
         self.credit(&buyer_id, paid.0);
         env::log_str(&format!(
             "delivery failed; purchase rolled back and {} yoctoNEAR credited to {}",
@@ -1038,11 +1031,20 @@ impl Market {
     /// `list_item` — which is precisely a dev patch. Anyone may now poke a thin
     /// merchant, and a function-call key can do it because nothing is attached.
     ///
-    /// Why it is not a griefing vector: the trigger is self-limiting. After one
-    /// restock the shelf sits at `RESTOCK_TARGET_STOCK`, and nobody can re-arm
-    /// it without *buying* the stock back down at a rising price. Repeated
-    /// poking is a no-op, and the merchant comes out ahead in cash each time —
-    /// see the arithmetic on `restock_plan`.
+    /// It IS a griefing vector, and this comment used to deny it.
+    ///
+    /// The claim was that the trigger is self-limiting: one restock puts the
+    /// shelf at `RESTOCK_TARGET_STOCK` and nobody can re-arm it without buying
+    /// the stock back down at a rising price. That holds only when the merchant
+    /// can afford the whole gap. When it cannot, `restock_plan` returns fewer
+    /// units, the shelf stays under `RESTOCK_TRIGGER_STOCK`, and the trigger is
+    /// still armed — so this can be called again, and again, draining a poor
+    /// merchant to its floor and closing its shop.
+    ///
+    /// Money is conserved throughout; availability is not. Disclosed in the
+    /// README rather than fixed, because the fix is a policy decision about who
+    /// may restock, not a bug fix. What is not acceptable is a comment saying
+    /// the problem cannot happen.
     ///
     /// Why it is not inside `buy` or `sell`: those paths already make a
     /// cross-contract call with a rollback, and adding a second, independent
@@ -1077,11 +1079,19 @@ impl Market {
         let mut merchant = merchant;
         merchant.treasury = U128(merchant.treasury.0 - cost);
         self.merchants.insert(merchant_id.clone(), merchant);
-        // The wholesaler is the house: the spend leaves the merchant and lands
-        // as the owner's withdrawable credit, so it is a pure internal transfer
-        // and the ledger total does not move.
-        let owner = self.owner_id.clone();
-        self.credit(&owner, cost);
+        // The wholesaler is the house, and it is paid in `on_restocked` once
+        // the goods exist — not here.
+        //
+        // This used to credit the owner immediately. That credit is
+        // withdrawable (`withdraw` zeroes it and sends real NEAR), and the
+        // unwind clawed it back with `saturating_sub` while restoring the
+        // merchant's treasury in full: spend it inside the window and the
+        // shortfall vanished into the clamp. `restock` is permissionless, so
+        // anyone could open that window. Third instance of the same shape,
+        // after `sell` and `buy`.
+        //
+        // In flight, the cost is owed to nobody and the ledger under-states
+        // what the contract holds. Under, never over.
 
         env::log_str(&format!(
             "{merchant_id} restocked {units} {item} at {} NEAR each, paying {} NEAR",
@@ -1114,6 +1124,11 @@ impl Market {
         #[callback_result] result: Result<(), PromiseError>,
     ) -> bool {
         if result.is_ok() {
+            // The house is paid here, once the goods it sold actually exist.
+            // Treasury out at `restock`, credit in here: still a pure internal
+            // transfer, so the ledger total ends where it started.
+            let owner = self.owner_id.clone();
+            self.credit(&owner, cost.0);
             return true;
         }
         let key = ListingKey { merchant_id: merchant_id.clone(), item: item.clone() };
@@ -1133,11 +1148,9 @@ impl Market {
                 Merchant { treasury: U128(merchant.treasury.0 + cost.0), ..merchant },
             );
         }
-        // Take the owner's credit back too, or the restock would have paid the
-        // house for goods that never arrived.
-        let owner = self.owner_id.clone();
-        let held = self.credits.get(&owner).copied().unwrap_or(U128(0)).0;
-        self.credits.insert(owner, U128(held.saturating_sub(cost.0)));
+        // The treasury restore above is now unconditional AND correct: the house
+        // was never paid, so there is nothing to take back and no clamp to hide
+        // a shortfall behind.
         env::log_str(&format!(
             "{merchant_id} could not mint {} {item}; the restock was unwound",
             units.0
@@ -1269,9 +1282,10 @@ impl Market {
                 ..listing
             },
         );
-        let mut merchant = self.merchants.get(&merchant_id).cloned().expect("unknown merchant");
-        merchant.treasury = U128(merchant.treasury.0 + total);
-        self.merchants.insert(merchant_id.clone(), merchant);
+        // Held, not paid — the same reason as in `buy`. Both entry points reach
+        // the same `on_items_delivered`, so both have to leave the money where
+        // the unwind can still find it.
+        require!(self.merchants.contains_key(&merchant_id), "unknown merchant");
 
         self.deliver(buyer_id, merchant_id, item, units, total)
     }
@@ -1449,6 +1463,14 @@ mod tests {
 
         let q = m.quote(ironmonger(), IRON.to_string(), 1);
         assert_eq!(q.stock, U128(246), "stock must fall by what was bought");
+        assert_eq!(
+            m.merchant(ironmonger()).unwrap().treasury.0, before,
+            "the shelf moves at once; the money waits for the delivery"
+        );
+        ctx("market.test.near".parse().unwrap(), 0);
+        assert!(m.on_items_delivered(
+            player(), ironmonger(), IRON.to_string(), U128(10), U128(total), Ok(()),
+        ));
         assert_eq!(m.merchant(ironmonger()).unwrap().treasury.0, before + total);
         assert!(q.demand_bps.0 > BPS, "a purchase must push demand up");
         assert!(q.unit_price.0 > BASE, "and the next quote must be dearer");
@@ -1541,11 +1563,23 @@ mod tests {
         conserved(&m, deposited, paid_out, "after fund_credit");
 
         // ── in: a payable purchase, paid exactly ────────────────────────────
+        //
+        // Held, not paid — the same shape as the sale further down. The buyer's
+        // NEAR is inside the contract and the merchant has not been credited,
+        // so mid-flight the ledger UNDER-states what is held. The identity is
+        // asserted either side of the delivery rather than in the middle of it.
         let total = m.quote(ironmonger(), IRON.to_string(), 4).total.0;
         ctx(player(), total);
         let _ = m.buy(ironmonger(), IRON.to_string(), 4);
         deposited += total;
-        conserved(&m, deposited, paid_out, "after an exact buy");
+        assert_eq!(ledger(&m), deposited - paid_out - total, "in flight during a purchase");
+        assert!(ledger(&m) < deposited - paid_out, "in flight, under — never over");
+
+        ctx("market.test.near".parse().unwrap(), 0);
+        m.on_items_delivered(
+            player(), ironmonger(), IRON.to_string(), U128(4), U128(total), Ok(()),
+        );
+        conserved(&m, deposited, paid_out, "after an exact buy was delivered");
 
         // ── in: a purchase that overpays. The excess must stay inside, as
         //       buyer credit, not vanish into the contract's pocket.
@@ -1553,7 +1587,9 @@ mod tests {
         ctx(player(), total + BASE * 3);
         let _ = m.buy(ironmonger(), IRON.to_string(), 4);
         deposited += total + BASE * 3;
-        conserved(&m, deposited, paid_out, "after an overpaid buy");
+        // The overpayment is credited at once; only the quoted total waits on
+        // the delivery.
+        assert_eq!(ledger(&m), deposited - paid_out - total, "overpayment back, principal in flight");
 
         // ── internal: a failed delivery rolls the purchase back ─────────────
         ctx("market.test.near".parse().unwrap(), 0);
@@ -1564,9 +1600,15 @@ mod tests {
         conserved(&m, deposited, paid_out, "after a delivery rollback");
 
         // ── internal: the agent path spends a budget ────────────────────────
+        let agent_total = m.quote(ironmonger(), IRON.to_string(), 2).total.0;
         ctx(player(), 0);
         let _ = m.buy_with_credit(ironmonger(), IRON.to_string(), 2);
-        conserved(&m, deposited, paid_out, "after buy_with_credit");
+        assert_eq!(ledger(&m), deposited - paid_out - agent_total, "in flight on the credit path");
+        ctx("market.test.near".parse().unwrap(), 0);
+        m.on_items_delivered(
+            player(), ironmonger(), IRON.to_string(), U128(2), U128(agent_total), Ok(()),
+        );
+        conserved(&m, deposited, paid_out, "after buy_with_credit was delivered");
 
         // ── internal: a sale pulled under an approval ───────────────────────
         //
@@ -1614,15 +1656,45 @@ mod tests {
         conserved(&m, deposited, paid_out, "after mt_on_transfer");
 
         // ── internal: a restock pays the house out of the treasury ──────────
+        //
+        // Reserved the same way: the treasury is debited at `restock`, which
+        // stops a second restock being planned against money already
+        // committed, and the house is credited only when the mint lands.
         ctx(owner(), 0);
         m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(8));
+        let treasury_before = m.merchant_treasury_for(ironmonger());
+        let stock_before = m.quote(ironmonger(), IRON.to_string(), 1).stock.0;
         ctx(player(), 0);
         let _ = m.restock(ironmonger(), IRON.to_string());
-        conserved(&m, deposited, paid_out, "after a restock");
+        let restock_cost = treasury_before - m.merchant_treasury_for(ironmonger());
+        let restock_units = m.quote(ironmonger(), IRON.to_string(), 1).stock.0 - stock_before;
+        assert_eq!(ledger(&m), deposited - paid_out - restock_cost, "in flight during a restock");
+        assert!(ledger(&m) < deposited - paid_out, "in flight, under — never over");
+
+        ctx("market.test.near".parse().unwrap(), 0);
+        m.on_restocked(
+            ironmonger(), IRON.to_string(), U128(restock_units), U128(restock_cost), Ok(()),
+        );
+        conserved(&m, deposited, paid_out, "after a restock was minted");
 
         // ── internal: and its rollback ──────────────────────────────────────
+        //
+        // Read AFTER `list_item`, which resets the shelf: taking the baseline
+        // before it measured the restock against the previous shelf and
+        // underflowed.
+        ctx(owner(), 0);
+        m.list_item(ironmonger(), IRON.to_string(), U128(BASE), U128(8));
+        let treasury_before = m.merchant_treasury_for(ironmonger());
+        let stock_before = m.quote(ironmonger(), IRON.to_string(), 1).stock.0;
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+        let rolled_cost = treasury_before - m.merchant_treasury_for(ironmonger());
+        let rolled_units = m.quote(ironmonger(), IRON.to_string(), 1).stock.0 - stock_before;
         ctx("market.test.near".parse().unwrap(), 0);
-        m.on_restocked(ironmonger(), IRON.to_string(), U128(1), U128(BASE), Err(PromiseError::Failed));
+        m.on_restocked(
+            ironmonger(), IRON.to_string(), U128(rolled_units), U128(rolled_cost),
+            Err(PromiseError::Failed),
+        );
         conserved(&m, deposited, paid_out, "after a restock rollback");
 
         // ── out: a credit withdrawal ────────────────────────────────────────
@@ -1686,7 +1758,13 @@ mod tests {
         let bought = m.quote(ironmonger(), IRON.to_string(), 2).total.0;
         let _ = m.buy(ironmonger(), IRON.to_string(), 2);
         deposited += BASE * 40;
-        conserved(&m, deposited, paid_out, "after the buy that precedes a margin split");
+        // In flight: the overpayment is credited at once, the quoted total is
+        // not. The margin split happens in the callback, where the merchant is
+        // paid first and the backer repaid out of what that leaves.
+        assert_eq!(
+            ledger(&m), deposited - paid_out - bought,
+            "the buy that precedes a margin split is in flight"
+        );
         ctx("market.test.near".parse().unwrap(), 0);
         m.on_items_delivered(
             player(), ironmonger(), IRON.to_string(), U128(2), U128(bought),
@@ -1840,6 +1918,8 @@ mod tests {
         let house_before = m.credit_of(owner()).0;
         let demand_before = m.quote(ironmonger(), IRON.to_string(), 1).demand_bps;
 
+        let stock_before = m.quote(ironmonger(), IRON.to_string(), 1).stock.0;
+
         // Anyone may poke it — this is called as a player, not as the owner.
         ctx(player(), 0);
         let _ = m.restock(ironmonger(), IRON.to_string());
@@ -1848,6 +1928,12 @@ mod tests {
         assert_eq!(after.stock, U128(128), "filled to the reference band");
 
         let spent = treasury_before - m.merchant_treasury_for(ironmonger());
+
+        // The mint lands, and that is when the house is paid for the goods.
+        ctx("market.test.near".parse().unwrap(), 0);
+        assert!(m.on_restocked(
+            ironmonger(), IRON.to_string(), U128(after.stock.0 - stock_before), U128(spent), Ok(()),
+        ));
         assert!(spent > 0, "the merchant paid for it");
         assert_eq!(
             m.credit_of(owner()).0 - house_before,
@@ -2261,8 +2347,24 @@ mod tests {
         // money invariant in miniature.
         let mut m = thin_market();
         let total_before = m.merchant_treasury_for(ironmonger()) + m.credit_of(owner()).0;
+        let treasury_before = m.merchant_treasury_for(ironmonger());
+        let stock_before = m.quote(ironmonger(), IRON.to_string(), 1).stock.0;
         ctx(player(), 0);
         let _ = m.restock(ironmonger(), IRON.to_string());
+
+        // In flight the cost has left the treasury and reached nobody, so the
+        // total is LOWER. Under, never over — the contract holds more than it
+        // admits owing until the goods exist.
+        let cost = treasury_before - m.merchant_treasury_for(ironmonger());
+        let units = m.quote(ironmonger(), IRON.to_string(), 1).stock.0 - stock_before;
+        assert_eq!(
+            m.merchant_treasury_for(ironmonger()) + m.credit_of(owner()).0, total_before - cost,
+            "in flight, the cost is owed to nobody"
+        );
+
+        ctx("market.test.near".parse().unwrap(), 0);
+        assert!(m.on_restocked(ironmonger(), IRON.to_string(), U128(units), U128(cost), Ok(())));
+
         let total_after = m.merchant_treasury_for(ironmonger()) + m.credit_of(owner()).0;
         assert_eq!(total_before, total_after, "a restock must be a pure internal transfer");
     }
@@ -2635,6 +2737,16 @@ mod tests {
 
         assert_eq!(m.credit_of(worker()), U128(BASE * 10 - total), "budget debited");
         assert_eq!(m.quote(ironmonger(), IRON.to_string(), 1).stock, U128(250));
+        assert_eq!(
+            m.merchant(ironmonger()).unwrap().treasury.0, treasury_before,
+            "not yet — the merchant is paid when the goods arrive, not when they are ordered"
+        );
+
+        // Delivery lands, and only now is the merchant paid.
+        ctx("market.test.near".parse().unwrap(), 0);
+        assert!(m.on_items_delivered(
+            worker(), ironmonger(), IRON.to_string(), U128(6), U128(total), Ok(()),
+        ));
         assert_eq!(m.merchant(ironmonger()).unwrap().treasury.0, treasury_before + total);
     }
 
@@ -2927,6 +3039,228 @@ mod tests {
         assert_eq!(m.merchant_treasury_for(ironmonger()), treasury_before, "treasury restored in full");
         assert_eq!(m.credit_of(seller()), U128(0), "and the seller is owed nothing");
         conserved(&m, deposited, paid_out, "after a failed pull");
+    }
+
+    /// The buy side had the same shape, and the same clamp.
+    ///
+    /// `settle_purchase` credited the merchant's treasury before the delivery
+    /// went out, so for the whole of that window the merchant held spendable
+    /// NEAR for goods that had not moved. `withdraw_treasury` sends real NEAR
+    /// out and only needs `treasury > floor`, so the proceeds could leave the
+    /// contract before `on_items_delivered` ever ran — and the unwind debited
+    /// the treasury with `saturating_sub` while crediting the buyer in full.
+    /// The difference was absorbed silently, and `ledger_total` rose above the
+    /// NEAR the contract actually holds.
+    ///
+    /// The fix is the one the sell side already had: promise nothing until the
+    /// goods arrive. Money that was never added to the treasury cannot be
+    /// withdrawn from it, so NOT crediting is the reservation — no new state,
+    /// no migration. The README said otherwise and the README was wrong.
+    #[test]
+    fn a_failed_delivery_must_not_debit_a_treasury_that_has_been_emptied() {
+        let deposited = BASE * 100;
+        let mut m = market();
+        conserved(&m, deposited, 0, "before the purchase");
+
+        let total = m.quote(ironmonger(), IRON.to_string(), 4).total.0;
+        let treasury_before = m.merchant_treasury_for(ironmonger());
+
+        // The buyer pays. Their NEAR is inside the contract from here on.
+        ctx(player(), total);
+        let _ = m.buy(ironmonger(), IRON.to_string(), 4);
+
+        assert_eq!(
+            m.merchant_treasury_for(ironmonger()), treasury_before,
+            "the merchant must NOT be paid before the goods have been delivered; \
+             that money is withdrawable and the unwind cannot rely on getting it back"
+        );
+        // In flight the payment belongs to neither account. The ledger
+        // under-states what the contract holds — under, never over.
+        assert_eq!(ledger(&m), deposited, "the payment is owed to nobody yet");
+
+        // 2. The step that used to make money: empty the treasury into real
+        //    NEAR while the delivery is still in flight.
+        ctx(ironmonger(), 0);
+        let _ = m.withdraw_treasury();
+        let emptied = m.merchant_treasury_for(ironmonger());
+        assert_eq!(emptied, BASE, "withdraw_treasury takes everything above the floor");
+
+        // 3. The delivery fails.
+        ctx("market.test.near".parse().unwrap(), 0);
+        let ok = m.on_items_delivered(
+            player(), ironmonger(), IRON.to_string(), U128(4), U128(total),
+            Err(PromiseError::Failed),
+        );
+        assert!(!ok);
+
+        assert_eq!(m.credit_of(player()), U128(total), "the buyer is refunded in full");
+        assert_eq!(
+            m.merchant_treasury_for(ironmonger()), emptied,
+            "and nothing is clawed back from a treasury that never received the payment"
+        );
+        // The whole point. Against the old ordering this assertion fails by
+        // exactly `total`: the buyer was credited out of money the merchant had
+        // already withdrawn.
+        //
+        // `deposited + total` because the buyer's payment is itself NEAR
+        // arriving in the contract; `paid_out` is everything `withdraw_treasury`
+        // sent back out, which is the treasury down to its floor.
+        let paid_out = BASE * 100 - BASE;
+        conserved(&m, deposited + total, paid_out, "after a delivery that failed");
+    }
+
+    /// And the other half of the buy side: a delivery that lands pays the
+    /// merchant, and the ledger is whole rather than merely solvent.
+    #[test]
+    fn a_successful_delivery_pays_the_merchant_and_closes_the_ledger() {
+        let deposited = BASE * 100;
+        let mut m = market();
+        let total = m.quote(ironmonger(), IRON.to_string(), 4).total.0;
+        let treasury_before = m.merchant_treasury_for(ironmonger());
+
+        ctx(player(), total);
+        let _ = m.buy(ironmonger(), IRON.to_string(), 4);
+        assert_eq!(ledger(&m), deposited, "in flight, owed to nobody");
+
+        ctx("market.test.near".parse().unwrap(), 0);
+        assert!(m.on_items_delivered(
+            player(), ironmonger(), IRON.to_string(), U128(4), U128(total), Ok(()),
+        ));
+
+        assert_eq!(
+            m.merchant_treasury_for(ironmonger()), treasury_before + total,
+            "now the merchant is paid"
+        );
+        conserved(&m, deposited + total, 0, "after a delivery that landed");
+    }
+
+    /// `buy_with_credit` is the agent and scoped-key path, and it shares
+    /// `settle_purchase`, so it has to hold the same property — reached from
+    /// the other entry point, because the two differ in where the money comes
+    /// from and that is exactly what the unwind has to put back.
+    #[test]
+    fn a_failed_delivery_on_the_credit_path_refunds_credit_not_a_deposit() {
+        let deposited = BASE * 100;
+        let mut m = market();
+
+        // Fund the buyer's budget: a deposit in, credited to them.
+        let budget = BASE * 20;
+        ctx(owner(), budget);
+        m.fund_credit(player());
+        conserved(&m, deposited + budget, 0, "after funding the budget");
+
+        let total = m.quote(ironmonger(), IRON.to_string(), 4).total.0;
+        let treasury_before = m.merchant_treasury_for(ironmonger());
+
+        ctx(player(), 0);
+        let _ = m.buy_with_credit(ironmonger(), IRON.to_string(), 4);
+
+        assert_eq!(m.credit_of(player()), U128(budget - total), "the budget is debited up front");
+        assert_eq!(
+            m.merchant_treasury_for(ironmonger()), treasury_before,
+            "but the merchant is not paid until the goods arrive"
+        );
+
+        ctx(ironmonger(), 0);
+        let _ = m.withdraw_treasury();
+
+        ctx("market.test.near".parse().unwrap(), 0);
+        assert!(!m.on_items_delivered(
+            player(), ironmonger(), IRON.to_string(), U128(4), U128(total),
+            Err(PromiseError::Failed),
+        ));
+
+        assert_eq!(m.credit_of(player()), U128(budget), "the budget is whole again");
+        conserved(&m, deposited + budget, BASE * 100 - BASE, "after a failed credit purchase");
+    }
+
+    /// A restock that fails to mint had the same shape a THIRD time, and this
+    /// one the audit missed.
+    ///
+    /// `restock` credited the owner before the mint and `on_restocked` restored
+    /// the merchant's treasury unconditionally while clawing the owner's credit
+    /// back with `saturating_sub`. The owner is the house and `withdraw` zeroes
+    /// their credit and pays out real NEAR, so spending it inside the window
+    /// left `ledger_total` above what the contract holds. `restock` is
+    /// permissionless, so anyone can open the window.
+    #[test]
+    fn a_failed_mint_must_not_restore_a_treasury_it_cannot_debit() {
+        let deposited = BASE * 100;
+        let mut m = market();
+
+        // Buy the shelf down below RESTOCK_TRIGGER_STOCK (32) so a restock is
+        // allowed at all: 256 - 230 leaves 26.
+        let total = m.quote(ironmonger(), IRON.to_string(), 230).total.0;
+        ctx(player(), total);
+        let _ = m.buy(ironmonger(), IRON.to_string(), 230);
+        ctx("market.test.near".parse().unwrap(), 0);
+        assert!(m.on_items_delivered(
+            player(), ironmonger(), IRON.to_string(), U128(230), U128(total), Ok(()),
+        ));
+        let banked = deposited + total;
+        conserved(&m, banked, 0, "after the shelf was bought down");
+
+        let owner_credit_before = m.credit_of(owner()).0;
+        let treasury_before = m.merchant_treasury_for(ironmonger());
+        let stock_before = m.quote(ironmonger(), IRON.to_string(), 1).stock.0;
+
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+
+        let cost = treasury_before - m.merchant_treasury_for(ironmonger());
+        let units = m.quote(ironmonger(), IRON.to_string(), 1).stock.0 - stock_before;
+        assert!(cost > 0, "the restock should have cost the merchant something");
+        assert_eq!(
+            m.credit_of(owner()), U128(owner_credit_before),
+            "the house must NOT be paid before the goods have been minted; \
+             that credit is withdrawable and the unwind cannot rely on it"
+        );
+        assert_eq!(ledger(&m), banked - cost, "in flight, the cost is owed to nobody");
+
+        // The step that used to make money: the house takes its credit out
+        // while the mint is still in flight. There is nothing there to take.
+        assert_eq!(m.credit_of(owner()), U128(owner_credit_before), "nothing to race");
+
+        // The mint fails.
+        ctx("market.test.near".parse().unwrap(), 0);
+        assert!(!m.on_restocked(ironmonger(), IRON.to_string(), U128(units), U128(cost), Err(PromiseError::Failed)));
+
+        assert_eq!(m.merchant_treasury_for(ironmonger()), treasury_before, "treasury restored in full");
+        assert_eq!(m.credit_of(owner()), U128(owner_credit_before), "and the house is owed nothing extra");
+        conserved(&m, banked, 0, "after a mint that failed");
+    }
+
+    /// The other half: a mint that lands pays the house.
+    #[test]
+    fn a_successful_mint_pays_the_house_and_closes_the_ledger() {
+        let deposited = BASE * 100;
+        let mut m = market();
+        let total = m.quote(ironmonger(), IRON.to_string(), 230).total.0;
+        ctx(player(), total);
+        let _ = m.buy(ironmonger(), IRON.to_string(), 230);
+        ctx("market.test.near".parse().unwrap(), 0);
+        assert!(m.on_items_delivered(
+            player(), ironmonger(), IRON.to_string(), U128(230), U128(total), Ok(()),
+        ));
+        let banked = deposited + total;
+
+        let owner_credit_before = m.credit_of(owner()).0;
+        let treasury_before = m.merchant_treasury_for(ironmonger());
+        let stock_before = m.quote(ironmonger(), IRON.to_string(), 1).stock.0;
+
+        ctx(player(), 0);
+        let _ = m.restock(ironmonger(), IRON.to_string());
+        let cost = treasury_before - m.merchant_treasury_for(ironmonger());
+        let units = m.quote(ironmonger(), IRON.to_string(), 1).stock.0 - stock_before;
+
+        ctx("market.test.near".parse().unwrap(), 0);
+        assert!(m.on_restocked(ironmonger(), IRON.to_string(), U128(units), U128(cost), Ok(())));
+
+        assert_eq!(
+            m.credit_of(owner()), U128(owner_credit_before + cost),
+            "now the house is paid for the goods it supplied"
+        );
+        conserved(&m, banked, 0, "after a mint that landed");
     }
 
     /// The other half: a pull that succeeds pays the seller, and the ledger is
