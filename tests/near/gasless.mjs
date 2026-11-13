@@ -775,6 +775,8 @@ test('a sign-in that died half-way is resumed, not stranded forever', async (t) 
   assert.equal(strandedKeys.filter((k) => k.fullAccess).length, 1,
     'the account should be left holding the live full-access key — that is the state being recovered from')
   assert.ok(vault.has(accountId), 'the bootstrap key must have been parked BEFORE the account was created')
+  // Kept for the last case below, where this key is dead but still parked.
+  const deadKey = vault.get(accountId)
 
   // The config is fixed and the player signs in again. Same identity, so the
   // same derived account — the one already sitting there half-finished.
@@ -806,6 +808,19 @@ test('a sign-in that died half-way is resumed, not stranded forever', async (t) 
     },
   })
   assert.equal(approved, true, 'the resumed sign-in must leave the market approved to pull materials')
+
+  // One state cannot be resumed, and it should say so rather than fail
+  // obscurely: step 3 landed, so the account is correctly restricted and holds
+  // no full-access key — but the scoped key it was restricted to was generated
+  // in memory and never returned to anyone. No key left anywhere can issue
+  // another. Modelled here by re-parking the key that is now dead on chain.
+  vault.set(accountId, deadKey)
+  const hopeless = await fixed.signIn('unlucky-player').then(() => null, (e) => e)
+  console.log(`  dead key       ${hopeless?.code}`)
+  assert.equal(hopeless?.code, 'ACCOUNT_ALREADY_RESTRICTED',
+    `expected a named refusal, got ${hopeless?.code}: ${hopeless?.message}`)
+  assert.equal(vault.has(accountId), false,
+    'and a bootstrap key that no longer exists on chain must not be kept')
 })
 
 test('without a store, a half-finished account behaves exactly as it always did', async (t) => {

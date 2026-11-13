@@ -95,6 +95,10 @@ const STATUS = {
   NO_FETCH: 500,
   // Ours as well: the server is not set up to do what it was asked.
   ONBOARDING_MISCONFIGURED: 503,
+  // Ours, and permanent. The account finished onboarding and its scoped key
+  // was never recorded, so no server can act for it and retrying cannot help.
+  // 410 rather than 503: 503 invites a retry, and there is nothing to retry.
+  ACCOUNT_ALREADY_RESTRICTED: 410,
 
   // Link codes.
   LINK_CODE_INVALID: 401,
@@ -316,6 +320,18 @@ export function createPlayService({
                 'Players already onboarded can still sign in.',
               )
             }
+            // An account whose sign-in got all the way through step 3 before
+            // dying is sound on chain and unusable: it holds a scoped key that
+            // was generated in memory and never handed to anyone, and no key
+            // left anywhere can issue another. That is a deployment fact, not
+            // a verdict on the player's login — reporting it as
+            // IDENTITY_REJECTED is the same mislabelling the two branches above
+            // exist to undo.
+            if (e?.code === 'ACCOUNT_ALREADY_RESTRICTED') {
+              throw new PlayRefusal('ACCOUNT_ALREADY_RESTRICTED',
+                'this account finished onboarding but its signing key was never recorded, ' +
+                'so no server can act for it. Your login is fine; the account is not recoverable.')
+            }
             // Surface the specific refusal when the verifier gave one. The
             // generic code remains the fallback, so nothing depends on a new
             // one existing.
@@ -352,7 +368,10 @@ export function createPlayService({
             // claimed a method the key did not grant once already.
             permittedMethods: scoped?.methodNames ?? [],
           })
-          log({ event: 'signed_in', accountId, created: Boolean(result.created) })
+          log({
+            event: 'signed_in', accountId, created: Boolean(result.created),
+            ...(result.resumed ? { resumed: true } : {}),
+          })
 
           return ok({
             sessionId,

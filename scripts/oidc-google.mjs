@@ -17,6 +17,27 @@
 //   3. this exchanges that code for an id_token at Google's token endpoint
 //   4. backend/near/oidc.mjs verifies it against Google's LIVE JWKS
 //
+// WHY NOT THE DEVICE FLOW, which would need no configuration at all. Google's
+// Device Authorization Grant lets a user type a code at google.com/device, so
+// it needs no registered redirect URI — which is exactly the thing currently
+// blocking this script. It was tried against the configured client id, and
+// Google refused with HTTP 401:
+//
+//   invalid_client: Only clients of type 'TVs and Limited Input devices' can
+//   use the OAuth 2.0 flow for TV and Limited-Input Device Applications.
+//
+// Creating such a client is possible, but it is a different client id, so
+// `.local/oidc.json`'s audience would have to change with it — and that is the
+// same amount of console work as registering a redirect URI on the client that
+// already exists, for a flow this repository does not otherwise use. (The
+// derived account id would survive: it is sha256 of provider and subject, and
+// Google's `sub` is stable across clients within one project. The audience is
+// not part of it.)
+//
+// So the loopback flow below stands, and what it needs is one redirect URI
+// registered on the existing client. Recorded here so the next person does not
+// spend the attempt finding out.
+//
 // ON THE CLIENT SECRET. It is read into memory for step 3 and sent to exactly
 // one place, https://oauth2.googleapis.com/token, over TLS. It is never
 // printed, never logged, never written to a file, and never included in an
