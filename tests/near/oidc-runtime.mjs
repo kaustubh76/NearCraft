@@ -105,7 +105,14 @@ test('a genuine token is verified over a real HTTP JWKS fetch, and derives the a
     // here independently, so the test does not simply agree with itself — and
     // computed FIRST, because the service refuses a sign-in for an account it
     // holds no key for, which is the right behaviour and had to be fed.
-    const expected = `p-${createHash('sha256').update('test:subject-abc').digest('hex').slice(0, 8)}.${ROOT}`
+    //
+    // The WIDTH is pinned here on purpose, not imported. It was 8 while the
+    // digest was 32 bits, and widening `ID_BYTES` to 8 bytes broke this test —
+    // which is the independent computation doing its job. Changing the
+    // derivation should cost a deliberate edit in two places; calling
+    // `playerAccountId` here instead would make this agree with whatever the
+    // module does and assert nothing about the width at all.
+    const expected = `p-${createHash('sha256').update('test:subject-abc').digest('hex').slice(0, 16)}.${ROOT}`
 
     // Only the chain write is faked. The verifier and the derivation are real.
     let derived = null

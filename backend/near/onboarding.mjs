@@ -34,14 +34,37 @@ export class OnboardingError extends Error {
 }
 
 /// NEAR account ids are lowercase and limited to 64 bytes, so a hash prefix is
-/// used rather than anything derived from the address itself. 8 hex characters
-/// is 32 bits — ample for a game, and it keeps the id short enough to read out.
-const ID_BYTES = 4
+/// used rather than anything derived from the address itself.
+///
+/// EIGHT bytes, not four. This was 4 — 32 bits — justified as "ample for a
+/// game, and it keeps the id short enough to read out". It is not ample, and
+/// the length argument did not hold:
+///
+///   * A collision is not a cosmetic clash. `signIn` tests only whether the
+///     derived account EXISTS, so a second identity colliding with a first
+///     takes the `created: false` branch, and the service then issues it a
+///     session bound to the FIRST player's stored key — custodial control of
+///     someone else's credit, holdings and sell rights. The original identity
+///     is never stored, so nothing downstream can notice the mismatch.
+///   * 32 bits is a few minutes of sha256 to hit deliberately, and on the
+///     seeded login path the subject is whatever string the caller sends
+///     (`scripts/serve-play.mjs`), so an attacker picks the preimage.
+///   * The id was 38 characters for this root, against a 64-byte limit. The
+///     space was there the whole time.
+///
+/// 64 bits is a birthday bound around 2^32 accounts rather than 2^16, and it
+/// makes `ACCOUNT_ID_TOO_LONG` below a live guard instead of dead code: a long
+/// root now genuinely cannot fit, and is refused rather than truncated.
+const ID_BYTES = 8
 
 /// The transaction hash nearcore reports, under either of the two names the
 /// RPC uses for it. Same shape as `transactionHash` in signer.mjs; duplicated
 /// rather than imported so this module keeps depending on nothing of ours.
 const hashOf = (outcome) => outcome?.transaction?.hash ?? outcome?.transaction_outcome?.id ?? null
+
+/// Each dot-separated part is alphanumeric, may contain `-` or `_` internally,
+/// and must begin and end alphanumeric.
+const ROOT_PATTERN = /^(?:[a-z\d]+(?:[-_][a-z\d]+)*\.)*[a-z\d]+(?:[-_][a-z\d]+)*$/
 
 /// Derive a player account id from a verified identity.
 ///
@@ -53,7 +76,13 @@ const hashOf = (outcome) => outcome?.transaction?.hash ?? outcome?.transaction_o
 /// is a one-way hash, so the on-chain account leaks nothing about the login.
 export function playerAccountId(provider, subject, root) {
   if (!provider || !subject) throw new OnboardingError('IDENTITY_INCOMPLETE', 'provider and subject are required')
-  if (!root || !/^[a-z0-9._-]{2,48}$/.test(root)) throw new OnboardingError('ROOT_MALFORMED', String(root))
+  // NEAR's actual account-id grammar, not an approximation of it. The old
+  // pattern was `[a-z0-9._-]{2,48}`, which accepts `-x`, `x-`, `_x` and `a..b`
+  // — all of which nearcore refuses, so "the id is always valid" was only ever
+  // true of the digest half.
+  if (!root || root.length < 2 || root.length > 48 || !ROOT_PATTERN.test(root)) {
+    throw new OnboardingError('ROOT_MALFORMED', String(root))
+  }
   const digest = createHash('sha256').update(`${provider}:${subject}`).digest('hex').slice(0, ID_BYTES * 2)
   const id = `p-${digest}.${root}`
   if (id.length > 64) throw new OnboardingError('ACCOUNT_ID_TOO_LONG', id)

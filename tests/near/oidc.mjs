@@ -253,7 +253,7 @@ test('the identity it returns is exactly what onboarding.signIn consumes', async
   // And it derives a usable, deterministic NEAR account id — which is the
   // whole reason this function exists.
   const accountId = playerAccountId(identity.provider, identity.subject, 'nearcraftmc.testnet')
-  assert.match(accountId, /^p-[0-9a-f]{8}\.nearcraftmc\.testnet$/)
+  assert.match(accountId, /^p-[0-9a-f]{16}\.nearcraftmc\.testnet$/)
   assert.equal(
     accountId,
     playerAccountId(identity.provider, identity.subject, 'nearcraftmc.testnet'),

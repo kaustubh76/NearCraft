@@ -11,7 +11,7 @@ test('the same login always derives the same account', () => {
   const a = playerAccountId('google', 'alice@example.com', ROOT)
   const b = playerAccountId('google', 'alice@example.com', ROOT)
   assert.equal(a, b, 'a player must not get a new account on every sign-in')
-  assert.match(a, /^p-[0-9a-f]{8}\.nearcraftmc\.testnet$/)
+  assert.match(a, /^p-[0-9a-f]{16}\.nearcraftmc\.testnet$/)
 })
 
 test('the same address at two providers is two players', () => {
@@ -33,15 +33,63 @@ test('the account id leaks nothing about the identity', () => {
 test('different subjects do not collide', () => {
   const seen = new Set()
   for (let i = 0; i < 2_000; i++) seen.add(playerAccountId('google', `user${i}@example.com`, ROOT))
-  // 32 bits of hash over 2,000 ids: a couple of collisions would be unlucky but
-  // possible, so this asserts the derivation is working, not that it is perfect.
-  assert.ok(seen.size > 1_990, `expected near-2000 distinct ids, got ${seen.size}`)
+  assert.equal(seen.size, 2_000, `expected 2000 distinct ids, got ${seen.size}`)
+})
+
+test('the derivation carries 64 bits, not 32', () => {
+  // Why this is asserted rather than left to the comment: at 32 bits a
+  // deliberate collision is minutes of sha256, and a collision is not a
+  // cosmetic clash here. `signIn` only tests whether the derived account
+  // EXISTS, so the colliding identity gets a session bound to the FIRST
+  // player's stored key — custodial control of someone else's balance. The
+  // original identity is never stored, so nothing downstream can tell.
+  const digest = playerAccountId('google', 'alice@example.com', ROOT)
+    .slice('p-'.length, -(`.${ROOT}`.length))
+  assert.match(digest, /^[0-9a-f]{16}$/, `expected 16 hex characters (64 bits), got "${digest}"`)
+})
+
+test('an exact collision would be caught by the account id, not by the login', () => {
+  // The property that makes the width matter: two identities colliding produce
+  // the SAME account id, and nothing else in the system distinguishes them.
+  // Same preimage, same id — which is what makes it idempotent for one person
+  // and dangerous for two.
+  assert.equal(
+    playerAccountId('google', 'alice@example.com', ROOT),
+    playerAccountId('google', 'alice@example.com', ROOT),
+  )
+  assert.notEqual(
+    playerAccountId('google', 'alice@example.com', ROOT),
+    playerAccountId('google', 'alice@example.co', ROOT),
+  )
 })
 
 test('an account id can never exceed NEAR\'s 64-byte limit', () => {
-  const id = playerAccountId('google', 'someone@example.com', 'a'.repeat(48))
-  assert.ok(id.length <= 64, `${id.length} bytes`)
+  // `p-` + 16 hex + `.` = 19 characters, so a root of 45 is the longest that
+  // fits and 46 is the shortest that cannot.
+  const longest = playerAccountId('google', 'someone@example.com', 'a'.repeat(45))
+  assert.equal(longest.length, 64, `the longest fitting id should be exactly 64, got ${longest.length}`)
+
+  // ACCOUNT_ID_TOO_LONG was UNREACHABLE while the digest was 32 bits: the
+  // worst case was 59 characters, so the guard could never fire and nothing
+  // tested it. Widening the digest brought it to life, and this is the test
+  // that reaches it. A guard that cannot fire is not a guard.
+  assert.throws(() => playerAccountId('google', 'someone@example.com', 'a'.repeat(46)),
+    (e) => e.code === 'ACCOUNT_ID_TOO_LONG')
+
   assert.throws(() => playerAccountId('google', 'x', 'a'.repeat(49)), (e) => e.code === 'ROOT_MALFORMED')
+})
+
+test('a root NEAR itself would refuse is refused here too', () => {
+  // The old pattern was [a-z0-9._-]{2,48}, which let all of these through —
+  // so "the derived id is always a valid NEAR account id" held for the digest
+  // half only.
+  for (const bad of ['-x', 'x-', '_x', 'x_', 'a..b', '.a', 'a.', 'A.testnet', 'x', 'a-.b']) {
+    assert.throws(() => playerAccountId('seed', 's', bad),
+      (e) => e.code === 'ROOT_MALFORMED', `"${bad}" should be refused`)
+  }
+  for (const ok of ['testnet', 'nearcraftmc.testnet', 'a-b.testnet', 'a_b.near', 'x1.y2.near']) {
+    assert.ok(playerAccountId('seed', 's', ok).endsWith(`.${ok}`), `"${ok}" should be accepted`)
+  }
 })
 
 test('incomplete identities and malformed roots are refused', () => {
