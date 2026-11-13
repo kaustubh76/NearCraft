@@ -272,6 +272,18 @@ baseline project, where it was the thing that made the evidence worth reading.
   tree.** So commit and push before building, or you will ship bytes that do not
   match the source anyone else can fetch — and the mismatch is invisible,
   because the artifact is perfectly self-consistent.
+- **Do not commit WHILE a reproducible build is running.** `npm run
+  build:reproducible` builds the three contracts in sequence, and each one reads
+  HEAD when it starts. Committing between them gives each contract a different
+  commit — and the commit is embedded in the wasm, so the bytes differ too. One
+  run produced `items` at one commit and `market` at the next, which would have
+  deployed three contracts naming three commits while the whole point of the
+  exercise was to put them on one.
+  Worse, cargo-near records the HEAD it read at the *start* and then clones at
+  the moment it reaches that contract. Commit in between and the artifact is
+  built from one tree while claiming another. Freeze the tree, run the build,
+  then commit. Editing is safe — the clone drops uncommitted changes — but a
+  commit moves the thing every later contract is about to read.
 - **A green `verify:deployed` used to be compatible with an edited contract.**
   It hashes the wasm in `contracts/target/`, so editing a contract and not
   rebuilding left all three printing MATCH — the A3 bug class living inside the
