@@ -63,11 +63,26 @@ npm run web       # the market page, reading those same contracts live in a brow
 npm run play      # the same page, playable: sign in and trade (needs .local/ keys)
 npm run mc:test   # the Minecraft plugin's Java checks, offline (needs a JDK)
 npm run mc:server # Paper + the plugin, driven from its console (downloads 55 MiB)
+npm run mc:up     # ONE command: brings everything up, proves it, tears it down
 npm run mc:bot    # a headless client joins and plays the loop for real
 npm run oidc:dev  # a local OIDC issuer, so the real login path can be driven
 npm run play:oidc # the service against it: /api/health reports verifier "oidc"
 npm run oidc:verify -- "<token>"   # verify a REAL provider token, print its account
 ```
+
+**`npm run mc:up` is the one to run.** It pre-flights what can be known before
+spending three minutes booting a server — JDK, disk, ports, the relayer's gas,
+and whether the player's budget covers the run it is about to attempt — then
+starts the OIDC issuer and the play service itself, boots Paper, proves the
+loop, and tears down only what it started. `-- --oidc` for a real token through
+a one-time code, `-- --keep` to leave the server joinable, and `-- --sandbox`
+to run the whole thing against a **local node** with no balance ceiling at all,
+where `deploy.mjs` builds the full-size economy (5 merchants, scale 1) instead
+of the 1% one testnet can afford. A sandbox run is not a public-chain run and
+nothing from it goes into `evidence/live/`.
+
+The three scripts below still work on their own; `mc:up` just spawns them in the
+right order with the right environment, which is what used to be the manual part.
 
 **`npm run mc:server` is the same loop inside Minecraft.** It fetches a
 hash-pinned Paper 26.3 build 231, builds and installs the plugin, boots the
@@ -99,12 +114,20 @@ rather than failing obscurely:
   works, and the full new-player path — create, approve while a bootstrap key
   still exists, then install the scoped key and delete the bootstrap one in the
   same transaction — runs against a real node in `tests/near/gasless.mjs`.
-- The demo player's **spend budget is finite**, and only the contract owner can
-  top it up, which needs that same root balance. When it runs out a buy comes
-  back `502 INNER_CALL_FAILED` carrying the contract's own words — *"insufficient
-  credit for this purchase"*. **Sell something first:** the player holds iron,
-  and selling pays credit back in. That is the economy working, not a bug, and
-  it is why the panel shows your credit beside your balance.
+- The demo player's **spend budget is finite**, and this document used to say
+  only the contract owner could top it up. **That was wrong.**
+  `market.fund_credit` has no `assert_owner()` — `register_merchant` directly
+  above it does — so it is **permissionless**: any account that can attach a
+  deposit may fund any player's budget. That is deliberate, because an agent
+  holding a function-call key cannot attach NEAR and so cannot fund itself.
+  `npm run topup` uses it, signing with `worker-1` and keeping the gas headroom
+  nearcore reserves; the budget now sits at 0.05 NEAR, about **62 round trips**
+  at the merchant's spread, and `npm run mc:up` tops it up on its own when a run
+  cannot afford itself. When it does run out a buy comes back
+  `502 INNER_CALL_FAILED` carrying the contract's own words — *"insufficient
+  credit for this purchase"* — and selling pays credit back in. That is the
+  economy working, not a bug, and it is why the panel shows credit beside
+  balance.
 
 **And the headline claim, measured on the public chain.** A player bought 2 iron
 and sold them back, holding one function-call key and no full-access key:

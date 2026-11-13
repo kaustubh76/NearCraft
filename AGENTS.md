@@ -44,9 +44,21 @@ And the Minecraft side, which needs a JDK rather than the wasm:
 ```sh
 brew install openjdk@25           # Paper 26.3 refuses anything older
 npm run mc:test                   # the plugin's Java checks, offline, ~2s
-npm run play                      # in another terminal — the plugin is its client
-npm run mc:server -- --token player-1 --trade
+npm run mc:up                     # ← one command: brings it all up and proves it
+npm run mc:up -- --sandbox        # the same, on a local node, no balance ceiling
+npm run mc:up -- --keep           # leave the server joinable
 ```
+
+`mc:up` is the one to reach for. It pre-flights what is knowable in seconds,
+starts the issuer and the play service itself, boots Paper, proves the loop and
+stops only what it started — a service you were already using survives it. The
+three scripts it spawns (`oidc-dev`, `serve-play`, `mc-bot`/`mc-server`) all
+still work on their own; `mc:up` exists because running them in the right order
+by hand was where every failure came from once the code was right.
+
+`npm run topup` refills the player's spend budget. `market.fund_credit` is
+permissionless — it has no `assert_owner()` — so any funded account can do it,
+which is why this needs neither the root account nor a faucet.
 
 `npm run agent` is the single best summary of what this project does, and
 `npm run mc:server -- --token player-1 --trade` is the one that looks like a
@@ -118,6 +130,25 @@ baseline project, where it was the thing that made the evidence worth reading.
   account), and the plugin's inventory moves are not atomic with the chain. `games` requirement 4 is not "a
   week in a minute". These are stated in `README.md` and `docs/MINECRAFT.md` and
   must stay stated.
+- **A wait that does not wait is a check that cannot fail.** `mc-up`'s poller
+  tested `test()` for truthiness, and an async predicate returns a Promise,
+  which is always truthy — so every wait returned on its first tick. The live
+  run passed anyway because the service happened to be quick; the sandbox run
+  crashed reading a field off the null that came back. Await the predicate.
+- **Put the code in the branch you meant.** `--serve` was inserted at the end of
+  the `catch` block instead of the `try`, so the server stayed up only when
+  something had gone wrong, and stopped on a clean run. It read correctly and
+  did the opposite of what it said.
+- **Derive the network, never assert it.** Every manifest `deploy.mjs` wrote
+  said `network: 'testnet'`, including the ones written against a local
+  sandbox — and that label travelled, so a sandbox transaction was retained in
+  `evidence/live/` as though an explorer could confirm it. It is a fact about
+  the RPC URL and is now read off the RPC URL, and `mc-bot` refuses to write
+  into `evidence/live/` for anything that is not a public chain.
+- **A config fallback changes behaviour you did not ask it to change.** Adding
+  `.local/oidc.json` as a fallback silently put every run into real-OIDC mode,
+  so `mc:up --sandbox` refused its own seeded player as a malformed token. Any
+  orchestrator must be able to state the mode it means — `NEARCRAFT_LOGIN`.
 - **An unspecified behaviour is not a bug until you check.** `Items.take` moved
   blocks by mutating the array `Inventory.getContents()` returns, which the
   Bukkit API guarantees nothing about. Rewriting it on `removeItemAnySlot` was

@@ -480,7 +480,20 @@ for (const f of findings) console.log(`  ${f.ok ? 'ok  ' : 'FAIL'}  ${f.what}`)
 console.log(`\n  ${passed} passed, ${failed} failed`)
 console.log(`  log  ${logPath}`)
 
-if (failed === 0) {
+/// A public chain, or a local node pretending to be one.
+///
+/// evidence/live/ is for records anyone can verify on an explorer. A sandbox
+/// hash cannot be, so it does not go there — this check exists because a
+/// sandbox run DID write one, labelled testnet, because the manifest said so.
+const PUBLIC_CHAINS = new Set(['testnet', 'mainnet'])
+const network = service?.network ?? 'unknown'
+
+if (failed === 0 && !PUBLIC_CHAINS.has(network)) {
+  console.log(`  not retained  the network is "${network}", not a public chain.`)
+  console.log('                evidence/live/ is for records an explorer can confirm.')
+}
+
+if (failed === 0 && PUBLIC_CHAINS.has(network)) {
   const record = {
     note: 'A headless Minecraft client — a bot, not a person — joined a Paper server, signed in '
       + (OIDC
@@ -493,7 +506,7 @@ if (failed === 0) {
       + 'online-mode=false because a headless client has no Mojang account; npm run mc:server, '
       + 'which is the documented way to run this, keeps online-mode=true.',
     recorded_at: new Date().toISOString(),
-    network: service?.network ?? 'testnet',
+    network,
     paper: `${runtime.artifacts.paper.version} build ${runtime.artifacts.paper.build}`,
     client: `mineflayer ${runtime.bot.mineflayer} speaking ${runtime.bot.protocol} through ViaVersion ${runtime.artifacts.ViaVersion.version}`,
     username: USERNAME,

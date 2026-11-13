@@ -15,8 +15,30 @@ import { Account, KeyPair, actions, teraToGas } from 'near-api-js'
 import { catalog, fromYocto, names, provider, rootAccount, rootAccountId, toYocto, RPC_URL } from './near-env.mjs'
 import { createOnboarding } from '../backend/near/onboarding.mjs'
 
-const KEYS_PATH = new URL('../.local/nearcraft-keys.json', import.meta.url)
-const MANIFEST_PATH = new URL('../deployment.json', import.meta.url)
+/// Where the manifest and the keys live.
+///
+/// Overridable so a local sandbox run never touches the committed testnet
+/// manifest. `deploy.mjs` writes whatever these point at, and
+/// `serve-play.mjs` reads the same two variables, so one pair of env vars
+/// moves the whole deployment somewhere disposable.
+///
+/// The default is exactly what it always was.
+const MANIFEST_PATH = process.env.NEARCRAFT_MANIFEST
+  ? new URL(`file://${process.env.NEARCRAFT_MANIFEST}`)
+  : new URL('../deployment.json', import.meta.url)
+const KEYS_PATH = process.env.NEARCRAFT_KEYS
+  ? new URL(`file://${process.env.NEARCRAFT_KEYS}`)
+  : new URL('../.local/nearcraft-keys.json', import.meta.url)
+/// Which chain an RPC URL belongs to. Loopback is a sandbox, whatever else it
+/// may be configured to pretend.
+function networkOf(url) {
+  const host = (() => { try { return new URL(url).hostname } catch { return '' } })()
+  if (host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '0.0.0.0') return 'sandbox'
+  if (/mainnet/.test(url)) return 'mainnet'
+  if (/testnet|test\.rpc/.test(url)) return 'testnet'
+  return host || 'unknown'
+}
+
 const WASM = {
   items: new URL('../contracts/target/near/nearcraft_items/nearcraft_items.wasm', import.meta.url),
   market: new URL('../contracts/target/near/nearcraft_market/nearcraft_market.wasm', import.meta.url),
@@ -46,7 +68,10 @@ const WASM = {
 /// possible — it just has to be on purpose.
 const priorScale = await (async () => {
   try {
-    const prior = JSON.parse(await readFile(new URL('../deployment.json', import.meta.url), 'utf8'))
+    // MANIFEST_PATH, not a second hardcoded copy of the path. The duplicate is
+    // how a sandbox run silently inherited the live manifest's 0.01 scale and
+    // built a 1%-size economy.
+    const prior = JSON.parse(await readFile(MANIFEST_PATH, 'utf8'))
     return typeof prior.economy_scale === 'number' && prior.economy_scale > 0 ? prior.economy_scale : null
   } catch {
     return null // no prior deployment; a first run is unconstrained
@@ -616,7 +641,15 @@ if (cat.relayer) {
 
 const manifest = {
   note: 'Written by npm run deploy. Public ids only — no secret material.',
-  network: 'testnet',
+  // DERIVED, not asserted.
+  //
+  // This was the literal string 'testnet' in every manifest this script ever
+  // wrote — including the ones written against a local sandbox. A sandbox
+  // deployment therefore described itself as testnet, and that label travelled:
+  // a local run's transaction hash was retained in evidence/live/ as though it
+  // had happened on a public chain. The network is a fact about the RPC URL, so
+  // it is read off the RPC URL.
+  network: networkOf(RPC_URL),
   rpc: RPC_URL,
   deployed_at: new Date().toISOString(),
   economy_scale: SCALE,

@@ -169,6 +169,26 @@ try {
   } else if (TRADE) {
     console.log('\n  --trade needs --token <subject>; skipping the trade')
   }
+
+  // --serve: stay up instead of stopping, so somebody can actually join.
+  //
+  // This belongs at the end of the TRY. The first version of it sat at the end
+  // of the CATCH, so the server stayed up only when something had gone wrong —
+  // and on a clean run it stopped, which is the opposite of what the flag says.
+  // `--keep` is a different thing and unchanged: it means "do not delete the
+  // world".
+  if (flag('--serve')) {
+    console.log(`\n=== staying up ===`)
+    console.log(`  join at   127.0.0.1:${PORT}   (Minecraft Java ${runtime.client})`)
+    console.log(`  in chat   /nearcraft link player-1   then   /market iron_ingot`)
+    console.log(`  or a code from the web page: /nearcraft claim <code>`)
+    console.log(`\n  Ctrl-C to stop.\n`)
+    await new Promise((resolve) => {
+      process.on('SIGINT', resolve)
+      process.on('SIGTERM', resolve)
+      server.on('close', resolve)
+    })
+  }
 } catch (e) {
   console.error(`\n  ${e.message}`)
   console.error(`  the last few lines:\n${seen.slice(-12).map((l) => '    ' + l).join('\n')}`)

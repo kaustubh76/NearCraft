@@ -321,6 +321,59 @@ claims in this repository five times.
 - **EthCraft's world, menus, escrow, item delivery, voice and property
   protection remain unported**, and this does not change that.
 
+## One command
+
+```sh
+npm run mc:up                  # live testnet, prove it, tear down
+npm run mc:up -- --oidc        # a real RS256 token, via a one-time code
+npm run mc:up -- --keep        # leave the server up and joinable
+npm run mc:up -- --sandbox     # a local economy, no balance ceiling
+```
+
+Everything in this document worked before `mc:up` existed, and still failed
+often — because it took three terminals in the right order. `mc:bot` needs the
+play service already listening, and `--oidc` needs the issuer and an
+OIDC-configured service as well. **Every failure after the code was correct was
+orchestration.**
+
+So `mc:up` owns the lifecycle: it pre-flights what is knowable in seconds
+(JDK, disk, the pinned jars, ports, the relayer's gas, and whether the player's
+budget covers the run it is about to attempt), starts what is missing, boots
+Paper, runs the proof, and stops only the processes it started — a service you
+were already using survives it.
+
+Two deliberate behaviours:
+
+- **It retries the client connection, twice, and nothing else.** That hop goes
+  through ViaVersion and is the one step outside this repository. A failed
+  *check* is never retried, because that would be hiding a result, and the
+  retry count is reported whenever it is used.
+- **A run that cannot trade does not claim it traded.** If the budget will not
+  cover the round trip, every free check still runs and the trade is reported
+  skipped with the arithmetic.
+
+### `--sandbox`: the version with no ceiling
+
+`Sandbox.start()` in-process, then the same `scripts/deploy.mjs` testnet uses,
+pointed at it with four environment variables — so there is no sandbox-only
+deployment path to drift. It builds the **full-size** economy (`scale 1`, five
+merchants) rather than the 1% one the testnet faucet can afford, and the
+genesis account holds 10,000 NEAR, so credit never runs out.
+
+Two traps worth naming, both found while building it:
+
+- `deploy.mjs` inherits `economy_scale` from whatever manifest is on disk, so a
+  sandbox run silently built a 1%-size economy until it was set explicitly.
+- The manifest and keys paths are now overridable (`NEARCRAFT_MANIFEST`,
+  `NEARCRAFT_KEYS`), so a local run never touches the committed testnet
+  `deployment.json`. There were **two** hardcoded copies of that path in
+  `deploy.mjs`, and only one of them was the constant.
+
+**A sandbox is a local node, not a public chain.** No hash from it is presented
+as live evidence and `evidence/live/` stays for public-chain records only. It
+exists so the demo always works, and so somebody with no credentials can run
+the whole thing.
+
 ## Reproducing it
 
 ```sh

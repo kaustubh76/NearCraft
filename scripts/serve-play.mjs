@@ -27,11 +27,20 @@ import { createOidcVerifier } from '../backend/near/oidc.mjs'
 const ROOT = new URL('..', import.meta.url).pathname
 const PORT = Number(process.env.PORT ?? 8080)
 
-const manifest = JSON.parse(await readFile(new URL('../deployment.json', import.meta.url), 'utf8'))
+/// The same two overrides scripts/deploy.mjs reads, so a sandbox deployment can
+/// be served without the committed testnet manifest being involved at all.
+const MANIFEST_PATH = process.env.NEARCRAFT_MANIFEST
+  ? new URL(`file://${process.env.NEARCRAFT_MANIFEST}`)
+  : new URL('../deployment.json', import.meta.url)
+const KEYS_PATH = process.env.NEARCRAFT_KEYS
+  ? new URL(`file://${process.env.NEARCRAFT_KEYS}`)
+  : new URL('../.local/nearcraft-keys.json', import.meta.url)
+
+const manifest = JSON.parse(await readFile(MANIFEST_PATH, 'utf8'))
 
 let keys = {}
 try {
-  keys = JSON.parse(await readFile(new URL('../.local/nearcraft-keys.json', import.meta.url), 'utf8'))
+  keys = JSON.parse(await readFile(KEYS_PATH, 'utf8'))
 } catch {
   console.error('\n  No .local/nearcraft-keys.json — this server cannot sign for anyone.')
   console.error('  Run `npm run web` for the read-only page, or `npm run deploy` to create a deployment.\n')
@@ -67,7 +76,30 @@ const oidc = {
   // that does not exist. Pin it once per deployment.
   provider: process.env.OIDC_PROVIDER ?? oidcFile?.provider,
 }
-const oidcConfigured = Boolean(oidc.issuer && oidc.audience && oidc.jwksUri)
+/// Force the login mode, for callers that must not inherit a config file.
+///
+/// Adding the `.local/oidc.json` fallback had a consequence I did not see: a
+/// run that expected the seeded login silently got real OIDC instead, because
+/// the file was there. `npm run mc:up --sandbox` failed exactly that way — a
+/// seeded subject refused as a malformed token against a Google issuer. An
+/// orchestrator has to be able to say which mode it means.
+///
+///   NEARCRAFT_LOGIN=seed   never use OIDC, whatever is configured
+///   NEARCRAFT_LOGIN=oidc   require OIDC, and refuse to start without it
+///   unset                  env vars, then the file, else seeded
+const forced = process.env.NEARCRAFT_LOGIN ?? null
+if (forced && forced !== 'seed' && forced !== 'oidc') {
+  console.error(`\n  NEARCRAFT_LOGIN must be "seed" or "oidc", not "${forced}".\n`)
+  process.exit(1)
+}
+const haveOidc = Boolean(oidc.issuer && oidc.audience && oidc.jwksUri)
+if (forced === 'oidc' && !haveOidc) {
+  console.error('\n  NEARCRAFT_LOGIN=oidc was asked for, but no issuer, audience and JWKS are')
+  console.error('  configured. Set OIDC_ISSUER / OIDC_AUDIENCE / OIDC_JWKS_URI, or put them')
+  console.error('  in .local/oidc.json.\n')
+  process.exit(1)
+}
+const oidcConfigured = forced === 'seed' ? false : haveOidc
 
 let verifyIdentity
 let verifierKind
@@ -108,12 +140,20 @@ let rootKeyFile = null
 try {
   rootKeyFile = JSON.parse(await readFile(new URL('../.local/nearcraftmc-root.json', import.meta.url), 'utf8'))
 } catch { /* absent on a clone */ }
-if (rootKeyFile && rootKeyFile.account_id && rootKeyFile.account_id !== manifest.root) {
-  console.error(`\n  .local/nearcraftmc-root.json is for ${rootKeyFile.account_id}, but the`)
-  console.error(`  deployment's root is ${manifest.root}. Refusing to sign with the wrong account.\n`)
-  process.exit(1)
+// Resolve first, then complain only about the source we would actually use.
+//
+// The earlier version refused outright whenever the root-key FILE disagreed
+// with the manifest, which is correct for a testnet deployment and fatal for a
+// sandbox one: the file is pinned to nearcraftmc.testnet and a sandbox root is
+// `sandbox`, so the whole local mode exited here. A mismatched file only
+// matters when nothing better was supplied.
+const rootKeyFromFile = rootKeyFile?.account_id === manifest.root ? rootKeyFile?.private_key : null
+const rootKey = process.env.NEAR_ROOT_KEY ?? keys[manifest.root] ?? rootKeyFromFile ?? null
+if (!rootKey && rootKeyFile?.account_id && rootKeyFile.account_id !== manifest.root) {
+  console.error(`\n  The only root key available is for ${rootKeyFile.account_id}, but this`)
+  console.error(`  deployment's root is ${manifest.root}. Refusing to sign with the wrong account;`)
+  console.error(`  new players cannot be created until a key for ${manifest.root} is available.\n`)
 }
-const rootKey = process.env.NEAR_ROOT_KEY ?? keys[manifest.root] ?? rootKeyFile?.private_key ?? null
 
 const onboarding = createOnboarding({
   rootAccountId: manifest.root,
@@ -149,7 +189,7 @@ const reader = createMarketReader({
 ///
 /// Written with mode 0600 into .local/, which is gitignored and which the
 /// static server refuses to serve.
-const KEYS_FILE = new URL('../.local/nearcraft-keys.json', import.meta.url)
+const KEYS_FILE = KEYS_PATH
 async function saveKey(accountId, secret) {
   keys[`${accountId}#scoped`] = secret
   await writeFile(KEYS_FILE, JSON.stringify(keys, null, 2) + '\n', { mode: 0o600 })
