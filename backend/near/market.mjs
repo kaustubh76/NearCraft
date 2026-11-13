@@ -86,8 +86,14 @@ export function quoteRequest({ marketContract, merchantId, item, count }) {
 // (proved in tests/near/gasless.mjs). Those players go through the
 // non-payable builders further down, submitted by the relayer.
 //
-// Keeping both is deliberate: this is the seam the Minecraft settlement port
-// plugs into, and deleting it would mean rebuilding it from memory later.
+// Keeping both WAS justified as "the seam the Minecraft settlement port plugs
+// into". That justification has now expired and is corrected rather than left
+// standing: the port landed in `minecraft/`, and it plugs into the play
+// service over HTTP instead — `PlayClient` holds no chain code at all, so it
+// never reaches these. They are kept anyway, labelled, for the reason
+// `RULES.md` is kept: a full-access player path is a real shape this contract
+// supports, it is tested, and deleting it would hide that it was built. If a
+// client ever signs for its own player, this is what it calls.
 
 /// A player purchase, signed by the player with a full-access key. Pure.
 ///
@@ -234,7 +240,20 @@ export function menuRows(quotes) {
     .sort((a, b) => (BigInt(a.unitPrice) < BigInt(b.unitPrice) ? -1 : 1))
 }
 
-/// Yocto to a short display string for a Minecraft lore line.
+/// Yocto to a short display string.
+///
+/// The docstring here used to say "for a Minecraft lore line". It never was:
+/// the Minecraft plugin formats amounts in Java (`Amounts.near`), because it
+/// shares no code with this backend, and `web/market.html` has its own copy
+/// again. So this value now has THREE formatters in the repository and this one
+/// has no caller outside its own tests.
+///
+/// Recorded rather than deleted, and recorded rather than left to be
+/// discovered: the duplication is real, it is the kind of thing that drifts
+/// into three different answers for one number, and unifying it across a
+/// JavaScript backend, a browser page and a Java plugin is not a change worth
+/// making hours before a deadline. The Java one is the strictest of the three
+/// and is the one under test.
 export function displayNear(yocto) {
   const s = BigInt(yocto).toString().padStart(25, '0')
   const whole = s.slice(0, -24).replace(/^0+(?=\d)/, '')

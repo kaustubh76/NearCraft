@@ -14,7 +14,21 @@ const MAIN = new URL('minecraft/src/main/java/', ROOT)
 const TEST = new URL('minecraft/src/test/java/', ROOT)
 const CLASSES = new URL('test-classes/', TMP)
 
-const home = await javaHome()
+// `npm test` runs this with --optional so a clone with no JDK is told rather
+// than failed: every other check in this repository needs neither Java nor a
+// network, and breaking that for a plugin would be the wrong trade. Run
+// `npm run mc:test` directly and a missing JDK is an error, because then you
+// asked for it specifically.
+const optional = process.argv.includes('--optional')
+let home
+try {
+  home = await javaHome()
+} catch (e) {
+  if (!optional) throw e
+  console.log(`\n  skipping the Minecraft plugin checks: ${e.message.split('\n')[0]}`)
+  console.log('  everything else in `npm test` needs no JDK.\n')
+  process.exit(0)
+}
 
 const classpath = []
 for (const name of runtime.compileClasspath) classpath.push((await fetchPinned(name)).pathname)

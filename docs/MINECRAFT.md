@@ -68,6 +68,62 @@ gas either way. Both transactions are retained in
 came from: [`4Dmr8LKk…`](https://testnet.nearblocks.io/txns/4Dmr8LKkJYtRYVAmg3RfxfJQoq6g9TeQp4SkaparWJPP)
 and [`5pPhhd4h…`](https://testnet.nearblocks.io/txns/5pPhhd4h9H7wb3sv9bYM1C3TkrhbmiaW4wF9w1vGHhwE).
 
+## A real player, and what it took
+
+`npm run mc:bot` connects a **headless client** — mineflayer, pinned — which
+joins the server as an ordinary player and plays the loop:
+
+```
+ok    a headless client joined the server            as nearcraft_bot, protocol 1.21.11
+ok    the player signed in from inside the game      signed in as p-1d6a3c5d.nearcraftmc.testnet
+      before: carrying 0 iron_ingot, chain says 1
+ok    the purchase settled on NEAR                   tx CmbQGYwKpbg9knBCviGB1eoaoEJFJk4fnP9qNHySsWig
+ok    the player paid no gas for it                  balance moved by 0
+ok    the iron_ingot arrived in a real player inventory          0 -> 1
+ok    the purchase moved the chain and the inventory by the same amount   chain 1 -> 2, carrying 0 -> 1
+ok    the sale settled on NEAR                       tx 2Uz4KTr2dnGSPc7LWfaySX6RCB9bXUqhHHuXRM7J6Msx
+ok    the iron_ingot left the inventory when sold                1 -> 0
+ok    the sale moved the chain and the inventory by the same amount       chain 1 -> 1, carrying 0 -> 0
+
+9 passed, 0 failed
+```
+
+That is the half of the loop a console cannot reach. It is also the first time
+the game and the ledger have been **compared** at all.
+
+### It is a bot, not a person
+
+mineflayer is a headless client. It has a real server-side player entity and a
+real `PlayerInventory`, which is what was missing — and nobody played this. No
+document here says otherwise.
+
+### Three things it took, each a finding
+
+**The chain and the inventory are not equal, and should not be.** The first
+version of the cross-check compared totals and failed: *chain 1, carrying 0*.
+That was right. The NEAR account is shared with the browser client and earlier
+console runs, so it already owned an ingot, while a player entity in a fresh
+world starts empty. The chain is the ledger of record and the inventory is one
+view of it. What has to agree is **how much each moved**, and that is what the
+check asserts now.
+
+**Paper rejected every position packet.** The bot was kicked one second after
+each command with `Invalid move player packet received`, losing the reply it was
+waiting for. That is a hard validity check on the values in the packet, not the
+`moved-wrongly` threshold — so relaxing thresholds did nothing, and neither did
+turning mineflayer's physics off. The protocol hop is the cause: mineflayer
+speaks a pinned older protocol and ViaVersion translates it for this server.
+Connecting as the newest protocol mineflayer supports got *less* far. The fix is
+that the harness **drops outgoing position packets**: a Minecraft client is not
+required to report its position, and this one never moves. It still runs
+commands and reads its own inventory, which is all it is for.
+
+**`online-mode=false`, and only here.** A headless client has no Mojang account.
+The bot fixture therefore runs with authentication off, in **its own directory**,
+so a normal run cannot inherit it. `npm run mc:server` keeps
+`online-mode=true` — that sentence elsewhere in this document is still true of
+the documented way to run this.
+
 ## What it is not
 
 **It is not a port of EthCraft's plugin.** That plugin is 5,201 lines across 28
@@ -104,14 +160,25 @@ process in the system, the one players connect to.
 | `Amounts` | yoctoNEAR to NEAR by string arithmetic |
 | `Sessions` | player UUID to session, memory only |
 | `Items` | token id to `Material`, take and give |
+| `Orders` | merchant name resolution and the count clamp; **no Bukkit types**, so it tests offline |
 
 The total is in `README.md` and is counted by `check:docs` rather than written
 by hand here — six line counts in a table is six numbers that would start
 rotting the next time a comment is added to one of these files.
 
-Five in-game commands: `/nearcraft link|status|selftest`, `/market`, `/buy`,
-`/sell`, `/wallet`. All of them are runnable **from the server console**, which
-is the only reason any of this could be proven here — see the limits below.
+Six in-game commands: `/nearcraft link|status|selftest|inventory-selftest`,
+`/market`, `/buy`, `/sell`, `/wallet`, and `/invest`. All of them are runnable
+**from the server console** as well as by a player, which is what let the chain
+half be proven before any client could connect.
+
+`/invest` is the `games` prompt's own closing sentence — *"it closes its shop
+until someone invests in it"*. It calls `invest_with_credit`, the non-payable
+twin of a `#[payable]` method, which exists precisely because a function-call
+key cannot attach a deposit: without it the mechanic would be unreachable by the
+players it is for. Every layer of it was built and tested before this, and no
+client called it. The live demo player's key predates the method and can never
+gain it, so for that account the command refuses and says why; a player
+onboarded today is granted all three methods.
 
 ### Two things that are easy to get wrong, and are not
 
@@ -163,13 +230,24 @@ claims in this repository five times.
 
 ## Limits, stated rather than hidden
 
-- **Nobody walked around.** There is no Minecraft account on this machine, so
-  every command was driven from the server console. The one thing a console
-  cannot do is hold an inventory, and the plugin says so in its own output:
-  `(console: chain only, no inventory to move)`. The chain half is fully
-  exercised; the block-moving half is exercised only by the unit checks.
-- **`online-mode` stays `true`.** A demo is not a reason to turn authentication
-  off, so `mc-server.mjs` does not.
+- **No human has played it.** There is no Minecraft account on this machine. A
+  headless client has — a real protocol client with a real server-side player
+  entity and a real `PlayerInventory`, which is what the console could not
+  reach — but it is a bot, and no claim here should be read as a person playing.
+  The console path still exists and still prints its own gap:
+  `(console: chain only, no inventory to move)`.
+- **`online-mode` is `true` for `npm run mc:server`** and **`false` for
+  `npm run mc:bot`**, because a headless client has no Mojang account to
+  authenticate. The bot fixture lives in its own directory so a normal run
+  cannot inherit that, and it also relaxes Paper's move-packet validation and
+  drops the client's outgoing position packets — all three are properties of a
+  test fixture for a client that never moves, and none of them touch the
+  documented way to run this.
+- **The inventory arithmetic is proven, but not against every slot.** The twelve
+  console checks run against a real `Bukkit.createInventory`, which has no
+  offhand; `take` uses `removeItemAnySlot` specifically so the offhand is
+  reachable, and only the bot run exercises a real `PlayerInventory` at all.
+  Selling a stack held *only* in the offhand is not separately asserted.
 - **Inventory and chain are not atomic.** The relayed call is the settlement and
   the `ItemStack` is a game-side effect applied after it. A crash in between
   diverges them and nothing here repairs that. EthCraft solved this with an

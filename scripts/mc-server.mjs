@@ -147,6 +147,10 @@ try {
 
   await send('plugins')
   await send('nearcraft selftest', 6000)
+  // Needs no network and no player: it drives Items against a real
+  // Bukkit.createInventory, which is the only way the inventory arithmetic can
+  // be checked on a machine with no Minecraft account.
+  await send('nearcraft inventory-selftest', 5000)
 
   if (TOKEN) {
     // The token is passed on the command line and never written to disk. It is
@@ -244,10 +248,13 @@ const retained = await retain()
 const enabled = seen.some((l) => /Enabling NearCraft/.test(l))
 const settled = seen.some((l) => /settled on NEAR/.test(l))
 const healthy = seen.some((l) => /health\s+200/.test(l))
+const inventory = seen.find((l) => /inventory selftest: /.test(l))
+const inventoryOk = Boolean(inventory) && /0 failed/.test(inventory)
 
 console.log('\n=== result ===')
 console.log(`  plugin loaded on Paper        ${enabled ? 'yes' : 'NO'}`)
 console.log(`  reached the play service      ${healthy ? 'yes' : 'no'}`)
+console.log(`  inventory arithmetic          ${inventory ? (inventoryOk ? 'all passed' : 'FAILED') : 'did not run'}`)
 console.log(`  settled a trade on NEAR       ${settled ? 'yes' : (TRADE ? 'NO' : 'not attempted')}`)
 console.log(`  log                           ${logPath}`)
 if (retained) console.log(`  retained                      evidence/live/${retained}`)
@@ -257,4 +264,4 @@ if (!flag('--keep')) {
   await rm(new URL('nearcraft/', SERVER), { recursive: true, force: true })
 }
 
-process.exit(enabled && (!TRADE || settled) ? 0 : 1)
+process.exit(enabled && inventoryOk && (!TRADE || settled) ? 0 : 1)

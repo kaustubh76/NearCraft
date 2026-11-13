@@ -113,6 +113,35 @@ public final class JsonTest {
     h.equals("null is zero", "0", Amounts.near(null));
     h.equals("the unit is appended", "0.004 NEAR", Amounts.nearWithUnit("4000000000000000000000"));
 
+    // ----------------------------------------------------------- NEAR -> yocto
+    //
+    // This direction builds an argument the CONTRACT acts on, so a rounding
+    // error here stakes an amount nobody agreed to.
+    h.equals("a stake of 0.05 NEAR", "5" + "0".repeat(22), Amounts.yocto("0.05"));
+    h.equals("one whole NEAR", "1" + "0".repeat(24), Amounts.yocto("1"));
+    h.equals("zero", "0", Amounts.yocto("0"));
+    h.equals("zero with a decimal tail", "0", Amounts.yocto("0.000"));
+    h.equals("a leading dot is accepted", "5" + "0".repeat(23), Amounts.yocto(".5"));
+    h.equals("surrounding space is trimmed", "4" + "0".repeat(21), Amounts.yocto("  0.004 "));
+    h.equals("exactly 24 decimal places is the smallest unit", "1", Amounts.yocto("0." + "0".repeat(23) + "1"));
+    h.equals("a big amount is not rounded", "123456" + "789012345678901234" + "000000",
+        Amounts.yocto("123456.789012345678901234"));
+
+    // Refusals. Each of these is something a player could type.
+    h.equals("25 decimal places is finer than the chain goes, so refused",
+        null, Amounts.yocto("0." + "0".repeat(24) + "1"));
+    h.equals("a negative stake is refused", null, Amounts.yocto("-1"));
+    h.equals("two decimal points are refused", null, Amounts.yocto("1.2.3"));
+    h.equals("letters are refused", null, Amounts.yocto("1e24"));
+    h.equals("a bare dot is refused", null, Amounts.yocto("."));
+    h.equals("empty is refused", null, Amounts.yocto("   "));
+    h.equals("null is refused", null, Amounts.yocto(null));
+
+    // The two directions must agree, or one of them is wrong.
+    h.equals("yocto then near is a round trip", "0.05", Amounts.near(Amounts.yocto("0.05")));
+    h.equals("near then yocto is a round trip too",
+        "4" + "0".repeat(21), Amounts.yocto(Amounts.near("4" + "0".repeat(21))));
+
     return h.report();
   }
 

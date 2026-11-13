@@ -42,6 +42,48 @@ public final class Amounts {
     return negative && !out.equals("0") ? "-" + out : out;
   }
 
+  /**
+   * NEAR to yoctoNEAR, the inverse of {@link #near}.
+   *
+   * <p>{@code "0.05"} becomes {@code "50000000000000000000000"}. String
+   * arithmetic again, and for a sharper reason this time: {@link #near} only
+   * renders a number for a human to read, while this one produces an argument
+   * the contract will act on. A {@code double} round-trip would stake a
+   * different amount from the one the player typed.
+   *
+   * <p>A fraction finer than a yoctoNEAR is <b>refused</b>, not rounded: the
+   * caller asked to move an amount that does not exist, and silently moving a
+   * different one is how a ledger stops matching what anybody agreed to.
+   *
+   * @return the yoctoNEAR amount, or null when the input is not a non-negative
+   *     decimal number this chain can represent
+   */
+  public static String yocto(String near) {
+    if (near == null) return null;
+    String text = near.trim();
+    if (text.isEmpty() || text.startsWith("-")) return null;
+
+    int dot = text.indexOf('.');
+    if (dot != text.lastIndexOf('.')) return null;
+    String whole = dot < 0 ? text : text.substring(0, dot);
+    String fraction = dot < 0 ? "" : text.substring(dot + 1);
+    if (whole.isEmpty() && fraction.isEmpty()) return null;
+    if (!digitsOnly(whole) || !digitsOnly(fraction)) return null;
+    // More than 24 decimal places is finer than the chain's smallest unit.
+    if (fraction.length() > DECIMALS) return null;
+
+    String digits = (whole.isEmpty() ? "0" : whole) + fraction + "0".repeat(DECIMALS - fraction.length());
+    while (digits.length() > 1 && digits.charAt(0) == '0') digits = digits.substring(1);
+    return digits;
+  }
+
+  private static boolean digitsOnly(String text) {
+    for (int i = 0; i < text.length(); i++) {
+      if (text.charAt(i) < '0' || text.charAt(i) > '9') return false;
+    }
+    return true;
+  }
+
   /** The same, with a unit, for a line of chat. */
   public static String nearWithUnit(String yocto) {
     return near(yocto) + " NEAR";

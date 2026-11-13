@@ -3,6 +3,7 @@ package org.nearcraft.mc;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
@@ -10,6 +11,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
@@ -87,6 +90,7 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
       case "buy": return trade(sender, args, true);
       case "sell": return trade(sender, args, false);
       case "wallet": return wallet(sender);
+      case "invest": return invest(sender, args);
       default: return false;
     }
   }
@@ -97,6 +101,7 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
       case "link": return link(sender, args);
       case "status": return status(sender);
       case "selftest": return selftest(sender);
+      case "inventory-selftest": return inventorySelftest(sender);
       default:
         sender.sendMessage(GOLD + "NearCraft" + GREY + " — an agent economy settled on NEAR");
         sender.sendMessage(GREY + "  /nearcraft link <token>" + WHITE + "  sign in; no seed phrase, no wallet");
@@ -104,6 +109,7 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
         sender.sendMessage(GREY + "  /buy <merchant> <item> [count]");
         sender.sendMessage(GREY + "  /sell <merchant> <item> [count]");
         sender.sendMessage(GREY + "  /wallet" + WHITE + "  credit, holdings, and what your key may do");
+        sender.sendMessage(GREY + "  /invest <merchant> <NEAR>" + WHITE + "  reopen a merchant that went broke");
         return true;
     }
   }
@@ -209,8 +215,29 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
   }
 
   private boolean market(CommandSender sender, String[] args) {
-    String item = args.length > 0 ? args[0].toLowerCase() : "iron_ingot";
-    int count = count(args, 1);
+    // No item named: list what the chain actually trades, rather than guessing
+    // at one. This is also the only caller of PlayClient.materials, which was
+    // written, tested and reachable from nothing.
+    if (args.length == 0) {
+      async(() -> {
+        PlayClient.Response response = client.materials();
+        sync(() -> {
+          if (!response.ok()) { sender.sendMessage(RED + "materials: " + response.refusal()); return; }
+          Object list = response.body.get("materials");
+          if (!(list instanceof List)) { sender.sendMessage(RED + "the service listed no materials"); return; }
+          sender.sendMessage(GOLD + "this economy trades:");
+          for (Object material : Json.asList(list)) {
+            Material block = Items.materialFor(String.valueOf(material));
+            sender.sendMessage(GREY + "  " + WHITE + material
+                + (block == null ? RED + "  (no block in this game)" : ""));
+          }
+          sender.sendMessage(GREY + "  /market <item> [count]" + WHITE + " for prices");
+        });
+      });
+      return true;
+    }
+    String item = args[0].toLowerCase();
+    int count = Orders.count(args, 1);
     async(() -> {
       PlayClient.Response response = client.market(item, count);
       sync(() -> {
@@ -233,7 +260,7 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
     for (Object row : merchants) {
       if (!(row instanceof Map)) { sender.sendMessage(GREY + "  " + row); continue; }
       Map<String, Object> m = Json.asObject(row);
-      sender.sendMessage(GREY + "  " + WHITE + handle(m)
+      sender.sendMessage(GREY + "  " + WHITE + Orders.handle(m)
           + GREY + "  asks " + AQUA + Amounts.near(Json.text(m, "unitPrice", "0"))
           + GREY + "  bids " + AQUA + Amounts.near(Json.text(m, "bid", "0"))
           + GREY + "  stock " + WHITE + Json.number(m, "stock", 0)
@@ -244,36 +271,6 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
       if (!reason.isEmpty()) sender.sendMessage(GREY + "    " + reason);
     }
     sender.sendMessage(GREY + "  prices in NEAR; trade with " + WHITE + "/buy <merchant> " + item);
-  }
-
-  /** The short name a player types, taken from the account id the chain uses. */
-  private static String handle(Map<String, Object> row) {
-    String id = Json.text(row, "merchantId", "");
-    int dot = id.indexOf('.');
-    String short_ = dot > 0 ? id.substring(0, dot) : id;
-    String name = Json.text(row, "merchantName", short_);
-    return short_.isEmpty() ? name : name + " (" + short_ + ")";
-  }
-
-  /**
-   * Find the merchant a player meant.
-   *
-   * <p>The chain knows merchants as {@code ironmonger.nearcraftmc.testnet}.
-   * Nobody is typing that into a chat box mid-game, so the short handle, the
-   * display name and the full id all resolve, and an unknown one is answered
-   * with the list rather than a refusal the player cannot act on.
-   */
-  private static Map<String, Object> matchMerchant(PlayClient.Response quotes, String wanted) {
-    if (!(quotes.body.get("merchants") instanceof List)) return null;
-    String target = wanted.trim().toLowerCase();
-    for (Object row : Json.asList(quotes.body.get("merchants"))) {
-      if (!(row instanceof Map)) continue;
-      Map<String, Object> m = Json.asObject(row);
-      String id = Json.text(m, "merchantId", "").toLowerCase();
-      String name = Json.text(m, "merchantName", "").toLowerCase();
-      if (id.equals(target) || name.equals(target) || id.startsWith(target + ".")) return m;
-    }
-    return null;
   }
 
   /**
@@ -299,7 +296,7 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
     }
     String wanted = args[0];
     String item = args[1].toLowerCase();
-    int count = count(args, 2);
+    int count = Orders.count(args, 2);
     Sessions.Session session = sessions.of(idOf(sender));
     if (session == null) {
       sender.sendMessage(RED + "sign in first: " + WHITE + "/nearcraft link <token>");
@@ -324,14 +321,14 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
 
     // The console has no inventory. One code path; the missing half is named.
     Player player = sender instanceof Player ? (Player) sender : null;
-    if (!buying && player != null && !Items.take(player, material, count)) {
-      sender.sendMessage(RED + "you are carrying " + Items.held(player, material)
+    if (!buying && player != null && !Items.take(player.getInventory(), material, count)) {
+      sender.sendMessage(RED + "you are carrying " + Items.held(player.getInventory(), material)
           + " " + item + ", not " + count);
       return true;
     }
     Runnable refund = () -> {
       if (!buying && player != null) {
-        Items.give(player, material, count);
+        Items.giveOrDrop(player, material, count);
         sender.sendMessage(GREY + "  your " + count + " " + item + " came back");
       }
     };
@@ -343,7 +340,7 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
         sync(() -> { sender.sendMessage(RED + "market: " + quotes.refusal()); refund.run(); });
         return;
       }
-      Map<String, Object> row = matchMerchant(quotes, wanted);
+      Map<String, Object> row = Orders.match(quotes, wanted);
       if (row == null) {
         sync(() -> {
           sender.sendMessage(RED + "no merchant called " + WHITE + wanted + RED + " trades " + item);
@@ -353,7 +350,7 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
         return;
       }
       String merchantId = Json.text(row, "merchantId", wanted);
-      String shown = handle(row);
+      String shown = Orders.handle(row);
       if (Json.flag(row, "closed", false)) {
         sync(() -> { sender.sendMessage(RED + shown + " is closed"); refund.run(); });
         return;
@@ -377,7 +374,7 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
           refund.run();
           return;
         }
-        if (buying && player != null) Items.give(player, material, count);
+        if (buying && player != null) Items.giveOrDrop(player, material, count);
         String hash = Json.text(response.body, "hash", "?");
         String delta = Json.text(response.body, "playerNearDelta", "0");
         sender.sendMessage(GREEN + "settled on NEAR" + GREY + " with " + WHITE + shown
@@ -385,6 +382,91 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
         sender.sendMessage(GREY + "  your NEAR balance moved by " + WHITE + Amounts.near(delta)
             + GREY + ("0".equals(delta) ? " - the relayer paid the gas" : ""));
         if (player == null) sender.sendMessage(GREY + "  (console: chain only, no inventory to move)");
+      });
+    });
+    return true;
+  }
+
+  /**
+   * Back a merchant that went broke, so it reopens.
+   *
+   * <p>This is the `games` prompt's own closing sentence — "it closes its shop
+   * until someone invests in it" — and until now it was the one mechanic in
+   * this project that was built end to end and reachable by nobody. The
+   * contract has it, the service routes it, the relayer allows it, a new
+   * player's key is granted it, and no client called it.
+   *
+   * <p>There are two invest methods and the difference decides whether a player
+   * can do this at all. {@code invest} is {@code #[payable]} and takes a
+   * deposit, which a function-call key cannot attach; {@code invest_with_credit}
+   * is non-payable and spends the player's existing credit, which is the only
+   * version a key-less player can reach. This calls the second.
+   */
+  private boolean invest(CommandSender sender, String[] args) {
+    if (args.length < 2) {
+      sender.sendMessage(RED + "usage: /invest <merchant> <amount in NEAR>");
+      sender.sendMessage(GREY + "  backs a broke merchant out of your credit, so it reopens");
+      return true;
+    }
+    String wanted = args[0];
+    Sessions.Session session = sessions.of(idOf(sender));
+    if (session == null) {
+      sender.sendMessage(RED + "sign in first: " + WHITE + "/nearcraft link <token>");
+      return true;
+    }
+    if (!session.permits("invest_with_credit")) {
+      // Not a bug and not a bad request: this account's key was issued before
+      // the method existed, and a key with no full-access sibling can never
+      // gain one. The product says so rather than letting the chain refuse it.
+      sender.sendMessage(RED + "your key may not call " + WHITE + "invest_with_credit");
+      sender.sendMessage(GREY + "  it grants " + WHITE + String.join(", ", session.permittedMethods)
+          + GREY + " and can never gain another: the account has no full-access key.");
+      sender.sendMessage(GREY + "  a player onboarded today is granted all three.");
+      return true;
+    }
+
+    String stake = Amounts.yocto(args[1]);
+    if (stake == null) {
+      sender.sendMessage(RED + WHITE + args[1] + RED + " is not an amount of NEAR this chain can hold");
+      sender.sendMessage(GREY + "  24 decimal places is the smallest unit; nothing is rounded for you");
+      return true;
+    }
+    if ("0".equals(stake)) {
+      sender.sendMessage(RED + "a stake of nothing would reopen nothing");
+      return true;
+    }
+
+    sender.sendMessage(GREY + "backing " + wanted + " with " + Amounts.nearWithUnit(stake) + " of credit...");
+    async(() -> {
+      // Investing names no item, so there is no quote list to resolve the
+      // handle against — the merchant's account id is derived from the market
+      // contract's, which shares its parent.
+      PlayClient.Response health = client.health();
+      String market = health.ok() && health.body.get("contracts") instanceof Map
+          ? Json.text(Json.asObject(health.body.get("contracts")), "market", "")
+          : "";
+      String merchantId = Orders.merchantId(wanted, market);
+      if (merchantId == null) {
+        sync(() -> sender.sendMessage(RED + "cannot work out which account " + WHITE + wanted
+            + RED + " is; give the full id"));
+        return;
+      }
+      PlayClient.Response response = client.invest(session.id, merchantId, stake);
+      sync(() -> {
+        if (!response.ok()) {
+          sender.sendMessage(RED + "invest refused: " + response.refusal());
+          return;
+        }
+        String delta = Json.text(response.body, "playerNearDelta", "0");
+        sender.sendMessage(GREEN + "staked " + Amounts.nearWithUnit(stake) + GREY + " in " + WHITE + merchantId);
+        sender.sendMessage(GREY + "  tx " + WHITE + Json.text(response.body, "hash", "?"));
+        sender.sendMessage(GREY + "  your NEAR balance moved by " + WHITE + Amounts.near(delta)
+            + GREY + ("0".equals(delta) ? " - the relayer paid the gas" : ""));
+        // The contract repays a backer out of half of every later sale's
+        // margin. Say that, because a stake that looked like a donation is the
+        // reason nobody would ever make one.
+        sender.sendMessage(GREY + "  half of every later sale's margin repays you until the claim is settled");
+        sender.sendMessage(GREY + "  run " + WHITE + "/market <item>" + GREY + " to see the shop open again");
       });
     });
     return true;
@@ -428,21 +510,84 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
     return true;
   }
 
+  /**
+   * Check the inventory arithmetic against a REAL Bukkit inventory, from the
+   * console, with nobody connected.
+   *
+   * <p>This exists because {@link Items} is the only code here that touches a
+   * player's property, and for its whole first day it could not be exercised at
+   * all: a {@code Player} cannot be constructed without a client, and the
+   * console path skips the inventory branch. So the arithmetic ran nowhere.
+   *
+   * <p>{@code Bukkit.createInventory} gives a genuine server-side inventory —
+   * the same interface and the same implementation family a player carries —
+   * so this is not a mock. What it cannot cover is the offhand slot, which only
+   * a player inventory has; {@code npm run mc:bot} covers that with a real one.
+   */
+  private boolean inventorySelftest(CommandSender sender) {
+    sender.sendMessage(GOLD + "--- inventory selftest ---");
+    int[] tally = new int[2]; // passed, failed
+    Material iron = Material.IRON_INGOT;
+    Material stone = Material.STONE;
+
+    // Exact amount, in one stack.
+    Inventory one = Bukkit.createInventory(null, 36);
+    one.addItem(new ItemStack(iron, 10));
+    check(sender, tally, "taking exactly what is there succeeds", Items.take(one, iron, 10));
+    check(sender, tally, "and leaves nothing behind", Items.held(one, iron) == 0);
+
+    // One short. THE case: Bukkit removes "as much as possible", so an
+    // implementation that trusts removeItem without reading its return leaves
+    // the player minus the blocks AND minus the sale.
+    Inventory short_ = Bukkit.createInventory(null, 36);
+    short_.addItem(new ItemStack(iron, 5));
+    check(sender, tally, "taking more than is there is refused", !Items.take(short_, iron, 6));
+    check(sender, tally, "and a refused take changes NOTHING", Items.held(short_, iron) == 5);
+
+    // Spread across several stacks, which is how 100 iron is actually carried.
+    Inventory spread = Bukkit.createInventory(null, 36);
+    spread.addItem(new ItemStack(iron, 64));
+    spread.addItem(new ItemStack(iron, 64));
+    spread.addItem(new ItemStack(iron, 10));
+    check(sender, tally, "a take spanning three stacks succeeds", Items.take(spread, iron, 100));
+    check(sender, tally, "and takes exactly 100 of the 138", Items.held(spread, iron) == 38);
+
+    // Nothing at all.
+    check(sender, tally, "taking from an empty inventory is refused",
+        !Items.take(Bukkit.createInventory(null, 36), iron, 1));
+
+    // A nonsense order must not be treated as a successful no-op, because the
+    // caller reads `true` as "the player has paid".
+    check(sender, tally, "taking zero is refused", !Items.take(one, iron, 0));
+    check(sender, tally, "taking a negative amount is refused", !Items.take(one, iron, -5));
+
+    // A full inventory must hand the remainder BACK rather than void it: the
+    // chain has already moved the material by the time this runs.
+    Inventory full = Bukkit.createInventory(null, 36);
+    for (int i = 0; i < 36; i++) full.setItem(i, new ItemStack(stone, 64));
+    check(sender, tally, "a full inventory returns what would not fit",
+        Items.give(full, iron, 5).stream().mapToInt(ItemStack::getAmount).sum() == 5);
+
+    Inventory room = Bukkit.createInventory(null, 36);
+    check(sender, tally, "an inventory with room returns no leftovers", Items.give(room, iron, 5).isEmpty());
+    check(sender, tally, "and is now carrying them", Items.held(room, iron) == 5);
+
+    sender.sendMessage((tally[1] == 0 ? GREEN : RED) + "inventory selftest: "
+        + tally[0] + " passed, " + tally[1] + " failed");
+    return true;
+  }
+
+  private static void check(CommandSender sender, int[] tally, String what, boolean ok) {
+    if (ok) { tally[0]++; return; }
+    tally[1]++;
+    sender.sendMessage(RED + "  FAIL  " + what);
+  }
+
   // --------------------------------------------------------------- helpers
 
   /** The console is not a player, so it borrows a reserved id rather than a branch. */
   private static UUID idOf(CommandSender sender) {
     return sender instanceof Player ? ((Player) sender).getUniqueId() : Sessions.CONSOLE;
-  }
-
-  private static int count(String[] args, int index) {
-    if (args.length <= index) return 1;
-    try {
-      // Bounded at both ends: zero is not an order, and a stack is 64.
-      return Math.max(1, Math.min(64, Integer.parseInt(args[index].trim())));
-    } catch (NumberFormatException e) {
-      return 1;
-    }
   }
 
   /**

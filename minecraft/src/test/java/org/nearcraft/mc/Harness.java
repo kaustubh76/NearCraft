@@ -66,6 +66,8 @@ public final class Harness {
     int status = 0;
     status |= JsonTest.run();
     status |= PlayClientTest.run();
+    status |= OrdersTest.run();
+    status |= SessionsTest.run();
     if (status != 0) {
       System.out.println("\nFAILED");
       System.exit(1);

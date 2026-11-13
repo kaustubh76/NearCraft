@@ -44,8 +44,17 @@ public final class Sessions {
       this.permittedMethods = permittedMethods == null ? List.of() : List.copyOf(permittedMethods);
     }
 
-    /** Whether the key behind this account may call a method at all. */
-    public boolean permits(String method) { return permittedMethods.contains(method); }
+    /**
+     * Whether the key behind this account may call a method at all.
+     *
+     * <p>The null guard is not defensive padding: {@code List.of(...)} throws
+     * on {@code contains(null)}, so without it a null method name crashed the
+     * command handler instead of refusing the call. Found by the first test
+     * ever written for this class.
+     */
+    public boolean permits(String method) {
+      return method != null && permittedMethods.contains(method);
+    }
   }
 
   private final Map<UUID, Session> byPlayer = new ConcurrentHashMap<>();

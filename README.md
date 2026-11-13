@@ -43,7 +43,7 @@ column before the description.
 | Merchant restocking — "an economy that evolves without a dev patch" | **Built and tested.** `market.restock(merchant_id, item)` is **permissionless and non-payable**, so anyone may refill a thin shelf and a scoped key can do it. The merchant pays out of its own treasury at the bid it *would post for the restocked shelf* — provably below what it sells for, so a restock can never be a loss — and never spends into its floor. It **mints** the goods through `items.mt_mint`, so a shelf never claims stock the contract does not hold; a sandbox test on a real node proves the market's NEP-245 balance rises by exactly the units added. 13 tests. |
 | Payout rollbacks | **Built and tested.** `withdraw` and `withdraw_treasury` used to zero the ledger and then fire a bare transfer with no callback: a failed payout debited the claimant and delivered nothing, and the market silently kept money it no longer accounted for. Both now roll back. 3 unit tests. |
 | NEP-245 Approval Management | **Built and tested.** 10 unit tests. Implemented because without it a key-less player could buy but never sell. |
-| Minecraft plugin settlement path | **Built, and settled on public testnet from inside a Minecraft server.** `npm run mc:server -- --token player-1 --trade` boots a hash-pinned Paper 26.3 build 231 with a new plugin loaded, signs in from the server console, and sells iron: credit rose **0.0048768 → 0.0080768 NEAR**, exactly the bid the Ironmonger had posted two commands earlier, holdings fell 3 → 2, and the player's NEAR balance moved by **0** ([`H6HpWytt…`](https://testnet.nearblocks.io/txns/H6HpWyttACf9g1PE2HBZpzNLkEAwedFxzM1vY5EaZixt)). A later run did the **round trip** — `/sell` then `/buy` in one session — and the credit moved by exactly the merchant's spread (+0.0032 the bid, then −0.004 the ask), holdings ended where they started, and both NEAR deltas were 0 ([`4Dmr8LKk…`](https://testnet.nearblocks.io/txns/4Dmr8LKkJYtRYVAmg3RfxfJQoq6g9TeQp4SkaparWJPP), [`5pPhhd4h…`](https://testnet.nearblocks.io/txns/5pPhhd4h9H7wb3sv9bYM1C3TkrhbmiaW4wF9w1vGHhwE)). The plugin is a client of the play service and **holds no keys, no signer and no chain code**; 5 in-game commands, 1277 lines of new Java, 84 Java checks offline. It is **not** a port of EthCraft's plugin and no line of it was copied — `check:docs` fails if any file under `minecraft/` carries that package name. What it does not do is move blocks for a player who joined: there is no Minecraft account here, so the console drove it. [docs/MINECRAFT.md](docs/MINECRAFT.md) |
+| Minecraft plugin settlement path | **Built, and settled on public testnet from inside a Minecraft server.** `npm run mc:server -- --token player-1 --trade` boots a hash-pinned Paper 26.3 build 231 with a new plugin loaded, signs in from the server console, and sells iron: credit rose **0.0048768 → 0.0080768 NEAR**, exactly the bid the Ironmonger had posted two commands earlier, holdings fell 3 → 2, and the player's NEAR balance moved by **0** ([`H6HpWytt…`](https://testnet.nearblocks.io/txns/H6HpWyttACf9g1PE2HBZpzNLkEAwedFxzM1vY5EaZixt)). A later run did the **round trip** — `/sell` then `/buy` in one session — and the credit moved by exactly the merchant's spread (+0.0032 the bid, then −0.004 the ask), holdings ended where they started, and both NEAR deltas were 0 ([`4Dmr8LKk…`](https://testnet.nearblocks.io/txns/4Dmr8LKkJYtRYVAmg3RfxfJQoq6g9TeQp4SkaparWJPP), [`5pPhhd4h…`](https://testnet.nearblocks.io/txns/5pPhhd4h9H7wb3sv9bYM1C3TkrhbmiaW4wF9w1vGHhwE)). **And a real Minecraft player has now played it.** `npm run mc:bot` connects a headless client — a bot, not a person — which joins, signs in, buys iron and receives the ingot in a **real `PlayerInventory`** (0 → 1), then sells it back (1 → 0), paying no gas either way ([`CmbQGYwK…`](https://testnet.nearblocks.io/txns/CmbQGYwKpbg9knBCviGB1eoaoEJFJk4fnP9qNHySsWig), [`2Uz4KTr2…`](https://testnet.nearblocks.io/txns/2Uz4KTr2dnGSPc7LWfaySX6RCB9bXUqhHHuXRM7J6Msx)). At each step the chain and the inventory moved by **the same amount** — the first time the game and the ledger have been compared at all. 9 of 9 checks, retained in `evidence/live/minecraft-player.json`. The plugin is a client of the play service and **holds no keys, no signer and no chain code**; 6 in-game commands — including `/invest`, the `games` prompt's own closing sentence — 1622 lines of new Java, 172 Java checks offline. It is **not** a port of EthCraft's plugin and no line of it was copied — `check:docs` fails if any file under `minecraft/` carries that package name. What it does not do is move blocks for a player who joined: there is no Minecraft account here, so the console drove it. [docs/MINECRAFT.md](docs/MINECRAFT.md) |
 | Sealed-bid rounds (`swarms`) | **Not built, and that track is not entered.** See below. |
 
 **Live on NEAR testnet.** The contracts below are deployed and queryable by
@@ -63,6 +63,7 @@ npm run web       # the market page, reading those same contracts live in a brow
 npm run play      # the same page, playable: sign in and trade (needs .local/ keys)
 npm run mc:test   # the Minecraft plugin's Java checks, offline (needs a JDK)
 npm run mc:server # Paper + the plugin, driven from its console (downloads 55 MiB)
+npm run mc:bot    # a headless client joins and plays the loop for real
 ```
 
 **`npm run mc:server` is the same loop inside Minecraft.** It fetches a
@@ -70,8 +71,10 @@ hash-pinned Paper 26.3 build 231, builds and installs the plugin, boots the
 server and runs the commands from the console. Add `--token player-1 --trade`
 and it signs in and sells iron on public testnet. The plugin holds no keys: it
 calls the same play service the browser does. [docs/MINECRAFT.md](docs/MINECRAFT.md)
-has the transcript and the limits — chiefly that no human player has joined,
-because there is no Minecraft account on this machine.
+has the transcript and the limits. `npm run mc:bot` goes further: a headless
+client joins as a real player and the ingot lands in a real inventory. **No
+human has played it** — there is no Minecraft account on this machine — and
+every document here says "a headless client" rather than implying otherwise.
 
 **`npm run play` is the whole loop in a browser.** Sign in with any string —
 the account id is derived from the login, so the same identity always lands on
@@ -389,11 +392,18 @@ property protection **remain unported**.
 
 **What is now demonstrated, and what is still not.** A Paper server boots with
 the plugin, reads live merchant quotes with the contract's own reason strings,
-signs a player in, and settles a sale on public testnet with the player's NEAR
-balance moving by exactly zero. **No human player has joined that server** —
-there is no Minecraft account on this machine, so every command was driven from
-the server console, and the one thing a console cannot do is carry an inventory.
-The plugin prints that gap itself rather than hiding it. The `games` track is
+signs a player in, and settles trades on public testnet with the player's NEAR
+balance moving by exactly zero. A **headless client** then joins as a real
+player, and the iron it buys arrives in a real `PlayerInventory` — so the half
+of the loop a console cannot reach is exercised too.
+
+**No human has played it.** There is no Minecraft account on this machine, so
+the player is a bot: mineflayer speaking a pinned protocol. It is a real
+protocol client with a real server-side player entity, which is exactly what was
+missing, and it is not a person. The bot fixture also runs `online-mode=false`,
+because a headless client has no Mojang account to authenticate — that applies to
+`npm run mc:bot` alone, in its own directory; `npm run mc:server` keeps
+`online-mode=true`. The `games` track is
 entered on what is actually demonstrated: NEP-245 materials, one readable price
 rule, merchant reasoning the contract itself produces, a measured key-less buy
 and sell, a real testnet transaction, a full economy run anyone can reproduce,

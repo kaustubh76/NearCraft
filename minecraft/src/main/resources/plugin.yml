@@ -22,3 +22,6 @@ commands:
   wallet:
     description: Your credit, holdings, and exactly what your key is allowed to do.
     usage: /wallet
+  invest:
+    description: Back a broke merchant out of your credit so it reopens, and earn the stake back from its margin.
+    usage: /invest <merchant> <amount in NEAR>

@@ -107,12 +107,28 @@ baseline project, where it was the thing that made the evidence worth reading.
   it were changed in the same commit that built it — which is the rule working,
   not an exception to it. What remains disclosed: no provider client id is
   configured, so no real token has been verified. The
-  Minecraft settlement path now exists as NEW code in `minecraft/` and has
-  settled a real sale on testnet from a server console — but EthCraft's plugin
-  is still **not** ported, no human player has joined a server, and the plugin's
-  inventory moves are not atomic with the chain. `games` requirement 4 is not "a
+  Minecraft settlement path now exists as NEW code in `minecraft/`, has settled
+  real trades on testnet, and has been played by a **headless client** whose
+  real `PlayerInventory` received the iron — but EthCraft's plugin is still
+  **not** ported, **no human** has played it (the player is a bot, and the bot
+  fixture runs `online-mode=false` because a headless client has no Mojang
+  account), and the plugin's inventory moves are not atomic with the chain. `games` requirement 4 is not "a
   week in a minute". These are stated in `README.md` and `docs/MINECRAFT.md` and
   must stay stated.
+- **An unspecified behaviour is not a bug until you check.** `Items.take` moved
+  blocks by mutating the array `Inventory.getContents()` returns, which the
+  Bukkit API guarantees nothing about. Rewriting it on `removeItemAnySlot` was
+  right — but the old version was then run against a real server and **passed
+  all twelve checks**, because CraftBukkit happens to return live mirrors. The
+  claim "it was probably broken" was wrong and the commit does not make it. What
+  was true is narrower: it relied on behaviour the contract does not promise.
+  Say the narrower thing.
+- **Compare deltas, not totals, when two ledgers started out of step.** The
+  game-versus-chain check first compared the player's NEAR holdings to the
+  blocks in the bot's inventory and failed with "chain 1, carrying 0" —
+  correctly, because the account already owned an ingot from earlier runs while
+  a player entity in a fresh world starts empty. The assertion was wrong, not
+  the system. What must agree is how much each one MOVED.
 - **Keep failures.** `evidence/runs/` records a failing check exactly like a
   passing one. A check that cannot run is recorded as `skipped` with a reason —
   skipped and failed are different facts and conflating them misleads twice.

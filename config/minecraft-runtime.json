@@ -71,7 +71,28 @@
       "sha256": "a836a016be7ac52352eb3a1efb6857bb42ee73a6c78d46e292f7e87742edb0e6",
       "url": "https://fill-data.papermc.io/v1/objects/a836a016be7ac52352eb3a1efb6857bb42ee73a6c78d46e292f7e87742edb0e6/paper-26.3-231.jar",
       "use": "the server npm run mc:server boots"
+    },
+    "ViaVersion": {
+      "version": "5.12.2",
+      "sha256": "24e4876fefe73e08a4c87cd6c457ee0916e62dd69656631caf41e26f909d504b",
+      "url": "https://github.com/ViaVersion/ViaVersion/releases/download/5.12.2/ViaVersion-5.12.2.jar",
+      "use": "server plugin, bot runs only - lets a 1.21.11 protocol client reach a 26.3 server"
+    },
+    "ViaBackwards": {
+      "version": "5.12.2",
+      "sha256": "9a148a80ea22074f4bd1626cdbe254a4cd998bf44e7ceaff4e285a1b6b35da42",
+      "url": "https://github.com/ViaVersion/ViaBackwards/releases/download/5.12.2/ViaBackwards-5.12.2.jar",
+      "use": "server plugin, bot runs only - lets a 1.21.11 protocol client reach a 26.3 server"
     }
   },
-  "client": "1.21.11"
+  "client": "1.21.11",
+  "botClasspath": [
+    "ViaVersion",
+    "ViaBackwards"
+  ],
+  "bot": {
+    "mineflayer": "4.39.0",
+    "protocol": "1.21.11",
+    "why": "A headless client has no Mojang account, so the bot server runs online-mode=false. That applies to npm run mc:bot ONLY, in its own directory; npm run mc:server keeps online-mode=true. mineflayer speaks 1.21.11 and ViaVersion bridges it to this 26.3 server - the combination the sibling EthCraft repository records as working against this exact Paper build. Paper rejects this client position packets with \"Invalid move player packet received\" (a hard NaN/range check on the packet values, not a moved-wrongly threshold), because the translation mangles the field layout. Trying 26.1, the newest protocol mineflayer supports, got LESS far. So the harness simply does not send position packets: a client that never moves does not need them."
+  }
 }

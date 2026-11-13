@@ -15,7 +15,7 @@
     "keys": "node scripts/keys.mjs",
     "sim": "cargo test --manifest-path contracts/Cargo.toml -p nearcraft-integration --test simulation -- --nocapture",
     "verify:baseline": "node scripts/verify-baseline.mjs",
-    "test": "npm run test:contracts && npm run test:near && npm run verify:baseline && npm run check:docs",
+    "test": "npm run test:contracts && npm run test:near && npm run verify:baseline && npm run --silent mc:test -- --optional && npm run check:docs",
     "test:near": "node --test tests/near/policy.mjs tests/near/injection.mjs tests/near/market.mjs tests/near/counterparty.mjs tests/near/human-approval.mjs tests/near/onboarding.mjs tests/near/relayer.mjs tests/near/web.mjs tests/near/oidc.mjs tests/near/play.mjs",
     "check:nep245": "node scripts/check-nep245.mjs",
     "test:sandbox": "cargo test --manifest-path contracts/Cargo.toml -p nearcraft-integration --test smoke --test views --test keys --test economy --test migration",
@@ -26,6 +26,7 @@
     "mc:build": "node scripts/mc-build.mjs",
     "mc:test": "node scripts/mc-test.mjs",
     "mc:server": "node scripts/mc-server.mjs",
+    "mc:bot": "node scripts/mc-bot.mjs",
     "live:agent": "node scripts/live-agent.mjs",
     "web": "node scripts/serve-web.mjs",
     "play": "node scripts/serve-play.mjs",
@@ -40,6 +41,7 @@
     "near-api-js": "^7.4.0"
   },
   "devDependencies": {
+    "mineflayer": "^4.39.0",
     "near-sandbox": "^0.3.5"
   }
 }

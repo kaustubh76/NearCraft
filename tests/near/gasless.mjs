@@ -388,7 +388,12 @@ test('the play service runs the whole loop on a real node, and the player pays n
       marketContract: market.id,
       itemsContract: items.id,
       sellableItems: ['iron_ingot'],
-      playerMethods: ['buy_with_credit', 'sell'],
+      // The three methods config/catalog.json actually grants a new player. This
+      // test used to onboard with two, which meant the only real-node exercise
+      // of the play service never touched the invest route at all — the `games`
+      // prompt's own closing mechanic went unproven through the service that
+      // serves it.
+      playerMethods: ['buy_with_credit', 'sell', 'invest_with_credit'],
       verifyIdentity: async (token) => ({ provider: 'seed', subject: String(token) }),
       rpcUrl: sandbox.rpcUrl,
     }),
@@ -396,7 +401,7 @@ test('the play service runs the whole loop on a real node, and the player pays n
       relayerAccountId: relayerAcc.id,
       relayerKey: relayerAcc.key.toString(),
       marketContract: market.id,
-      permittedMethods: ['buy_with_credit', 'sell'],
+      permittedMethods: ['buy_with_credit', 'sell', 'invest_with_credit'],
       rpcUrl: sandbox.rpcUrl,
     }),
     reader: createMarketReader({ marketContract: market.id, itemsContract: items.id, rpcUrl: sandbox.rpcUrl }),
@@ -441,6 +446,28 @@ test('the play service runs the whole loop on a real node, and the player pays n
   console.log(`  bought 2, sold 1 -> holding ${me.body.holdings.iron_ingot}`)
   console.log(`  player NEAR delta ${after - before} yoctoNEAR`)
   console.log(`  buy reported ${buy.body.playerNearDelta}, sell reported ${sell.body.playerNearDelta}\n`)
+
+  // ------------------------------------------------- and it can back a merchant
+  //
+  // invest_with_credit is the non-payable twin of a #[payable] method, and it
+  // exists for exactly one reason: a player holding one function-call key
+  // cannot attach a deposit, so without it the mechanic the games prompt
+  // describes would be unreachable by the players it is for. Until now no
+  // client called it and this test never reached it.
+  const stake = '1000000000000000000000'
+  const invest = await service.handle('POST', '/api/invest',
+    { sessionId, merchantId: merchant.id, amount: stake })
+  assert.equal(invest.status, 200, JSON.stringify(invest.body))
+  assert.equal(invest.body.playerNearDelta, '0', 'backing a merchant must also be free')
+
+  const backer = await provider.callFunction({
+    contractId: market.id, method: 'backer_of', args: { merchant_id: merchant.id },
+  })
+  assert.ok(backer, 'the contract must record who backed the merchant')
+  assert.equal(backer.account_id, playerId, 'and record the player, not the relayer')
+  assert.equal(backer.principal, stake, 'for exactly the amount staked')
+
+  console.log(`  staked ${stake} yocto -> backer ${backer.account_id}, principal ${backer.principal}`)
 
   // The headline claim, measured rather than asserted.
   assert.equal(after - before, 0n, 'the player must not pay a single yoctoNEAR')
