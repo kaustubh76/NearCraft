@@ -90,6 +90,16 @@ pub struct Approval {
     pub amount: U128,
     /// Incremented on every grant, including a re-grant, so a stale id cannot
     /// be replayed after the owner has changed their mind.
+    ///
+    /// `U64`, so this serializes as a STRING on the way out, while
+    /// `mt_transfer` and `mt_is_approved` both take an approval id as a plain
+    /// number on the way in. That asymmetry is deliberate and is the lesser of
+    /// two evils: the spec writes `number` everywhere, but a u64 above 2^53
+    /// cannot survive a JSON number in a JavaScript client, which is the entire
+    /// reason near-sdk has `U64`. Inputs are made conformant because a client
+    /// sending a literal is in control of the value; an output is read by code
+    /// that is not. A reader therefore has to parse this before passing it to a
+    /// transfer, and saying so here is better than letting someone discover it.
     pub approval_id: U64,
 }
 
@@ -561,7 +571,14 @@ impl Items {
         token_ids: Vec<String>,
         approved_account_id: AccountId,
         amounts: Vec<U128>,
-        approval_ids: Option<Vec<U64>>,
+        // `Vec<u64>`, not `Vec<U64>`: the spec writes `number[]|null`, and this
+        // contract's own `mt_transfer` already takes an approval id as a plain
+        // `u64` inside its `approval` tuple. Taking a STRING here meant the
+        // same value was a number going in one method and a string going into
+        // another — a spec-conformant client sending `[1]` failed
+        // deserialization, and `npm run check:nep245` could not see it until it
+        // learned to read signatures.
+        approval_ids: Option<Vec<u64>>,
         owner_id: AccountId,
     ) -> bool {
         if token_ids.len() != amounts.len() {
@@ -576,7 +593,7 @@ impl Items {
             match self.find_approval(&owner_id, &approved_account_id, token_id) {
                 Some((amount, id)) => {
                     amount >= amounts[i].0
-                        && approval_ids.as_ref().is_none_or(|ids| ids[i].0 == id)
+                        && approval_ids.as_ref().is_none_or(|ids| ids[i] == id)
                 }
                 None => false,
             }
@@ -1137,9 +1154,9 @@ mod tests {
 
         setup(accounts(1), 0);
         assert!(c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(40)], None, accounts(1)));
-        assert!(c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(1)], Some(vec![id]), accounts(1)));
+        assert!(c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(1)], Some(vec![id.0]), accounts(1)));
         assert!(!c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(41)], None, accounts(1)), "over the amount");
-        assert!(!c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(1)], Some(vec![U64(id.0 + 99)]), accounts(1)), "wrong id");
+        assert!(!c.mt_is_approved(vec![IRON.to_string()], market(), vec![U128(1)], Some(vec![id.0 + 99]), accounts(1)), "wrong id");
         assert!(!c.mt_is_approved(vec![IRON.to_string()], accounts(4), vec![U128(1)], None, accounts(1)), "never approved");
         // Mismatched argument lengths are false rather than a panic: this is a
         // view a caller may probe with, not a state change.

@@ -36,6 +36,126 @@ const NEP245_APPROVAL = [
   'mt_token_approval', 'mt_token_approvals',
 ]
 
+/// What the SPEC says each method looks like, transcribed from the NEPs
+/// repository rather than from what we built.
+///
+/// This is the half of conformance the check could not see. It read names and
+/// modifiers, which means a contract implementing every method with the wrong
+/// arguments passed it — and the README said so in its open findings. The ABI
+/// has carried parameter names, types, the view/call kind and the return type
+/// all along; nothing was reading them.
+///
+/// Sources, fetched and read rather than recalled:
+///   core + enumeration  neps/nep-0245.md
+///   enumeration         neps/nep-0245/Enumeration.md
+///   approval management neps/nep-0245/ApprovalManagement.md
+///
+/// Types are in the vocabulary of `describe()` below. Where the spec is
+/// ambiguous the decision is recorded here rather than papered over:
+///
+///   * The spec writes `[string]` for a list of token ids. Its own examples
+///     pass lists of any length, so that is read as `string[]`, not a 1-tuple.
+///   * `mt_transfer_call` returns a bare untyped `Promise`. A typed promise
+///     satisfies that, so `describe()` folds any `Promise*` name to `Promise`.
+///   * `mt_approve` "returns void, if no msg given", otherwise a promise —
+///     which is `Promise?`.
+///   * `mt_token` is printed with no colon before its return type and
+///     `mt_batch_transfer` refers to an `approval_ids` parameter that does not
+///     exist in its own signature. Neither affects what is checked here.
+const SPEC = 'nep-0245'
+const NEP245_SIGNATURES = {
+  // ---- Core, neps/nep-0245.md, CHANGE METHODS
+  mt_transfer: { kind: 'call', result: 'void', args: [
+    ['receiver_id', 'string'], ['token_id', 'string'], ['amount', 'string'],
+    ['approval', '[string,integer]?'], ['memo', 'string?'],
+  ] },
+  mt_batch_transfer: { kind: 'call', result: 'void', args: [
+    ['receiver_id', 'string'], ['token_ids', 'string[]'], ['amounts', 'string[]'],
+    ['approvals', '[string,integer]?[]?'], ['memo', 'string?'],
+  ] },
+  mt_transfer_call: { kind: 'call', result: 'Promise', args: [
+    ['receiver_id', 'string'], ['token_id', 'string'], ['amount', 'string'],
+    ['approval', '[string,integer]?'], ['memo', 'string?'], ['msg', 'string'],
+  ] },
+  mt_batch_transfer_call: { kind: 'call', result: 'Promise', args: [
+    ['receiver_id', 'string'], ['token_ids', 'string[]'], ['amounts', 'string[]'],
+    ['approvals', '[string,integer]?[]?'], ['memo', 'string?'], ['msg', 'string'],
+  ] },
+  // Under neither heading in the spec; it is the resolver, and the spec both
+  // permits renaming it and requires it be callable only by the contract.
+  mt_resolve_transfer: { kind: 'call', result: 'string[]', args: [
+    ['sender_id', 'string'], ['receiver_id', 'string'], ['token_ids', 'string[]'],
+    ['approvals', 'unspecified'],
+  ] },
+  // ---- Core, VIEW METHODS
+  mt_token: { kind: 'view', result: 'Token?[]', args: [['token_ids', 'string[]']] },
+  mt_balance_of: { kind: 'view', result: 'string', args: [
+    ['account_id', 'string'], ['token_id', 'string'],
+  ] },
+  mt_batch_balance_of: { kind: 'view', result: 'string[]', args: [
+    ['account_id', 'string'], ['token_ids', 'string[]'],
+  ] },
+  mt_supply: { kind: 'view', result: 'string?', args: [['token_id', 'string']] },
+  mt_batch_supply: { kind: 'view', result: 'string?[]', args: [['token_ids', 'string[]']] },
+  // ---- Enumeration, neps/nep-0245/Enumeration.md
+  mt_tokens: { kind: 'view', result: 'Token[]', args: [
+    ['from_index', 'string?'], ['limit', 'integer?'],
+  ] },
+  mt_tokens_for_owner: { kind: 'view', result: 'Token[]', args: [
+    ['account_id', 'string'], ['from_index', 'string?'], ['limit', 'integer?'],
+  ] },
+  // ---- Approval Management, neps/nep-0245/ApprovalManagement.md
+  mt_approve: { kind: 'call', result: 'Promise?', args: [
+    ['token_ids', 'string[]'], ['amounts', 'string[]'], ['account_id', 'string'],
+    ['msg', 'string?'],
+  ] },
+  mt_revoke: { kind: 'call', result: 'void', args: [
+    ['token_ids', 'string[]'], ['account_id', 'string'],
+  ] },
+  mt_revoke_all: { kind: 'call', result: 'void', args: [['token_ids', 'string[]']] },
+  mt_is_approved: { kind: 'view', result: 'boolean', args: [
+    ['token_ids', 'string[]'], ['approved_account_id', 'string'],
+    ['amounts', 'string[]'], ['approval_ids', 'integer[]?'],
+  ] },
+  mt_token_approval: { kind: 'view', result: 'TokenApproval', args: [
+    ['token_id', 'string'], ['account_id', 'string'],
+  ] },
+  mt_token_approvals: { kind: 'view', result: 'TokenApproval[]', args: [
+    ['token_id', 'string'], ['from_index', 'string?'], ['limit', 'integer?'],
+  ] },
+}
+
+/// Deviations we have decided on, each naming the EXACT difference.
+///
+/// Keyed by `method/what`, and the value must equal the mismatch the check
+/// actually computes. That is deliberate, and it is the same discipline as the
+/// escape hatch in `check-docs.mjs`: a declaration that names only a method
+/// would go on excusing it after the signature had drifted into something else
+/// entirely. Naming the before and the after means a NEW deviation on an
+/// already-deviating method still fails.
+///
+/// An undeclared deviation fails. A declaration nothing matches also fails —
+/// otherwise this list would quietly accumulate excuses for problems that no
+/// longer exist, and stop describing the contract.
+const DECLARED_DEVIATIONS = {
+  'mt_resolve_transfer/args': {
+    expected: 'sender_id: string, receiver_id: string, token_ids: string[], approvals: unspecified',
+    actual: 'sender_id: string, receiver_id: string, token_ids: string[], amounts: string[]',
+    why: "the spec's resolver takes `approvals`, but a resolver cannot compute a refund "
+       + 'without knowing what was SENT. The spec text has acknowledged copy-paste errors in '
+       + 'this section, the resolver is a private callback rather than an interop surface, and '
+       + 'the spec permits renaming it. See the note at contracts/items/src/lib.rs.',
+  },
+  'mt_is_approved/args': {
+    expected: 'token_ids: string[], approved_account_id: string, amounts: string[], approval_ids: integer[]?',
+    actual: 'token_ids: string[], approved_account_id: string, amounts: string[], approval_ids: integer[]?, owner_id: string',
+    why: "the spec's four-argument signature names no owner, which a MULTI-token cannot answer: "
+       + 'balances and approvals are keyed per (owner, token), so "is this approved?" has no '
+       + 'meaning until you say whose. Reading the predecessor instead made it a view no client '
+       + 'could call — nearcore answers HostError(ProhibitedInView).',
+  },
+}
+
 /// Modifiers that are load-bearing rather than cosmetic.
 ///
 /// A list of pairs rather than an object literal, and that is the whole point.
@@ -157,6 +277,131 @@ for (const [contract, expectations] of REQUIRED_MODIFIERS) {
   }
 }
 if (!problems.length) console.log('ok    security-relevant modifiers correct (payable / private / non-payable)')
+
+// ------------------------------------------------------------- signatures
+//
+// The half this gate could not see. Everything below reads the ABI that
+// `cargo near` emitted from the compiled contract, so it describes what was
+// actually built rather than what the source comments claim.
+
+/// An ABI JSON-schema fragment as a short, comparable string.
+///
+/// Deliberately total: anything it does not recognise comes back as
+/// `unknown(...)`, which can never equal a spec type and so fails loudly. A
+/// normaliser that silently returns a plausible default is a check that cannot
+/// fail, and this file already carries two scars from that pattern.
+function describe(schema) {
+  if (schema === undefined || schema === null) return 'void'
+  if (typeof schema !== 'object') return `unknown(${JSON.stringify(schema)})`
+
+  if (schema.$ref) return promiseFold(schema.$ref.split('/').pop())
+
+  // `anyOf: [X, null]` — how near-sdk renders an Option of a named type.
+  if (Array.isArray(schema.anyOf)) {
+    const parts = schema.anyOf.map(describe)
+    const nulls = parts.filter((p) => p === 'null')
+    const rest = parts.filter((p) => p !== 'null')
+    if (nulls.length && rest.length === 1) return `${rest[0]}?`
+    return `anyOf(${parts.join('|')})`
+  }
+
+  const ty = schema.type
+  if (ty === undefined) return 'unknown(no type)'
+
+  // `type: ["array", "null"]` — an Option of an array.
+  if (Array.isArray(ty)) {
+    const base = ty.filter((t) => t !== 'null')
+    if (base.length !== 1) return `unknown(${JSON.stringify(ty)})`
+    return `${describe({ ...schema, type: base[0] })}?`
+  }
+
+  if (ty === 'array') {
+    const items = schema.items
+    // A JSON-schema tuple: `items` is an ARRAY of schemas, one per position.
+    if (Array.isArray(items)) return `[${items.map(describe).join(',')}]`
+    if (items === undefined) return 'unknown(array with no items)'
+    return `${describe(items)}[]`
+  }
+  if (ty === 'null') return 'null'
+  if (['string', 'integer', 'number', 'boolean', 'object'].includes(ty)) return ty
+  return `unknown(${ty})`
+}
+
+/// The spec returns a bare, untyped `Promise`. near-sdk names the concrete one,
+/// e.g. `PromiseOrValueArray_of_String`. A typed promise satisfies an untyped
+/// one, so they are folded together — and only here, so the folding is visible
+/// rather than buried in a comparison.
+function promiseFold(name) {
+  return /^Promise/.test(name) ? 'Promise' : name
+}
+
+const argsOf = (f) =>
+  ((f.params ?? {}).args ?? []).map((a) => `${a.name}: ${describe(a.type_schema)}`).join(', ')
+
+const resultOf = (f) => (f.result ? describe(f.result.type_schema) : 'void')
+
+const matched = new Set()
+let checkedSignatures = 0
+
+for (const [method, spec] of Object.entries(NEP245_SIGNATURES)) {
+  const f = items.get(method)
+  if (!f) continue // completeness is reported above; do not say it twice
+
+  const expectedArgs = spec.args.map(([n, t]) => `${n}: ${t}`).join(', ')
+  const actualArgs = argsOf(f)
+
+  for (const [what, expected, actual] of [
+    ['args', expectedArgs, actualArgs],
+    ['kind', spec.kind, f.kind],
+    ['result', spec.result, resultOf(f)],
+  ]) {
+    if (expected === actual) { checkedSignatures++; continue }
+
+    const key = `${method}/${what}`
+    const declared = DECLARED_DEVIATIONS[key]
+    if (declared && declared.expected === expected && declared.actual === actual) {
+      matched.add(key)
+      console.log(`note  ${method}: ${what} deviates from ${SPEC}, as declared`)
+      console.log(`        spec  ${expected}`)
+      console.log(`        ours  ${actual}`)
+      checkedSignatures++
+      continue
+    }
+    if (declared) {
+      matched.add(key)
+      problems.push(
+        `items: ${method} ${what} deviates from ${SPEC} DIFFERENTLY than declared — the ` +
+        `declaration no longer describes this contract.\n` +
+        `        declared spec  ${declared.expected}\n` +
+        `        declared ours  ${declared.actual}\n` +
+        `        actual spec    ${expected}\n` +
+        `        actual ours    ${actual}`,
+      )
+      continue
+    }
+    problems.push(
+      `items: ${method} ${what} does not match ${SPEC}\n` +
+      `        spec  ${expected}\n` +
+      `        ours  ${actual}`,
+    )
+  }
+}
+
+// A declaration nothing matches is an excuse for a problem that no longer
+// exists, and it would go on excusing the next one.
+for (const key of Object.keys(DECLARED_DEVIATIONS)) {
+  if (!matched.has(key)) {
+    problems.push(
+      `items: a deviation is declared for ${key} but the contract does not deviate there — ` +
+      'remove the declaration rather than leaving it to excuse something else later',
+    )
+  }
+}
+
+if (!problems.length) {
+  console.log(`ok    ${checkedSignatures} signature facts match ${SPEC} ` +
+    `(${Object.keys(NEP245_SIGNATURES).length} methods: arguments, view/call kind, return type)`)
+}
 
 // `buy_with_credit` is the agent path; spell the reason out so a future reader
 // does not "fix" it by making it payable.

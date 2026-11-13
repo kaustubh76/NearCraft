@@ -542,6 +542,9 @@ is listed after, because it is not fixed.
 
 | | |
 |---|---|
+| The conformance gate could not see a signature | `npm run check:nep245` read method names and modifiers off the compiled ABI and nothing else — so a contract taking entirely the wrong arguments passed it, and this README said so in its own open list. The ABI had carried parameter names, types, the view/call kind and return types all along. It now checks **54 signature facts across all 18 NEP-245 methods** against a table transcribed from the NEPs repository, and it was made to fail five ways first: a renamed parameter, a changed type, a view turned into a call, a changed return type, and a declared deviation that no longer matches. |
+| An approval id was a number in and a string out | What the gate found the moment it could see. `mt_transfer` takes an approval id as a plain number, matching the spec — but `mt_is_approved` took `Vec<U64>`, which is a **string**, so a spec-conformant client sending `[1]` failed deserialization. The input side is now `u64` in both. `Approval.approval_id` stays a string on the way **out**, declared rather than changed: a u64 above 2^53 cannot survive a JSON number in a JavaScript client, which is why near-sdk has `U64` at all. Conformant where the spec can be met safely, declared where it cannot. |
+| A deviation now has to be declared | Two deviations from NEP-245 remain, and each must now name its exact before and after in `DECLARED_DEVIATIONS` or the build fails. A declaration that stops matching fails too — otherwise the list becomes a graveyard of excuses for problems that no longer exist, still quietly excusing the next one. |
 | The same money bug was in three places | `sell` was fixed in round one. `buy`/`settle_purchase` and `restock` were not, and **`restock` had not been found at all**. All three credited somebody before a cross-contract call and clawed it back with `saturating_sub` if the call failed, while restoring the other side in full — so spending inside the window left `ledger_total` above the NEAR held. All three now pay on the callback. Three interleaved tests, each red first: a treasury emptied by `withdraw_treasury` between a purchase and its failed delivery, the same on the credit path, and the house withdrawing between a restock and its failed mint. |
 | A disclosure that was wrong | This README said the buy side "cannot be fixed the way `sell` was" and needed "reserving in-flight funds, which needs new state and therefore a migration". That was wrong. `withdraw_treasury` can only pay out what is **in** the treasury, so money never put there cannot leave: not crediting until the goods arrive **is** the reservation. No new field, no migration. A gap written down is still only a claim. |
 | `verifyKeyScope` was never called | It asks the chain whether the agent's key really is as narrow as the agent believes, and **nothing invoked it** — the definition, the export, and a comment leaning on it. It runs on both signing paths now. The human-approval path re-reads the chain rather than a memo, because a key's permission *can* widen in place (`DeleteKey` then `AddKey` on the same public key) and a parked call waits on a person for an unbounded time. Against the memo that check could not fail; the first version of it was exactly that, and the test caught it. |
@@ -589,10 +592,12 @@ and a line; none of them is claimed to be harmless.
   our approvals are keyed by `(owner, approved, token)`, and `Option<AccountId>`
   would need a default the NEP does not define. Guessing at semantics the
   standard does not state is worse than a documented deviation.
-- **`npm run check:nep245` is a name-and-modifier gate.** It reads the compiled
-  ABI, which is real, but only method names and modifiers — no parameters, no
-  types, no return types, no view/call kind. A contract implementing every
-  method with the wrong semantics passes it. Semantics rest on the unit tests.
+- **`npm run check:nep245` still cannot see semantics.** It now reads
+  signatures — 54 facts across all 18 methods — so it will catch a renamed
+  parameter, a changed type, a view turned into a call or a changed return
+  type. What it cannot see is whether the number coming back is the right
+  number. `mt_balance_of` returning a correctly-typed lie passes it. Semantics
+  rest on the unit tests, and that is a real limit, not a formality.
 - **`market` emits 12 plain `env::log_str` lines**, none of them NEP-297
   events and none shape-asserted. `items` is the contract with a real event
   envelope.
