@@ -251,6 +251,48 @@ const waiting = new Promise((resolve, reject) => {
 // Fails here, before a browser is opened, if the port could not be bound.
 await Promise.race([up, waiting]).catch(fatal)
 
+// Ask Google whether it will accept this redirect BEFORE sending anyone to it.
+//
+// Worth the one request: an unregistered redirect produces "Access blocked:
+// This app's request is invalid" in the browser, with the actual reason behind
+// a "see error details" toggle. The first real run of this script sat waiting
+// four minutes for a sign-in that could never arrive, because all three
+// plausible redirect URIs turned out to be unregistered on the client. A
+// terminal line naming the fix is worth more than a browser tab that cannot work.
+//
+// The reading is specific, not a blanket "something went wrong": a bogus client
+// id gives `invalid_client` instead, which is how this was confirmed to
+// discriminate rather than to always say no.
+try {
+  const probe = await fetch(authUrl.toString(), {
+    headers: { 'User-Agent': 'Mozilla/5.0' }, redirect: 'follow', signal: AbortSignal.timeout(20000),
+  })
+  const page = await probe.text()
+  if (page.includes('redirect_uri_mismatch')) {
+    console.error(`\n  Google will not accept this redirect, so signing in cannot work yet:`)
+    console.error(`\n      ${REDIRECT}`)
+    console.error(`\n  is not an Authorized redirect URI on OAuth client …${clientId.slice(-30)}.`)
+    console.error(`\n  Add it — console.cloud.google.com -> APIs & Services -> Credentials ->`)
+    console.error(`  your OAuth 2.0 Client ID -> Authorized redirect URIs. Add both spellings,`)
+    console.error(`  because Google compares them as strings:`)
+    console.error(`\n      http://127.0.0.1:${PORT}/callback`)
+    console.error(`      http://localhost:${PORT}/callback`)
+    console.error(`\n  Changes can take a few minutes. Then run this again.`)
+    console.error(`\n  Or skip the redirect entirely and paste a token from the OAuth Playground:`)
+    console.error(`      pbpaste | npm run oidc:google -- --paste --onboard`)
+    console.error(`  (that needs https://developers.google.com/oauthplayground registered instead)\n`)
+    process.exit(1)
+  }
+  if (page.includes('invalid_client') || page.includes('OAuth client was not found')) {
+    console.error(`\n  Google does not recognise client id …${clientId.slice(-30)}.`)
+    console.error(`  Check the Client_ID in ${envPath}.\n`)
+    process.exit(1)
+  }
+} catch (e) {
+  // A probe that cannot reach Google must not block a sign-in that might work.
+  say(`  (could not pre-check the redirect: ${e.message} — continuing anyway)`)
+}
+
 say(`\n  Open this and sign in (it listens on ${REDIRECT}):\n`)
 say(`  ${authUrl}\n`)
 say(`  If Google says redirect_uri_mismatch, add BOTH of these to your OAuth client's`)
