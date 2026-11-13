@@ -1,0 +1,12 @@
+{
+  "topic": "identity-verification",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 299,
+  "command": "node --test tests/near/oidc.mjs",
+  "cwd": ".",
+  "proves": "Real OIDC token verification: JWKS fetch, JWT signature check, and iss/aud/exp/nbf/sub validation, with 25 tests that generate their own RS256 keypair and serve a JWKS from a stubbed fetch, so none of it needs a provider or a network. The attacks are the substance: alg:none refused, an HMAC alg signed with the public key refused before the signature is checked, a swapped payload refused, a token minted for a DIFFERENT application refused, rotation handled with exactly one refetch. No provider client id is configured, so no token Google actually issued has been verified — that is the remaining gap, and it is configuration, not code.",
+  "output_sha256": "f936cb960e7087501796bcc668414af966973074f74f644b756dbf5d6a846a89",
+  "output_bytes": 1914,
+  "recorded_at": "2026-11-13T06:16:57.281Z"
+}

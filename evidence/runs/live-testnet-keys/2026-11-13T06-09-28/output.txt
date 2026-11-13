@@ -1,0 +1,53 @@
+
+Agent access keys, as the protocol reports them
+
+worker-1.nearcraftmc.testnet
+  ed25519:D9D4Eo6EmNSBPk66Uee6FMv6gqSSpgf9Y6Nv7V1X4NBJ
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit]
+    allowance     1.9993298664490253 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+    headroom      ~2983 more call(s) at the measured testnet burn; an operator key can re-key this account
+  ed25519:E1Qp6G9rCKpLGVp9XYHZJTTp3iQszpTDTA7K8jryCdgs
+    FULL ACCESS — the operator key, created with the account and kept in
+                  .local/. It is NOT given to the agent process, which
+                  holds only the scoped key below. Disclosed, not a
+                  failure: the operator owns the agent, so this does not
+                  widen what the AGENT can do. Players are different and
+                  delete theirs — see docs/GASLESS.md.
+
+worker-2.nearcraftmc.testnet
+  ed25519:2orZSEsAFb1wXEzP9xEALgXCidMsBBPk2kiNKWQQitjz
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit]
+    allowance     2 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+    headroom      ~2984 more call(s) at the measured testnet burn; an operator key can re-key this account
+  ed25519:AgRX8cS24BffEMd826VVFYHthLaTZHJBE8p7eFS9SB5C
+    FULL ACCESS — the operator key, created with the account and kept in
+                  .local/. It is NOT given to the agent process, which
+                  holds only the scoped key below. Disclosed, not a
+                  failure: the operator owns the agent, so this does not
+                  widen what the AGENT can do. Players are different and
+                  delete theirs — see docs/GASLESS.md.
+
+Player access keys, as the protocol reports them
+
+p-1d6a3c5d.nearcraftmc.testnet
+  ed25519:69tLBGBhuXTHU4mccA6EKfi7aieyC2GhFLffU1Gjpuus
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit, sell]
+    allowance     2 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+    headroom      ~2984 more call(s) at the measured testnet burn — and no full-access key to re-key it
+  no full-access key — this account cannot transfer NEAR, add a key, or
+  gain a method. Not by our restraint: by the runtime.
+
+Spend budgets (the second bound, enforced by the market contract)
+
+  worker-1.nearcraftmc.testnet       0.061811834992299437994071 NEAR remaining
+  worker-2.nearcraftmc.testnet             0.05 NEAR remaining
+  p-1d6a3c5d.nearcraftmc.testnet      0.0104768 NEAR remaining
+
+every agent and player key is scoped as recorded — 2 agent(s) and 1 player(s) audited, 2 operator key(s) disclosed
+

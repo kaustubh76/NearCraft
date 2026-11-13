@@ -1,0 +1,8 @@
+
+--- Json ---
+Json: 48 passed, 0 failed
+
+--- PlayClient ---
+PlayClient: 36 passed, 0 failed
+
+all Java checks passed

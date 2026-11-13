@@ -1,0 +1,33 @@
+✔ a well-formed token resolves to a provider and a subject (3.62875ms)
+✔ the provider label defaults to the issuer and can be overridden (1.012417ms)
+✔ aud may be an array, as some providers send it (0.993875ms)
+✔ alg: none is refused — a token with no signature at all (0.41ms)
+✔ an HMAC alg is refused — the public key is public, so it is not a secret (1.08675ms)
+✔ a tampered signature is refused (0.952667ms)
+✔ a tampered subject is refused — the signature covers it (0.9515ms)
+✔ a token signed by the wrong key is refused (66.1725ms)
+✔ a token for another application is refused, however valid (1.033125ms)
+✔ a token from another issuer is refused (1.023917ms)
+✔ an expired token is refused (0.979625ms)
+✔ a token that never expires is refused (0.948041ms)
+✔ a token not yet valid is refused (0.912459ms)
+✔ small clock skew is tolerated, because clocks differ (0.875666ms)
+✔ a malformed token is refused before anything is parsed (0.140083ms)
+✔ a token with no kid is refused rather than guessed at (0.783459ms)
+✔ an empty subject is refused — it would collide every login onto one account (0.877042ms)
+✔ an unknown kid triggers one refetch, which is how rotation works (0.934334ms)
+✔ a kid that is genuinely absent is refused, and does not hammer the provider (0.814083ms)
+✔ the JWKS is cached, so a second token does not refetch (1.618292ms)
+✔ an unreachable or broken JWKS is refused, never treated as no keys (2.255042ms)
+✔ one unusable key in the JWKS does not poison a rotation (0.885792ms)
+✔ a verifier with no issuer or audience refuses to exist (0.156625ms)
+✔ the identity it returns is exactly what onboarding.signIn consumes (1.156292ms)
+✔ two different subjects from one provider get different accounts (1.623458ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 237.232666

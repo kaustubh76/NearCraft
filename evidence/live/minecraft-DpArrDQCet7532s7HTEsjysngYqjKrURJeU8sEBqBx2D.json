@@ -1,0 +1,46 @@
+{
+  "note": "A sale settled on public NEAR testnet from inside a Minecraft server. Every line below was printed by the NearCraft plugin running on Paper 26.3 build 231; the commands were issued at the server console, because there is no Minecraft account on the machine that ran this. The plugin holds no keys: it calls the play service, which holds the player's scoped key.",
+  "recorded_at": "2026-11-13T06:04:57.571Z",
+  "network": "testnet",
+  "service": "http://127.0.0.1:8080",
+  "paper": "26.3 build 231",
+  "paper_sha256": "a836a016be7ac52352eb3a1efb6857bb42ee73a6c78d46e292f7e87742edb0e6",
+  "java": 25,
+  "player": "p-1d6a3c5d.nearcraftmc.testnet",
+  "merchant": "Ironmonger (ironmonger)",
+  "credit_before_near": "0.0080768",
+  "credit_after_near": "0.0112768",
+  "holdings_before": "2 iron_ingot",
+  "holdings_after": "1 iron_ingot",
+  "player_near_delta_yocto": "0",
+  "transactions": {
+    "sell": {
+      "hash": "DpArrDQCet7532s7HTEsjysngYqjKrURJeU8sEBqBx2D",
+      "explorer": "https://testnet.nearblocks.io/txns/DpArrDQCet7532s7HTEsjysngYqjKrURJeU8sEBqBx2D"
+    }
+  },
+  "console_transcript": [
+    " - NearCraft (0.1.0)",
+    "[NearCraft] Loading server plugin NearCraft v0.1.0",
+    "[NearCraft] Enabling NearCraft v0.1.0",
+    "[NearCraft] settling through http://127.0.0.1:8080 — this plugin holds no keys",
+    "- NearCraft",
+    "--- NearCraft selftest ---",
+    "Ironmonger (ironmonger)  asks 0.004  bids 0.0032  stock 254  buying",
+    "Ironmonger holds 254 (normally stocked); demand is quiet.",
+    "Stonecutter (stonecutter)  asks 0.006  bids 0.0048  stock 64  buying",
+    "Stonecutter holds 64 (thin); demand is quiet.",
+    "--- end selftest ---",
+    "signed in as p-1d6a3c5d.nearcraftmc.testnet",
+    "credit 0.0080768 NEAR of spend budget, set by the market contract",
+    "holds  2 iron_ingot",
+    "settled on NEAR with Ironmonger (ironmonger)  tx DpArrDQCet7532s7HTEsjysngYqjKrURJeU8sEBqBx2D",
+    "your NEAR balance moved by 0 - the relayer paid the gas",
+    "credit 0.0112768 NEAR of spend budget, set by the market contract",
+    "holds  1 iron_ingot",
+    "[NearCraft] Disabling NearCraft v0.1.0",
+    "[NearCraft] stopped; 1 session(s) forgotten",
+    "Waiting for all RegionFile I/O tasks to complete...",
+    "All RegionFile I/O tasks to complete"
+  ]
+}

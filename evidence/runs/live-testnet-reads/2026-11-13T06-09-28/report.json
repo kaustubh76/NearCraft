@@ -1,0 +1,12 @@
+{
+  "topic": "live-testnet-reads",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 4121,
+  "command": "npm run --silent reads",
+  "cwd": ".",
+  "proves": "The deployed contracts on NEAR testnet answering a public, credential-free query: every merchant ask, bid, stock band and the contract's own reason string. Needs no account and no key. Exits non-zero if the market reports no merchants, if the manifest records no materials, or if no merchant quotes a price for anything — a deployment that answers nothing is not a deployment that answered.",
+  "output_sha256": "6d275192fd2aca23516a0b65dba1e7de1936c162586642d5b890b07080bd7110",
+  "output_bytes": 3242,
+  "recorded_at": "2026-11-13T06:09:35.836Z"
+}

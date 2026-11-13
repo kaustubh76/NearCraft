@@ -1,6 +1,6 @@
 {
   "note": "Written by npm run evidence. Each run keeps its own directory; failures are retained alongside passes and are never edited out.",
-  "recorded_at": "2026-11-12T18:40:07.838Z",
+  "recorded_at": "2026-11-13T06:16:04.893Z",
   "host": {
     "platform": "darwin",
     "arch": "arm64",
@@ -8,7 +8,7 @@
   },
   "wasm_built": true,
   "totals": {
-    "pass": 17,
+    "pass": 18,
     "fail": 0,
     "skipped": 0
   },
@@ -17,7 +17,7 @@
     "Those live reads are VIEW calls only. No check in this script sends a transaction, so no record below is evidence of live write behaviour.",
     "Live write behaviour is evidenced separately, by the retained records in evidence/live/ — each names real transaction hashes on public testnet that anyone can open on an explorer. Those come from npm run live:agent (an agent purchase under a scoped key, screened and human-approved), npm run live:player (a player with NO full-access key buying and selling while its balance moves by exactly zero), and npm run live:stake (a real stake in a merchant, recorded by the contract and repaid out of the margin on a real gasless purchase). Both are deliberately outside this script because they spend real testnet balance.",
     "The live deployment runs at a reduced economy scale (see economy_scale in deployment.json); its figures are not the full-size economy the sandbox runs.",
-    "No Minecraft gameplay is recorded; the plugin is not exercised by any check here.",
+    "The minecraft-plugin check runs the plugin's Java checks offline against a stub HTTP server. It does NOT boot a Minecraft server: that is npm run mc:server, which is outside this script because it downloads a 55 MiB Paper jar and spends live testnet balance. No gameplay by a human player is recorded anywhere, because there is no Minecraft account on this machine; every in-game command evidenced here was issued from the server console.",
     "A passing check establishes what its own output shows and nothing wider."
   ],
   "live_transactions": [
@@ -32,6 +32,28 @@
         "https://testnet.nearblocks.io/txns/AvTEkD3Hm9DkF4uVKwPzJxKujm1usNnFTmdmY548XhLz"
       ],
       "path": "evidence/live/invest-reopen-AvTEkD3Hm9DkF4uVKwPzJxKujm1usNnFTmdmY548XhLz.json"
+    },
+    {
+      "transactions": {
+        "sell": "4Dmr8LKkJYtRYVAmg3RfxfJQoq6g9TeQp4SkaparWJPP",
+        "buy": "5pPhhd4h9H7wb3sv9bYM1C3TkrhbmiaW4wF9w1vGHhwE"
+      },
+      "what": "A sale and a purchase settled on public NEAR testnet from inside a Minecraft server. Every line below was printed by the NearCraft plugin running on Paper 26.3 build 231; the commands were issued at the server console, because there is no Minecraft account on the machine that ran this. The plugin holds no keys: it calls the play service, which holds the player's scoped key.",
+      "explorer": [
+        "https://testnet.nearblocks.io/txns/4Dmr8LKkJYtRYVAmg3RfxfJQoq6g9TeQp4SkaparWJPP",
+        "https://testnet.nearblocks.io/txns/5pPhhd4h9H7wb3sv9bYM1C3TkrhbmiaW4wF9w1vGHhwE"
+      ],
+      "path": "evidence/live/minecraft-4Dmr8LKkJYtRYVAmg3RfxfJQoq6g9TeQp4SkaparWJPP.json"
+    },
+    {
+      "transactions": {
+        "sell": "DpArrDQCet7532s7HTEsjysngYqjKrURJeU8sEBqBx2D"
+      },
+      "what": "A sale settled on public NEAR testnet from inside a Minecraft server. Every line below was printed by the NearCraft plugin running on Paper 26.3 build 231; the commands were issued at the server console, because there is no Minecraft account on the machine that ran this. The plugin holds no keys: it calls the play service, which holds the player's scoped key.",
+      "explorer": [
+        "https://testnet.nearblocks.io/txns/DpArrDQCet7532s7HTEsjysngYqjKrURJeU8sEBqBx2D"
+      ],
+      "path": "evidence/live/minecraft-DpArrDQCet7532s7HTEsjysngYqjKrURJeU8sEBqBx2D.json"
     },
     {
       "transactions": {
@@ -104,7 +126,7 @@
         "stake": "CwWMeG5txLAobS7dozomcBqKBZturJ7iKiY21e3FDEUG",
         "buy": "8s6e5vqwysZj8pMRubF8TkngzZ5erfr7EMdvUyr1pJYA"
       },
-      "what": "p-1d6a3c5d.nearcraftmc.testnet bought and sold 3x iron_ingot holding undefined full-access keys, paying undefined yocto; relayer paid undefined yocto",
+      "what": "A real stake in a merchant on public NEAR testnet, recorded in the contract and repaid out of the margin on a real gasless purchase. The stake is signed with a full-access operator key because invest is payable; the scoped-key path is invest_with_credit, which the live player cannot call because its key predates that method and can never be changed.",
       "explorer": [
         "https://testnet.nearblocks.io/txns/CwWMeG5txLAobS7dozomcBqKBZturJ7iKiY21e3FDEUG",
         "https://testnet.nearblocks.io/txns/8s6e5vqwysZj8pMRubF8TkngzZ5erfr7EMdvUyr1pJYA"
@@ -116,87 +138,92 @@
     {
       "topic": "unit-tests",
       "status": "pass",
-      "path": "evidence/runs/unit-tests/2026-11-12T18-40-07/"
+      "path": "evidence/runs/unit-tests/2026-11-13T06-16-04/"
     },
     {
       "topic": "policy-and-injection",
       "status": "pass",
-      "path": "evidence/runs/policy-and-injection/2026-11-12T18-40-07/"
+      "path": "evidence/runs/policy-and-injection/2026-11-13T06-16-04/"
     },
     {
       "topic": "live-testnet-reads",
       "status": "pass",
-      "path": "evidence/runs/live-testnet-reads/2026-11-12T18-40-07/"
+      "path": "evidence/runs/live-testnet-reads/2026-11-13T06-16-04/"
     },
     {
       "topic": "live-testnet-keys",
       "status": "pass",
-      "path": "evidence/runs/live-testnet-keys/2026-11-12T18-40-07/"
+      "path": "evidence/runs/live-testnet-keys/2026-11-13T06-16-04/"
     },
     {
       "topic": "deployed-code-matches-repo",
       "status": "pass",
-      "path": "evidence/runs/deployed-code-matches-repo/2026-11-12T18-40-07/"
+      "path": "evidence/runs/deployed-code-matches-repo/2026-11-13T06-16-04/"
     },
     {
       "topic": "agent-run",
       "status": "pass",
-      "path": "evidence/runs/agent-run/2026-11-12T18-40-07/"
+      "path": "evidence/runs/agent-run/2026-11-13T06-16-04/"
     },
     {
       "topic": "gasless-play",
       "status": "pass",
-      "path": "evidence/runs/gasless-play/2026-11-12T18-40-07/"
+      "path": "evidence/runs/gasless-play/2026-11-13T06-16-04/"
     },
     {
       "topic": "identity-verification",
       "status": "pass",
-      "path": "evidence/runs/identity-verification/2026-11-12T18-40-07/"
+      "path": "evidence/runs/identity-verification/2026-11-13T06-16-04/"
     },
     {
       "topic": "counterparty-and-approval",
       "status": "pass",
-      "path": "evidence/runs/counterparty-and-approval/2026-11-12T18-40-07/"
+      "path": "evidence/runs/counterparty-and-approval/2026-11-13T06-16-04/"
     },
     {
       "topic": "baseline-integrity",
       "status": "pass",
-      "path": "evidence/runs/baseline-integrity/2026-11-12T18-40-07/"
+      "path": "evidence/runs/baseline-integrity/2026-11-13T06-16-04/"
     },
     {
       "topic": "nep245-conformance",
       "status": "pass",
-      "path": "evidence/runs/nep245-conformance/2026-11-12T18-40-07/"
+      "path": "evidence/runs/nep245-conformance/2026-11-13T06-16-04/"
     },
     {
       "topic": "view-methods-callable",
       "status": "pass",
-      "path": "evidence/runs/view-methods-callable/2026-11-12T18-40-07/"
+      "path": "evidence/runs/view-methods-callable/2026-11-13T06-16-04/"
     },
     {
       "topic": "access-key-limits",
       "status": "pass",
-      "path": "evidence/runs/access-key-limits/2026-11-12T18-40-07/"
+      "path": "evidence/runs/access-key-limits/2026-11-13T06-16-04/"
     },
     {
       "topic": "money-invariant",
       "status": "pass",
-      "path": "evidence/runs/money-invariant/2026-11-12T18-40-07/"
+      "path": "evidence/runs/money-invariant/2026-11-13T06-16-04/"
     },
     {
       "topic": "solvency",
       "status": "pass",
-      "path": "evidence/runs/solvency/2026-11-12T18-40-07/"
+      "path": "evidence/runs/solvency/2026-11-13T06-16-04/"
     },
     {
       "topic": "state-migration",
       "status": "pass",
-      "path": "evidence/runs/state-migration/2026-11-12T18-40-07/"
+      "path": "evidence/runs/state-migration/2026-11-13T06-16-04/"
     },
     {
       "topic": "cross-contract-economy",
       "status": "pass",
-      "path": "evidence/runs/cross-contract-economy/2026-11-12T18-40-07/"
+      "path": "evidence/runs/cross-contract-economy/2026-11-13T06-16-04/"
+    },
+    {
+      "topic": "minecraft-plugin",
+      "status": "pass",
+      "path": "evidence/runs/minecraft-plugin/2026-11-13T06-16-04/"
     }
   ]
 }

@@ -1,0 +1,12 @@
+{
+  "topic": "deployed-code-matches-repo",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 2900,
+  "command": "npm run --silent verify:deployed",
+  "cwd": ".",
+  "proves": "The code running on NEAR testnet is the code this repo builds: for each contract, base58 of sha256 of the local wasm equals the code_hash the chain reports, read with a public credential-free view_account call. Written because items was found running bytes this repo does not build — the A3 bug class, a fix that silently never reaches the chain, whose only clue is a deploy log line that looks like success. It FAILED on items the first time it ran, and passed after a redeploy. The three deployed contracts are now built with cargo near build reproducible-wasm inside a digest-pinned container from a named commit, so these hashes are a function of the committed source and not of this machine: anyone can run npm run build:reproducible on this commit and get the same bytes. The chain says which commit and which container, because NEP-330 build_info is populated where it read null before — which is what lets SourceScan and NearBlocks verify the contracts. It also checks the half a hash cannot see: a hash match only proves the chain runs the wasm on this disk, not that the wasm was built from the source now in the repo. Editing a contract and skipping the rebuild left all three hashes matching, demonstrated rather than feared, so the script now reads the commit each contract names and compares the build inputs at that commit against the working tree, reporting SOURCE MOVED and exiting non-zero when they differ. No rebuild, no credentials, no Docker. The remaining limit, which the script prints itself: npm run build:contracts uses the local rustc and is deliberately NOT byte-stable, so comparing against that build proves nothing, and the failure message says so rather than leaving a reader to guess.",
+  "output_sha256": "b8808294b45a3fce946587a53d4200f615be071666caf1f0b0681190829deedf",
+  "output_bytes": 1511,
+  "recorded_at": "2026-11-13T06:09:41.179Z"
+}
