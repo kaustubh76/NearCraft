@@ -214,7 +214,7 @@ deployed contracts are now built with `cargo near build reproducible-wasm`,
 inside a digest-pinned container, from a commit:
 
 ```sh
-git checkout 4da447eb17c279c4ba4d1f3f07a9ec4e2561baac
+git checkout 46d812fb4d661ede3cdba1a92c81b8c3bbff313c
 npm run build:reproducible      # needs Docker; ~3 min per contract
 npm run verify:deployed
 ```
@@ -232,7 +232,7 @@ chain will tell you which commit and which container, because NEP-330
 
 ```
 build_environment      sourcescan/cargo-near:0.22.0-rust-1.99.1@sha256:c9655eaf…
-source_code_snapshot   git+https://github.com/kaustubh76/NearCraft?rev=4da447eb…
+source_code_snapshot   git+https://github.com/kaustubh76/NearCraft?rev=46d812fb…
 build_command          cargo near build non-reproducible-wasm --locked
 ```
 

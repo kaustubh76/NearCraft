@@ -1,0 +1,70 @@
+
+--- gasless purchase ---
+  player  delta 0 yoctoNEAR
+  relayer delta -28174325718600400000000 yoctoNEAR
+  player received 3 iron_ingot
+
+  deposit on a delegate's inner action: REFUSED — Deposit is not allowed with function call
+
+✔ a player buys with no key of their own and pays no gas (7006.739167ms)
+
+--- gasless sale, player holds no full-access key ---
+  player  delta 274737763755900000000 yoctoNEAR
+  relayer delta -58127705227374300000000 yoctoNEAR
+  player materials 50 -> 40, credited 600000000000000000000000 yoctoNEAR
+
+  (player gained 274737763755900000000 — unused gas refunded to the delegate sender)
+
+✔ a player with no full-access key sells, and still pays nothing (6771.055084ms)
+
+--- gasless investment ---
+  player  delta 0 yoctoNEAR
+  relayer delta -60990742713607000000000 yoctoNEAR
+  stake recorded: {"account_id":"player.sandbox","principal":"1000000000000000000000000","repaid":"0"}
+
+✔ a player with no full-access key backs a merchant, and still pays nothing (6243.652791ms)
+
+--- the play service, end to end ---
+  player   p-1d6a3c5d5b87ed0e.sandbox
+  bought 2, sold 1 -> holding 1
+  player NEAR delta 0 yoctoNEAR
+  buy reported 0, sell reported 0
+
+  staked 1000000000000000000000 yocto -> backer p-1d6a3c5d5b87ed0e.sandbox, principal 1000000000000000000000
+✔ the play service runs the whole loop on a real node, and the player pays nothing (8014.029166ms)
+
+--- a relayed call whose inner action panicked ---
+  threw      INNER_CALL_FAILED: Smart contract panicked: approval_id does not match the current approval
+  materials  50 -> 50
+  credit     0
+
+✔ a relayed call whose INNER action panics is reported as a failure, not a hash (6876.350458ms)
+
+--- two relays in flight for one player ---
+  call 1  fulfilled
+  call 2  fulfilled
+  player holds  7 iron_ingot
+
+✔ two calls in flight for one player do not collide on the delegate nonce (7232.493334ms)
+
+--- a sign-in that died at step 2 ---
+  account        p-0bbc650b6e17569c.sandbox
+  threw          ContractExecutionError
+  keys on chain  1 (1 full-access)
+  key parked     true
+  resumed        true
+  server key     issued
+  keys on chain  1 (0 full-access)
+  key parked     false
+
+  dead key       ACCOUNT_ALREADY_RESTRICTED
+✔ a sign-in that died half-way is resumed, not stranded forever (4317.744292ms)
+✔ without a store, a half-finished account behaves exactly as it always did (1478.071708ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 48098.787541

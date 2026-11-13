@@ -332,6 +332,47 @@ if (await exists('minecraft/')) {
 
 const readmeText = await readFile(new URL('README.md', ROOT), 'utf8')
 
+// 8a. The commit the README tells a verifier to check out.
+//
+// It said `git checkout 4da447eb…` for three deployments after that commit had
+// been superseded, so anyone following the instructions got a mismatch and the
+// strongest claim in this project looked false. A reproducible build embeds
+// the commit IN the wasm, which makes this checkable offline rather than
+// hand-maintained: read it back out of the artifact.
+//
+// Skipped, not failed, when the contracts have not been built — a fresh clone
+// has no artifacts and has nothing to be wrong about. Both forms in the README
+// are checked, the full hash and the abbreviated one, because they rotted
+// together and would again.
+try {
+  const wasm = await readFile(
+    new URL('contracts/target/near/nearcraft_items/nearcraft_items.wasm', ROOT),
+  )
+  const built = wasm.toString('latin1').match(/rev=([0-9a-f]{40})/)?.[1]
+  if (built) {
+    const full = readmeText.match(/git checkout ([0-9a-f]{40})/)
+    if (!full) {
+      fail('README.md', 'no `git checkout <commit>` line found — the reproducible-build '
+        + 'instructions were reworded, so this check now verifies nothing')
+    } else if (full[1] !== built) {
+      fail('README.md', `tells a verifier to check out ${full[1].slice(0, 8)}…, but the built `
+        + `contract was made from ${built.slice(0, 8)}… — following the README would mismatch`)
+    } else { commandsChecked++ }
+
+    const short = readmeText.match(/\?rev=([0-9a-f]{8})…/)
+    if (!short) {
+      fail('README.md', 'no abbreviated `?rev=…` line found — it was reworded, so this '
+        + 'check now verifies nothing')
+    } else if (!built.startsWith(short[1])) {
+      fail('README.md', `shows source_code_snapshot rev=${short[1]}…, but the built contract `
+        + `was made from ${built.slice(0, 8)}…`)
+    } else { commandsChecked++ }
+  }
+} catch (e) {
+  // No artifact is a legitimate state. A malformed one is not.
+  if (!/ENOENT/.test(e?.message ?? '')) fail('contracts/target', `could not be read: ${e.message}`)
+}
+
 // 8b. What the deployment actually contains, counted from the manifest.
 //
 // The README said "5 merchants, 2 agents, 1 player" for weeks, and it was true
