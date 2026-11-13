@@ -32,6 +32,7 @@
 // the chain, so a player can check what is being held on their behalf.
 
 import { randomBytes, randomUUID } from 'node:crypto'
+import { PLAYER_GAS } from './market.mjs'
 import {
   buyWithCreditRequest,
   sellUnderApprovalRequest,
@@ -227,6 +228,15 @@ export function createPlayService({
       playerKey: playerKey(s.accountId),
       methodName,
       args,
+      // EXPLICIT, because the relayer's default is 60 TGas and that is not
+      // enough for every method here. `sell` statically reserves 27 TGas for
+      // the cross-contract pull and its callback before its own body runs, and
+      // `scripts/live-player.mjs` was raised to 100 TGas for exactly that —
+      // while this path, the one a browser and the Minecraft plugin actually
+      // use, was left on the default. An out-of-gas there lands on the
+      // mt_transfer receipt and is absorbed by `on_materials_pulled`, so the
+      // symptom is a 502 that never mentions gas.
+      gas: PLAYER_GAS,
     })
     const after = BigInt(await reader.nearBalance(s.accountId))
     log({ event: 'relayed', accountId: s.accountId, methodName, delta: (after - before).toString() })

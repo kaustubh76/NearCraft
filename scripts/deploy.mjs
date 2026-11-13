@@ -184,8 +184,20 @@ function as(accountId) {
 }
 
 async function deployed(accountId) {
-  const state = await p.query({ request_type: 'view_account', finality: 'final', account_id: accountId })
-  return state.code_hash && state.code_hash !== '11111111111111111111111111111111'
+  // Wrapped, and `optimistic`, for the same reason `exists()` above is: this
+  // runs immediately after `ensureAccount` created the account, and the FINAL
+  // block has not seen it yet. Unwrapped and at `final` this threw
+  // UnknownAccount and killed a first run AFTER root had already paid to
+  // create three contract accounts. The workaround was applied to the relayer
+  // account further down and not to these.
+  try {
+    const state = await p.query({ request_type: 'view_account', finality: 'optimistic', account_id: accountId })
+    return state.code_hash && state.code_hash !== '11111111111111111111111111111111'
+  } catch {
+    // No account, or not visible yet. Either way there is no code to carry, and
+    // the caller's next move — deploy it — is right in both cases.
+    return false
+  }
 }
 
 /// Has `new` already run here? Answered with a FREE view rather than by calling

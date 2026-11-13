@@ -88,6 +88,10 @@ async fn every_view_method_is_callable_as_a_view() -> anyhow::Result<()> {
         (&world.items, "mt_tokens", json!({ "from_index": "0", "limit": 10 })),
         (&world.items, "mt_tokens_for_owner", json!({ "account_id": market_id, "from_index": "0", "limit": 10 })),
         (&world.items, "mt_token_approval", json!({ "token_id": IRON, "account_id": market_id })),
+        // The sixth Approval Management method. This test's both-directions
+        // check caught it the moment it was added and not called here, which
+        // is the only reason it is covered at all.
+        (&world.items, "mt_token_approvals", json!({ "token_id": IRON, "from_index": "0", "limit": 10 })),
         // THE one that was broken. Left in the list rather than given a test of
         // its own, because the bug was never specific to it.
         (&world.items, "mt_is_approved", json!({

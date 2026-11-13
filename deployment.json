@@ -1,5 +1,5 @@
 {
-  "note": "Written by npm run deploy. Public ids only — no secret material.",
+  "note": "Written by npm run deploy. Public ids only \u2014 no secret material.",
   "network": "testnet",
   "rpc": "https://test.rpc.fastnear.com",
   "deployed_at": "2026-11-12T11:18:46.312Z",
@@ -44,13 +44,24 @@
   ],
   "players": [
     {
+      "account_id": "p-62b0b2438ca03ae4.nearcraftmc.testnet",
+      "permitted_methods": [
+        "buy_with_credit",
+        "sell",
+        "invest_with_credit"
+      ],
+      "function_call_public_key": "ed25519:prMycaM98pq1R4pccvYVRo5izBMgsLovs5CNvKD7f64",
+      "note": "Onboarded under the 64-bit derivation. This is the player npm run mc:up demos."
+    },
+    {
       "account_id": "p-62b0b243.nearcraftmc.testnet",
       "permitted_methods": [
         "buy_with_credit",
         "sell",
         "invest_with_credit"
       ],
-      "function_call_public_key": "ed25519:G1EqfQ3bzBBcWU4EXnj79ybaMj97Zs18n5MWL5ww9bgJ"
+      "function_call_public_key": "ed25519:G1EqfQ3bzBBcWU4EXnj79ybaMj97Zs18n5MWL5ww9bgJ",
+      "note": "Onboarded under the previous 32-bit account derivation. Still a real player with a real scoped key, and kept here so npm run keys keeps auditing it; the derivation is 64 bits now, so the same login derives a longer id. See backend/near/onboarding.mjs."
     },
     {
       "account_id": "p-6928989e.nearcraftmc.testnet",
@@ -59,7 +70,8 @@
         "sell",
         "invest_with_credit"
       ],
-      "function_call_public_key": "ed25519:GmaW6Y9biNiz7Xhz8y3CTYUpUjhe5yxgW384pRt37pTh"
+      "function_call_public_key": "ed25519:GmaW6Y9biNiz7Xhz8y3CTYUpUjhe5yxgW384pRt37pTh",
+      "note": "Onboarded under the previous 32-bit account derivation. Still a real player with a real scoped key, and kept here so npm run keys keeps auditing it; the derivation is 64 bits now, so the same login derives a longer id. See backend/near/onboarding.mjs."
     },
     {
       "account_id": "p-1d6a3c5d.nearcraftmc.testnet",
@@ -67,7 +79,8 @@
         "buy_with_credit",
         "sell"
       ],
-      "function_call_public_key": "ed25519:69tLBGBhuXTHU4mccA6EKfi7aieyC2GhFLffU1Gjpuus"
+      "function_call_public_key": "ed25519:69tLBGBhuXTHU4mccA6EKfi7aieyC2GhFLffU1Gjpuus",
+      "note": "Onboarded under the previous 32-bit account derivation. Still a real player with a real scoped key, and kept here so npm run keys keeps auditing it; the derivation is 64 bits now, so the same login derives a longer id. See backend/near/onboarding.mjs."
     }
   ],
   "relayer": {

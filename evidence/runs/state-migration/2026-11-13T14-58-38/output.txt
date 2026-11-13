@@ -1,0 +1,13 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.54s
+     Running tests/migration.rs (target/debug/deps/migration-3fa68f7bbcf7258c)
+
+running 3 tests
+test only_the_contract_itself_may_migrate ... ok
+  before migration: Facts { owed: 21000000000000000000000000, treasury: 19000000000000000000000000, stock: 246, credit: 2000000000000000000000000, quoted: 1272000000000000000000000 }
+test migrating_again_changes_nothing ... ok
+  bricked as expected: every view fails to deserialize the state
+  after migration:  Facts { owed: 21000000000000000000000000, treasury: 19000000000000000000000000, stock: 246, credit: 2000000000000000000000000, quoted: 1272000000000000000000000 }
+test a_plain_redeploy_bricks_live_state_and_migrate_rescues_it ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.07s
+

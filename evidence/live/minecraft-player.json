@@ -1,13 +1,13 @@
 {
   "note": "A headless Minecraft client — a bot, not a person — joined a Paper server, signed in with a seeded demo identity (any string; the OIDC verifier was not the one running). It bought iron and received the ingot in a real PlayerInventory, then sold it back. Every write was relayed, so the player paid no gas. The server ran online-mode=false because a headless client has no Mojang account; npm run mc:server, which is the documented way to run this, keeps online-mode=true.",
-  "recorded_at": "2026-11-13T10:33:07.174Z",
+  "recorded_at": "2026-11-13T14:51:36.589Z",
   "network": "testnet",
   "paper": "26.3 build 231",
   "client": "mineflayer 4.39.0 speaking 1.21.11 through ViaVersion 5.12.2",
   "username": "nearcraft_bot",
   "online_mode": false,
-  "player": "p-62b0b243.nearcraftmc.testnet",
-  "explorer": "https://testnet.nearblocks.io/address/p-62b0b243.nearcraftmc.testnet",
+  "player": "p-62b0b2438ca03ae4.nearcraftmc.testnet",
+  "explorer": "https://testnet.nearblocks.io/address/p-62b0b2438ca03ae4.nearcraftmc.testnet",
   "login": "seeded subject",
   "checks": [
     {
@@ -18,12 +18,12 @@
     {
       "what": "the player signed in from inside the game",
       "ok": true,
-      "detail": "signed in as p-62b0b243.nearcraftmc.testnet"
+      "detail": "signed in as p-62b0b2438ca03ae4.nearcraftmc.testnet"
     },
     {
       "what": "the purchase settled on NEAR",
       "ok": true,
-      "detail": "settled on NEAR with Ironmonger (ironmonger)  tx 135NiJcQhmDPR91W9GFMca6TXt3PghcnBPEPbuikN7X9"
+      "detail": "settled on NEAR with Ironmonger (ironmonger)  tx 5RW5nTSBkkxB9FPKAaB6uW74NWRS7DwxhGyyXBCmsJRV"
     },
     {
       "what": "the player paid no gas for it",
@@ -43,7 +43,7 @@
     {
       "what": "the sale settled on NEAR",
       "ok": true,
-      "detail": "settled on NEAR with Ironmonger (ironmonger)  tx CJwFXieQHgPAUYpyXRYqhf5CsEXHJksh9xFf27cxU2ro"
+      "detail": "settled on NEAR with Ironmonger (ironmonger)  tx Hv6o5zWtfXjEDJUv3mU91h4ibtKzy1PbvP8QDGdT6sJo"
     },
     {
       "what": "the iron_ingot left the inventory when sold",

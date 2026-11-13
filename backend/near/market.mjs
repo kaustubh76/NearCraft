@@ -8,9 +8,14 @@
 // shapes being exactly right and a wrong one is invisible until a player loses
 // an item.
 
-/// Gas for a player purchase: one cross-contract mt_transfer plus the rollback
-/// callback. Players sign with a full-access key so there is no allowance
-/// ceiling to respect, unlike an agent (see policy.mjs).
+/// Gas for a player call: one cross-contract mt_transfer plus the rollback
+/// callback.
+///
+/// The old comment here said "players sign with a full-access key so there is
+/// no allowance ceiling to respect". That is false, and contradicted further
+/// down this very file: a player holds ONE function-call key with a gas-only
+/// allowance, which is the whole product. The ceiling is real — 2 NEAR, about
+/// 2,980 calls at the measured burn — and `npm run keys` audits the headroom.
 export const PLAYER_GAS = 100_000_000_000_000n
 
 /// Materials a player may name. The plugin sends Minecraft item ids, which are

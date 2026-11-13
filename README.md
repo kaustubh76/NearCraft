@@ -28,7 +28,7 @@ column before the description.
 | `backend/near/counterparty.mjs` — allow/warn/block | **Built and tested.** 23 tests. Pure scoring, no API key, no indexer. |
 | `backend/near` — signer, policy, warn→human approval | **Built and tested.** 59 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
 | **Sandbox integration tests** | **Built and passing.** A real local NEAR node via `near-workspaces`. 18 tests: 4 prove a restricted key's limits *at the protocol level*, 9 cover the cross-contract buy/sell/rollback paths, the economy, the money invariant and solvency, 3 the state migration (including bricking a contract with a plain redeploy and rescuing it), 1 that every view is callable *as a view*, and 1 that the node starts. These counts are checked by `npm run check:docs` against the tests that actually exist — they had rotted to 74 and 12. |
-| **Deployed to NEAR testnet** | **Yes.** `items.nearcraftmc.testnet`, `market.nearcraftmc.testnet`, `guard.nearcraftmc.testnet` — 5 merchants, 2 agents, 3 players. `npm run reads` and `npm run keys` query it with no credentials. |
+| **Deployed to NEAR testnet** | **Yes.** `items.nearcraftmc.testnet`, `market.nearcraftmc.testnet`, `guard.nearcraftmc.testnet` — 5 merchants, 2 agents, 4 players. `npm run reads` and `npm run keys` query it with no credentials. |
 | The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls — **135 real transactions in 26.4s** on a real nearcore node — 5.1 trades a second, measured over three runs — buyers running concurrently. `npm run sim` |
 | `web/market.html` | **Built, reads the live chain, and is playable.** Every merchant's ask, bid, stock band and the contract's own reason string, read from the deployed contract over public RPC with no API key. Falls back to the retained simulation snapshot when offline, and says which it is showing. With `npm run play` behind it the page also signs players in and trades: buy and sell on each row, and a strip showing your NEAR balance before and after every call. 16 tests. `npm run web` / `npm run play` |
 | **A real stake in a merchant on public testnet** | **Done.** [`CwWMeG5t…`](https://testnet.nearblocks.io/txns/CwWMeG5txLAobS7dozomcBqKBZturJ7iKiY21e3FDEUG) — 0.05 NEAR staked in the Ironmonger and recorded by the contract, then [`8s6e5vqw…`](https://testnet.nearblocks.io/txns/8s6e5vqwysZj8pMRubF8TkngzZ5erfr7EMdvUyr1pJYA), a gasless purchase whose margin repaid 0.005924 NEAR of it. `ledger_total` rose by exactly the stake and the purchase moved it by nothing. `npm run live:stake`, retained in `evidence/live/`. |
@@ -522,6 +522,77 @@ port was worth doing rather than relabelling, and it is what the `security`
 track is being entered on.
 
 ---
+
+## The NEAR audit — what it found, and what is still open
+
+The contracts and the backend were audited against NEAR protocol semantics and
+the NEP specifications read from the NEPs repository. It found two money bugs
+and a trust bug. All three are fixed, each proved by a test written to fail
+first; the rest is listed here because it is not fixed.
+
+**Fixed, and the tests that catch them again**
+
+| | |
+|---|---|
+| `market.sell` created money | It credited the seller **before** pulling the materials, then unwound asymmetrically: treasury restored in full and unconditionally, credit clawed back with `saturating_sub`. Spend the credit inside that window and the clamp absorbed the shortfall. Free to trigger — `approval_id` came straight from the caller and was never validated, so a garbage id failed the pull every time from a scoped key with the relayer paying. The seller is now credited only once the materials arrive. `a_failed_pull_must_not_restore_a_treasury_it_cannot_debit` creates 6.4 NEAR out of nothing against the old ordering. |
+| A rolled-back purchase bought trust | `backend/near/signer.mjs` called `callFunctionRaw` and never read `receipts_outcome`. near-api-js throws only on the **top-level** status, which stays `SuccessValue` when a contract absorbs its own failure — so a purchase the contract rolled back was logged `settled`, and `counterparty.recordSuccess` incremented the counter governing `INTERACTIONS_FOR_TRUST`. The check now lives in `backend/near/outcome.mjs` and **both** signing paths import it. |
+| That check had never seen a receipt | `grep innerFailure` returned three lines: the definition, its loop, its one call site. The test that looked like coverage stubs the whole relayer. `tests/near/gasless.mjs` now relays a call whose inner action panics on a real node and asserts the contract's own words survive the walk. |
+| `mt_token_approvals` did not exist | The sixth Approval Management method. `npm run check:nep245` reported "5/5" because its own required-method list was missing it too — the implementation was its own denominator. |
+| NEP-330 understated the contract | `#[near]` emits `nep330` alone, so the chain reported one standard for a contract implementing NEP-245 and emitting NEP-297 events. It declares all three now. |
+| 32-bit account ids | A derivation collision made the second identity inherit the first player's custodial key. 64 bits now, which also brought `ACCOUNT_ID_TOO_LONG` to life — at 32 bits it was unreachable. |
+| Two vacuous assertions | `assert!(x.contains(r#""old_owner_id":"alice""#) || x.contains("old_owner_id"))` — the right disjunct subsumes the left, so both passed for the wrong owner. |
+
+**Open, and disclosed rather than fixed.** Each is a real finding with a file
+and a line; none of them is claimed to be harmless.
+
+- **`on_items_delivered` keeps the same clamp on the buy side**
+  (`contracts/market/src/lib.rs`). The buyer's deposit sits in the merchant's
+  treasury, and `withdraw_treasury` can send it out before the callback lands;
+  the clamp then under-debits while the buyer is credited in full. It cannot be
+  fixed the way `sell` was — the buyer's NEAR is already in the contract and
+  they are owed it whatever the merchant did since — so the remedy is reserving
+  in-flight funds, which needs new state and therefore a migration. Until then
+  the shortfall at least logs a `SOLVENCY WARNING` instead of being silent.
+- **A partially completed `signIn` strands an account**
+  (`backend/near/onboarding.mjs`). It is three transactions and the bootstrap
+  key is a local variable. If step 2 throws — `mt_approve` panics on a token id
+  never minted — the account keeps a live full-access key nobody holds, and
+  `exists()` makes every later login return `created: false` with no key, so
+  that identity is permanently unusable. Recovering needs the bootstrap key
+  persisted before step 2.
+- **`restock` can be looped to drain a poor merchant.** It is permissionless and
+  non-payable, and when the merchant cannot afford the full gap the shelf stays
+  under the trigger, so the guard re-arms. The comment claiming repeated poking
+  is a no-op is wrong. Money is conserved; availability is not.
+- **No NEP-145, and state can be grown for a yoctoNEAR.** `fund_credit` creates
+  a permanent entry for any account id, `mt_transfer` the same for any receiver,
+  and `mt_approve` pushes into an unbounded `Vec` that every later transfer on
+  that pair must deserialize. `guard` bounds its equivalent; `items` does not.
+- **Three NEP-245 deviations.** `mt_is_approved` takes a required fifth
+  `owner_id`, so a spec-conformant client fails deserialization;
+  `mt_resolve_transfer` refunds the tokens but not the approval allowance a
+  refused transfer consumed; and a short return from `mt_on_transfer` is read as
+  "fully used" when the safe default is the other way.
+- **`npm run check:nep245` is a name-and-modifier gate.** It reads the compiled
+  ABI, which is real, but only method names and modifiers — no parameters, no
+  types, no return types, no view/call kind. A contract implementing every
+  method with the wrong semantics passes it. Semantics rest on the unit tests.
+- **`market` emits twelve plain `env::log_str` lines**, none of them NEP-297
+  events and none shape-asserted. `items` is the contract with a real event
+  envelope.
+- **`verifyKeyScope` is never called** (`backend/near/signer.mjs`). It exists to
+  stop an agent whose key turned out to be full-access or wrongly scoped, and
+  nothing asks it.
+- **Concurrent relays for one player collide on the delegate nonce.** Two calls
+  in flight compute the same nonce and the second is rejected. It fails loudly,
+  which is the right direction, but it is not handled.
+- **The session id travels in a query string**, so it lands in access logs.
+- **`guard` is still deployed from the earlier commit.** Its source has not
+  changed, and `items` and `market` are at the commit this section describes.
+  Bringing all three to one commit needs a `guard` redeploy that has not been
+  made, so `npm run verify:deployed` reports `guard DIFFERS` against a locally
+  rebuilt artifact — which is the script's own documented "a DIFFERS against
+  THAT build tells you nothing on its own".
 
 ## Verify it yourself
 

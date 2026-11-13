@@ -1,0 +1,49 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.88s
+     Running tests/views.rs (target/debug/deps/views-8c037fdba2a085b5)
+
+running 1 test
+
+--- calling 29 view methods as real view calls ---
+  ok        items.dev-20261113145629-37945826189970.test.near.contract_source_metadata
+  ok        items.dev-20261113145629-37945826189970.test.near.mt_owner
+  ok        items.dev-20261113145629-37945826189970.test.near.mt_balance_of
+  ok        items.dev-20261113145629-37945826189970.test.near.mt_batch_balance_of
+  ok        items.dev-20261113145629-37945826189970.test.near.mt_supply
+  ok        items.dev-20261113145629-37945826189970.test.near.mt_batch_supply
+  ok        items.dev-20261113145629-37945826189970.test.near.mt_token
+  ok        items.dev-20261113145629-37945826189970.test.near.mt_tokens
+  ok        items.dev-20261113145629-37945826189970.test.near.mt_tokens_for_owner
+  ok        items.dev-20261113145629-37945826189970.test.near.mt_token_approval
+  ok        items.dev-20261113145629-37945826189970.test.near.mt_is_approved
+  ok        market.dev-20261113145629-37945826189970.test.near.contract_source_metadata
+  ok        market.dev-20261113145629-37945826189970.test.near.items_contract
+  ok        market.dev-20261113145629-37945826189970.test.near.merchants
+  ok        market.dev-20261113145629-37945826189970.test.near.merchant
+  ok        market.dev-20261113145629-37945826189970.test.near.is_closed
+  ok        market.dev-20261113145629-37945826189970.test.near.credit_of
+  ok        market.dev-20261113145629-37945826189970.test.near.quote
+  ok        market.dev-20261113145629-37945826189970.test.near.quotes
+  ok        market.dev-20261113145629-37945826189970.test.near.ledger_total
+  ok        market.dev-20261113145629-37945826189970.test.near.basis_of
+  ok        market.dev-20261113145629-37945826189970.test.near.backer_of
+  ok        guard.dev-20261113145629-37945826189970.test.near.contract_source_metadata
+  ok        guard.dev-20261113145629-37945826189970.test.near.threshold
+  ok        guard.dev-20261113145629-37945826189970.test.near.blocked
+  ok        guard.dev-20261113145629-37945826189970.test.near.is_reported
+  ok        guard.dev-20261113145629-37945826189970.test.near.reporter_count
+  ok        guard.dev-20261113145629-37945826189970.test.near.reports_for
+  ok        guard.dev-20261113145629-37945826189970.test.near.summary
+
+thread 'every_view_method_is_callable_as_a_view' (13057851) panicked at integration/tests/views.rs:161:5:
+these views exist in the compiled ABI but are never called by this test, so nothing here would notice if they became unreachable: ["nearcraft_items.mt_token_approvals"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test every_view_method_is_callable_as_a_view ... FAILED
+
+failures:
+
+failures:
+    every_view_method_is_callable_as_a_view
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.18s
+
+error: test failed, to rerun pass `-p nearcraft-integration --test views`
