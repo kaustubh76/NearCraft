@@ -1,0 +1,54 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.54s
+     Running tests/economy.rs (target/debug/deps/economy-9da706a79aec583d)
+
+running 9 tests
+
+--- delivery failed, purchase rolled back ---
+  logs: delivery failed; purchase rolled back and 1500000000000000000000000 yoctoNEAR credited to player.dev-20261113181245-53587831846944.test.near
+  player holds 0 glass, credited 1500000000000000000000000 yoctoNEAR
+
+--- shelf drained to 10, market holds 100000 iron_ingot ---
+
+--- closed merchant refuses, resolver refunds ---
+  player still holds 6 iron_ingot, credit unchanged: true
+test a_failed_delivery_rolls_the_whole_purchase_back ... ok
+test a_closed_merchant_refuses_a_sale_and_the_materials_come_back ... ok
+--- restocked to 53, market now holds 100043 (minted 43) ---
+
+--- solvency across a trading session ---
+  at genesis             owes     15000000000000000000000000  holds     26997618789282236800000000
+
+--- purchase across two contracts ---
+  paid 4000000000000000000000000 yoctoNEAR, received 10 iron_ingot
+  shelf now 246, merchant treasury +4000000000000000000000000
+
+--- sale via mt_transfer_call -> mt_on_transfer ---
+  sold 12 iron_ingot at a bid of 358400000000000000000000, proceeds 4300800000000000000000000
+  player holds 8 iron_ingot, shelf 248
+test a_purchase_moves_materials_across_contracts ... ok
+test a_sale_routes_through_mt_transfer_call ... ok
+test restocking_mints_the_goods_it_claims ... ok
+
+--- flooding an undercapitalised merchant ---
+  after lot 1: treasury 220000000000000000000000 yoctoNEAR
+  closed after 1 lot(s)
+  posts no bid, still sells: "Pauper holds 260 (normally stocked) but will not buy more: it has 0.220 NEAR left to spend and one costs 0.320."
+
+  after three buys       owes     25060800000000000000000000  holds     37058418789282236799999997
+  backer staked 3.00 NEAR and has earned back 1526349206349206349206349 after one sale of 8
+test a_merchant_can_be_flooded_until_it_stops_buying ... ok
+test a_backer_earns_its_stake_back_out_of_the_merchant_s_margin ... ok
+  after selling back     owes     25060800000000000000000000  holds     37058418789282236799999997
+  after an investment    owes     27060800000000000000000000  holds     39058418789282236799999997
+  before withdrawing     owes     27060800000000000000000000  holds     39058418789282236799999997
+  after withdrawing      owes     24132160000000000000000000  holds     36129778789282236799999997
+test the_market_never_owes_more_than_it_holds ... ok
+
+--- withdrawal ---
+  credit 3392000000000000000000000 yoctoNEAR; account balance 15983247380938036499999999 -> 18391948324235862199999999
+  second withdrawal refused
+
+test withdrawals_move_real_near ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 48.90s
+

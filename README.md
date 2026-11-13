@@ -526,14 +526,30 @@ track is being entered on.
 ## The NEAR audit — what it found, and what is still open
 
 The contracts and the backend were audited against NEAR protocol semantics and
-the NEP specifications read from the NEPs repository. It found two money bugs
-and a trust bug. All three are fixed, each proved by a test written to fail
-first; the rest is listed here because it is not fixed.
+the NEP specifications read from the NEPs repository, in two rounds.
+
+The first round found two money bugs and a trust bug. The second round went
+back over what the first had disclosed rather than fixed, and found that **the
+headline money bug had the same shape in three places, not one** — and that one
+of those three had not been found at all. It also found one disclosure that was
+simply wrong: the buy side was written up as unfixable without new state and a
+migration, and it was fixable the same way the sell side had been.
+
+Everything below is proved by a test written to fail first. What is still open
+is listed after, because it is not fixed.
 
 **Fixed, and the tests that catch them again**
 
 | | |
 |---|---|
+| The same money bug was in three places | `sell` was fixed in round one. `buy`/`settle_purchase` and `restock` were not, and **`restock` had not been found at all**. All three credited somebody before a cross-contract call and clawed it back with `saturating_sub` if the call failed, while restoring the other side in full — so spending inside the window left `ledger_total` above the NEAR held. All three now pay on the callback. Three interleaved tests, each red first: a treasury emptied by `withdraw_treasury` between a purchase and its failed delivery, the same on the credit path, and the house withdrawing between a restock and its failed mint. |
+| A disclosure that was wrong | This README said the buy side "cannot be fixed the way `sell` was" and needed "reserving in-flight funds, which needs new state and therefore a migration". That was wrong. `withdraw_treasury` can only pay out what is **in** the treasury, so money never put there cannot leave: not crediting until the goods arrive **is** the reservation. No new field, no migration. A gap written down is still only a claim. |
+| `verifyKeyScope` was never called | It asks the chain whether the agent's key really is as narrow as the agent believes, and **nothing invoked it** — the definition, the export, and a comment leaning on it. It runs on both signing paths now. The human-approval path re-reads the chain rather than a memo, because a key's permission *can* widen in place (`DeleteKey` then `AddKey` on the same public key) and a parked call waits on a person for an unbounded time. Against the memo that check could not fail; the first version of it was exactly that, and the test caught it. |
+| Two relays for one player collided | The delegate nonce belongs to the **player**, not the relayer. Two calls built before either landed signed the same nonce and nearcore rejected the second — `Invalid delegate nonce (ak: 41000001, delegate: 41000001)`, measured in the sandbox. Reachable from the product: Minecraft and the web page both let a player act twice quickly. Relays are queued per player now, across sign **and** submit, since the nonce only advances on inclusion. |
+| A half-finished sign-in stranded an identity forever | `signIn` is three transactions and the bootstrap full-access key was a local `const`. A failure at step 2 lost it while it was still installed — leaving an account that exists, holds a live full-access key nobody holds, and sends every later login down the `created: false` branch with no key to return. A permanent 503 for that player, and the state `npm run keys` reports as FAIL. The key is parked before the account is created and dropped once it is dead on chain, and the next sign-in finishes the job. Opt-in, so the players onboarded before it behave exactly as they did. |
+| A short answer from a receiver forfeited materials | `mt_on_transfer` returns one unused figure per token. An over-long answer was clamped; a **short** one was read as "the receiver kept everything". It refunds now. The market always returns one entry per token, so nothing on the live path changes — this hardens against a third-party receiver. |
+| The approvals vector was unbounded | Every transfer on a (material, owner) pair deserializes it, so it was a balance that could eventually not move. Bounded at 64, the way `guard` already bounds its per-subject reports. Only the owner can grow their own list, so it was self-inflicted rather than a way to attack anyone else — and the comment says so rather than overstating it. |
+| Two counts in this README had rotted | One row said five of the six NEP-245 Approval Management methods were present and another said six of six, and `market` was described as emitting twelve `env::log_str` lines where there were thirteen. Both are derived from source now. The first version of that check looked for the count written against a literal six, so it did not match the stale row **at all** and passed — a check whose pattern encodes the expected answer cannot report an unexpected one. It reads both numbers now, and every occurrence rather than the first, since two rows disagreeing was the actual defect. It then caught this very row quoting the stale figures as examples, and they are spelled out in words above for exactly that reason. |
 | `market.sell` created money | It credited the seller **before** pulling the materials, then unwound asymmetrically: treasury restored in full and unconditionally, credit clawed back with `saturating_sub`. Spend the credit inside that window and the clamp absorbed the shortfall. Free to trigger — `approval_id` came straight from the caller and was never validated, so a garbage id failed the pull every time from a scoped key with the relayer paying. The seller is now credited only once the materials arrive. `a_failed_pull_must_not_restore_a_treasury_it_cannot_debit` creates 6.4 NEAR out of nothing against the old ordering. |
 | A rolled-back purchase bought trust | `backend/near/signer.mjs` called `callFunctionRaw` and never read `receipts_outcome`. near-api-js throws only on the **top-level** status, which stays `SuccessValue` when a contract absorbs its own failure — so a purchase the contract rolled back was logged `settled`, and `counterparty.recordSuccess` incremented the counter governing `INTERACTIONS_FOR_TRUST`. The check now lives in `backend/near/outcome.mjs` and **both** signing paths import it. |
 | That check had never seen a receipt | `grep innerFailure` returned three lines: the definition, its loop, its one call site. The test that looked like coverage stubs the whole relayer. `tests/near/gasless.mjs` now relays a call whose inner action panics on a real node and asserts the contract's own words survive the walk. |
@@ -545,34 +561,34 @@ first; the rest is listed here because it is not fixed.
 **Open, and disclosed rather than fixed.** Each is a real finding with a file
 and a line; none of them is claimed to be harmless.
 
-- **`on_items_delivered` keeps the same clamp on the buy side**
-  (`contracts/market/src/lib.rs`). The buyer's deposit sits in the merchant's
-  treasury, and `withdraw_treasury` can send it out before the callback lands;
-  the clamp then under-debits while the buyer is credited in full. It cannot be
-  fixed the way `sell` was — the buyer's NEAR is already in the contract and
-  they are owed it whatever the merchant did since — so the remedy is reserving
-  in-flight funds, which needs new state and therefore a migration. Until then
-  the shortfall at least logs a `SOLVENCY WARNING` instead of being silent.
-- **A partially completed `signIn` strands an account**
-  (`backend/near/onboarding.mjs`). It is three transactions and the bootstrap
-  key is a local variable. If step 2 throws — `mt_approve` panics on a token id
-  never minted — the account keeps a live full-access key nobody holds, and
-  `exists()` makes every later login return `created: false` with no key, so
-  that identity is permanently unusable. Recovering needs the bootstrap key
-  persisted before step 2.
-- **`restock` can be looped to drain a poor merchant.** It is permissionless and
-  non-payable, and when the merchant cannot afford the full gap the shelf stays
-  under the trigger, so the guard re-arms. The comment claiming repeated poking
-  is a no-op is wrong. Money is conserved; availability is not.
-- **No NEP-145, and state can be grown for a yoctoNEAR.** `fund_credit` creates
-  a permanent entry for any account id, `mt_transfer` the same for any receiver,
-  and `mt_approve` pushes into an unbounded `Vec` that every later transfer on
-  that pair must deserialize. `guard` bounds its equivalent; `items` does not.
-- **Three NEP-245 deviations.** `mt_is_approved` takes a required fifth
-  `owner_id`, so a spec-conformant client fails deserialization;
-  `mt_resolve_transfer` refunds the tokens but not the approval allowance a
-  refused transfer consumed; and a short return from `mt_on_transfer` is read as
-  "fully used" when the safe default is the other way.
+- **`restock` can be looped to drain a poor merchant.** It is permissionless
+  and non-payable, and when the merchant cannot afford the full gap the shelf
+  stays under the trigger, so the guard re-arms. Money is conserved;
+  availability is not. The comment claiming repeated poking is a no-op has been
+  corrected — a comment denying a known finding is worse than no comment — but
+  the finding itself stands, because the fix is a policy decision about who may
+  restock rather than a bug fix.
+- **No NEP-145.** `fund_credit` creates a permanent entry for any account id for
+  a yoctoNEAR, and `mt_transfer` the same for any receiver. The approvals vector
+  is bounded now, but there is still no storage-management standard and no way
+  to reclaim a deposit.
+- **A refused transfer burns approval allowance.** `mt_resolve_transfer` refunds the tokens
+  but not the approval allowance a refused transfer consumed, so a refused
+  transfer silently burns allowance. Reachability was checked rather than
+  assumed: `market.sell` pulls with plain `mt_transfer`, which has no refund
+  callback, and the push path carries no approval — so the combination needs a
+  third party calling `mt_transfer_call` under an approval. **Not fixed, with a
+  reason:** restoring the allowance means telling the resolver which approval
+  was spent, and that is a new argument on a `#[private]` callback. Any
+  `mt_resolve_transfer` receipt already in flight at the moment of deploy would
+  then fail to deserialize — and that receipt *is* the refund a player is owed.
+  The wrong change to make on a live deployment.
+- **`mt_is_approved` takes a required fifth `owner_id`**, so a spec-conformant
+  client fails deserialization — **deliberately not changed**: the spec's
+  four-argument signature gives no way to say whose approval is being checked,
+  our approvals are keyed by `(owner, approved, token)`, and `Option<AccountId>`
+  would need a default the NEP does not define. Guessing at semantics the
+  standard does not state is worse than a documented deviation.
 - **`npm run check:nep245` is a name-and-modifier gate.** It reads the compiled
   ABI, which is real, but only method names and modifiers — no parameters, no
   types, no return types, no view/call kind. A contract implementing every
@@ -580,19 +596,10 @@ and a line; none of them is claimed to be harmless.
 - **`market` emits 12 plain `env::log_str` lines**, none of them NEP-297
   events and none shape-asserted. `items` is the contract with a real event
   envelope.
-- **`verifyKeyScope` is never called** (`backend/near/signer.mjs`). It exists to
-  stop an agent whose key turned out to be full-access or wrongly scoped, and
-  nothing asks it.
-- **Concurrent relays for one player collide on the delegate nonce.** Two calls
-  in flight compute the same nonce and the second is rejected. It fails loudly,
-  which is the right direction, but it is not handled.
 - **The session id travels in a query string**, so it lands in access logs.
-- **`guard` is still deployed from the earlier commit.** Its source has not
-  changed, and `items` and `market` are at the commit this section describes.
-  Bringing all three to one commit needs a `guard` redeploy that has not been
-  made, so `npm run verify:deployed` reports `guard DIFFERS` against a locally
-  rebuilt artifact — which is the script's own documented "a DIFFERS against
-  THAT build tells you nothing on its own".
+- **An audit is not a proof of correctness.** The second round found three
+  things the first one missed, including a money bug in a function the first
+  round had read. There is no reason to believe a third would find nothing.
 
 ## Verify it yourself
 
