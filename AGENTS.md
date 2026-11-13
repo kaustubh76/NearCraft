@@ -188,7 +188,7 @@ baseline project, where it was the thing that made the evidence worth reading.
 - **An empty `method_names` means *any method on that contract*.** near-api-js
   defaults it to `[]`. Always pass it explicitly. `npm run keys` exits non-zero
   if it ever finds an unrestricted key.
-- **A check that cannot fail is not a check.** This repo shipped four of them.
+- **A check that cannot fail is not a check.** This repo shipped seven of them.
   `npm run keys` audited `manifest.agents ?? []` and the manifest said `[]`, so
   it examined zero accounts and printed "all agent keys are correctly scoped".
   `scripts/agent-run.mjs` — the demo the README calls the best summary of this
@@ -203,6 +203,25 @@ baseline project, where it was the thing that made the evidence worth reading.
   negative tests were themselves vacuous — a `grep | head -1` that always
   reported a leak, and a patch that edited a string which did not appear in the
   file. Check that the thing you broke actually broke.
+
+  Three more shapes, all found by breaking the check rather than reading it:
+
+  - **A denominator taken from the implementation.** `check:nep245` reported
+    "Approval Management 5/5" while the spec defines six, because its list of
+    required methods was hand-written from the contract. The check could not
+    see the method that was missing.
+  - **A pattern that only matches the right answer.** The replacement check
+    searched the README for "Approval Management N of 6" with the 6 written
+    literally, so the stale row claiming five of five did not match it **at
+    all** and the check passed. It now
+    reads both numbers. If a check's regex encodes the expected value, it
+    cannot report the unexpected one.
+  - **A check placed where it cannot fire.** `verifyKeyScope` was wired into
+    the human-approval path as well as the call path — but the call path had
+    already run it and memoised the result, so the second one always read a
+    resolved promise. It only became a real check when it re-read the chain,
+    which is also the correct behaviour: a key's permission can widen in place
+    while a call sits waiting on a person.
 - **`max_gas()` silently caps throughput to three transactions a block.**
   Prepaid gas is what reserves room in a chunk, and nearcore's per-chunk limit
   is 1000 TGas — so 300 TGas per call lets only three share a chunk however many

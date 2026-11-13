@@ -34,6 +34,14 @@ that margin becomes the backer's withdrawable credit until the stake is repaid;
 and `withdraw_treasury` is refused while a claim is open, because the principal
 sits in the treasury and an unguarded merchant could simply cash it out.
 
+One detail of that Ok branch changed after the audit and matters here: the
+merchant is now **paid** in it too, immediately before the margin is
+attributed. The payment used to land in the treasury when the purchase was
+made, which left it withdrawable while the delivery was still in flight. The
+ordering inside the branch is deliberate — `attribute_margin` sizes a backer's
+payout from `treasury - floor`, and the treasury it has always read included
+the sale, so paying after would quietly shrink every repayment.
+
 ## Why a merchant closes
 
 A merchant holds its own money. It earns on every sale and spends only when it
