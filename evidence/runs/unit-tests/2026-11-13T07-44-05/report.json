@@ -1,0 +1,12 @@
+{
+  "topic": "unit-tests",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 3259,
+  "command": "npm run --silent test:contracts",
+  "cwd": ".",
+  "proves": "Every Rust unit test across all three contracts, offline, with no wasm target and no network. The count is in the retained output below rather than in this sentence — it has drifted three times in one day, and this project has already had to correct eight stale counts at once.",
+  "output_sha256": "f3ff3d9c26895b4f64ad4a496934b7656c393d1e487bd2aad1dadca9995b4d5c",
+  "output_bytes": 10339,
+  "recorded_at": "2026-11-13T07:44:08.812Z"
+}

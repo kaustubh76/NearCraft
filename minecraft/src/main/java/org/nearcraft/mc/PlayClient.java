@@ -150,6 +150,18 @@ public final class PlayClient {
     return post("/api/session", body);
   }
 
+  /**
+   * Exchange a one-time code for a session.
+   *
+   * <p>The code, not a token: the thing a player can actually type. See
+   * {@link Orders#looksLikeJwt} for the measurement that makes this necessary.
+   */
+  public Response claim(String code) {
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("code", code);
+    return post("/api/link", body);
+  }
+
   public Response buy(String sessionId, String merchantId, String item, int count) {
     return post("/api/buy", order(sessionId, merchantId, item, count));
   }

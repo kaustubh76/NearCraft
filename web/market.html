@@ -182,8 +182,8 @@ function renderPlay(msg) {
   const login = PLAY.health.verifier === 'oidc'
     ? 'Signed in through a real OIDC provider.'
     : 'No OIDC provider is configured, so this demo accepts <strong>any string</strong> as a seeded identity. ' +
-      'The verifier itself is real and tested &mdash; point it at a provider with <code>OIDC_ISSUER</code>, ' +
-      '<code>OIDC_AUDIENCE</code> and <code>OIDC_JWKS_URI</code>.';
+      'The verifier itself is real and tested against a live JWKS endpoint &mdash; point it at a provider with <code>OIDC_ISSUER</code>, ' +
+      '<code>OIDC_AUDIENCE</code> and <code>OIDC_JWKS_URI</code>, or <code>.local/oidc.json</code>.';
 
   if (!PLAY.sessionId) {
     el.innerHTML = '<h2>Play</h2>' +
@@ -217,7 +217,30 @@ function renderPlay(msg) {
     'not this page. ' +
     (moved === 0n ? '<span class="zero">Your NEAR balance has not moved at all &mdash; the relayer paid.</span>' : '') +
     '</p>' +
+    (PLAY.health && PLAY.health.linkCodes
+      ? '<div class="row"><button id="getcode">Code for Minecraft</button>' +
+        '<span id="code" class="reason">' + esc(PLAY.code || '') + '</span></div>' +
+        '<p class="note">A login token is about 977 characters and Minecraft carries 256, so a token ' +
+        'cannot be typed into the game at all. This hands over eight characters instead: run ' +
+        '<code>/nearcraft claim &lt;code&gt;</code> in chat. It works once, expires in two minutes, and ' +
+        'is a bearer credential until it does &mdash; do not read it out on a stream.</p>'
+      : '') +
     (msg ? '<p class="note">' + esc(msg) + '</p>' : '');
+
+  const button = $('#getcode');
+  if (button) button.addEventListener('click', linkCode);
+}
+
+/// Mint a one-time code for the game. Needs a session, so it can only ever be
+/// issued for an identity the service already verified.
+async function linkCode() {
+  try {
+    const out = await api('POST', '/api/link-code', { sessionId: PLAY.sessionId });
+    PLAY.code = out.code + '  (expires in ' + Math.round(out.expiresInMs / 1000) + 's)';
+    renderPlay();
+  } catch (e) {
+    renderPlay('Could not get a code: ' + e.message);
+  }
 }
 
 async function signIn() {

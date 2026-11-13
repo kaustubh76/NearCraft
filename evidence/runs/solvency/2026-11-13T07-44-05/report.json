@@ -1,0 +1,12 @@
+{
+  "topic": "solvency",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 9524,
+  "command": "cargo test -p nearcraft-integration --test economy the_market_never_owes_more_than_it_holds -- --nocapture",
+  "cwd": "contracts",
+  "proves": "The market never promises more than it holds, across a real trading session on a real node: buys, a sale through the push path, an investment and a real withdrawal. This is the half a unit test cannot reach, because a unit test has no account balance. Asserted as >= rather than ==, because the contract spends 1 yoctoNEAR of its own balance per mt_transfer and locks a slice as storage stake — both drift the balance in the safe direction, and the run prints the figures so a reader can see the gap is exactly that.",
+  "output_sha256": "33ea0ce48cfb81872de1009429c61bd9d228d5976399e57e6876e092f70eeb8f",
+  "output_bytes": 950,
+  "recorded_at": "2026-11-13T07:45:40.647Z"
+}

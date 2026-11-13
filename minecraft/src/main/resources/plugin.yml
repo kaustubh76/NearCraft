@@ -7,8 +7,8 @@ website: https://github.com/kaustubh76/NearCraft
 author: NearCraft
 commands:
   nearcraft:
-    description: Sign in, check the service, or run the console selftest.
-    usage: /nearcraft <link|status|selftest>
+    description: Sign in, check the service, or run a selftest from the console.
+    usage: /nearcraft <link|claim|status|selftest|inventory-selftest>
     aliases: [nc]
   market:
     description: What the merchants are quoting for a material, with the contract's own reason.

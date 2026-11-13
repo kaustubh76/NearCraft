@@ -83,6 +83,31 @@ public final class Orders {
     }
   }
 
+  /** What Minecraft will carry in one chat message or command. */
+  public static final int CHAT_LIMIT = 256;
+
+  /**
+   * Does this look like someone trying to paste an identity token?
+   *
+   * <p>Measured, not guessed: a Google id token is about 977 characters and
+   * Minecraft caps chat and command input at {@link #CHAT_LIMIT}. A real login
+   * is roughly four times too long to arrive intact, so the useful thing to
+   * detect is the <i>attempt</i> — including a truncated one, which is what the
+   * player would actually manage to send.
+   *
+   * <p>Every JWT begins {@code eyJ}, because that is base64url for the
+   * {@code {"} that opens its header. A fragment of one still begins that way,
+   * which is why this test is the prefix rather than the structure: by the time
+   * the plugin sees it, the structure is already gone.
+   */
+  public static boolean looksLikeJwt(String value) {
+    if (value == null) return false;
+    String text = value.trim();
+    if (text.startsWith("eyJ")) return true;
+    // Or a complete one that somehow arrived: three dot-separated segments.
+    return text.length() > 40 && text.chars().filter((c) -> c == '.').count() >= 2;
+  }
+
   /**
    * The full account id for a merchant a player named by its short handle.
    *

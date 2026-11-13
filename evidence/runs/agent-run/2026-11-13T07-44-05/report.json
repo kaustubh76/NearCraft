@@ -1,0 +1,12 @@
+{
+  "topic": "agent-run",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 10567,
+  "command": "npm run --silent agent",
+  "cwd": ".",
+  "proves": "An agent with a scoped key shopping on a real nearcore node, end to end, with five ASSERTIONS rather than printed output a reader has to judge: a counterparty is parked for a human and settles once approved when the persisted ledger does not yet trust it (and clears on its own when it does), the same counterparty then clears without a human, a prompt-injected objective is BLOCKED and never settles, that block rests on corroborated reports read off the public guard contract, and the injected purchase moves no materials. Exits non-zero if any of those is untrue. Every layer is the real one, including two vendored baseline modules.",
+  "output_sha256": "c877165481c1fb92f77be8f83c7f62fadaf39aadfd2fb70aa025f92c511aa409",
+  "output_bytes": 4214,
+  "recorded_at": "2026-11-13T07:44:25.950Z"
+}

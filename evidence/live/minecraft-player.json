@@ -1,6 +1,6 @@
 {
   "note": "A headless Minecraft client — a bot, not a person — joined a Paper server, signed in with a social-style login, bought iron and received the ingot in a real PlayerInventory, then sold it back. Every write was relayed, so the player paid no gas. The server ran online-mode=false because a headless client has no Mojang account; npm run mc:server, which is the documented way to run this, keeps online-mode=true.",
-  "recorded_at": "2026-11-13T07:05:36.213Z",
+  "recorded_at": "2026-11-13T07:43:19.086Z",
   "network": "testnet",
   "paper": "26.3 build 231",
   "client": "mineflayer 4.39.0 speaking 1.21.11 through ViaVersion 5.12.2",
@@ -13,14 +13,24 @@
       "detail": "as nearcraft_bot, protocol 1.21.11"
     },
     {
-      "what": "the player signed in from inside the game",
+      "what": "a real RS256 token was verified by the running service",
+      "ok": true,
+      "detail": "token 551 chars -> code G8CA29P4"
+    },
+    {
+      "what": "the token is far too long for Minecraft to carry",
+      "ok": true,
+      "detail": "551 characters against a 256 limit"
+    },
+    {
+      "what": "the player signed in from inside the game, with a code",
       "ok": true,
       "detail": "signed in as p-1d6a3c5d.nearcraftmc.testnet"
     },
     {
       "what": "the purchase settled on NEAR",
       "ok": true,
-      "detail": "settled on NEAR with Ironmonger (ironmonger)  tx CmbQGYwKpbg9knBCviGB1eoaoEJFJk4fnP9qNHySsWig"
+      "detail": "settled on NEAR with Ironmonger (ironmonger)  tx 5Pgbp3v4N2Rtc4q6d4ELqJphTCtZnkpt96NVKdNyhLKZ"
     },
     {
       "what": "the player paid no gas for it",
@@ -40,7 +50,7 @@
     {
       "what": "the sale settled on NEAR",
       "ok": true,
-      "detail": "settled on NEAR with Ironmonger (ironmonger)  tx 2Uz4KTr2dnGSPc7LWfaySX6RCB9bXUqhHHuXRM7J6Msx"
+      "detail": "settled on NEAR with Ironmonger (ironmonger)  tx 3VYzoeBrcAYcJDgwZE9LbaALq4YDMZiYtrngYx2WnvfQ"
     },
     {
       "what": "the iron_ingot left the inventory when sold",

@@ -123,7 +123,18 @@ export function createOnboarding({
       try {
         identity = await verifyIdentity(token)
       } catch (e) {
-        throw new OnboardingError('IDENTITY_REJECTED', e?.message ?? 'verification failed')
+        // Keep WHICH check refused.
+        //
+        // This used to collapse every refusal into one code, so a wrong
+        // audience, an expired token and an unreachable JWKS were
+        // indistinguishable at the only boundary a caller ever sees — twenty
+        // carefully separated refusals arriving as one. The code travels on the
+        // error so the service can report it and choose a status from it: a
+        // caller can then tell "your token expired, sign in again" from "the
+        // identity provider is down", which are not the same instruction.
+        const refusal = new OnboardingError('IDENTITY_REJECTED', e?.detail ?? e?.message ?? 'verification failed')
+        refusal.identityCode = e?.code ?? null
+        throw refusal
       }
       if (!identity?.provider || !identity?.subject) {
         throw new OnboardingError('IDENTITY_INCOMPLETE', JSON.stringify(identity ?? null))

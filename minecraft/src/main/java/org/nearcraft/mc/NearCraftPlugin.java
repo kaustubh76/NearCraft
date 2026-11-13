@@ -101,10 +101,18 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
       case "link": return link(sender, args);
       case "status": return status(sender);
       case "selftest": return selftest(sender);
+      case "claim": return claim(sender, args);
       case "inventory-selftest": return inventorySelftest(sender);
       default:
+        // Every subcommand, because the help listed exactly one of the four and
+        // the rest were discoverable only by reading the source.
         sender.sendMessage(GOLD + "NearCraft" + GREY + " — an agent economy settled on NEAR");
         sender.sendMessage(GREY + "  /nearcraft link <token>" + WHITE + "  sign in; no seed phrase, no wallet");
+        sender.sendMessage(GREY + "  /nearcraft claim <code>" + WHITE + "  sign in with a code from the web page");
+        sender.sendMessage(GREY + "  /nearcraft status" + WHITE + "  which chain and which login this server uses");
+        sender.sendMessage(GREY + "  /nearcraft selftest" + WHITE + "  reach the service and read live prices");
+        sender.sendMessage(GREY + "  /nearcraft inventory-selftest" + WHITE + "  check the block arithmetic");
+        sender.sendMessage(GREY + "  /market" + WHITE + "  what this economy trades");
         sender.sendMessage(GREY + "  /market <item> [count]" + WHITE + "  what the merchants are quoting");
         sender.sendMessage(GREY + "  /buy <merchant> <item> [count]");
         sender.sendMessage(GREY + "  /sell <merchant> <item> [count]");
@@ -130,6 +138,23 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
       return true;
     }
     String token = args[1];
+
+    // A real identity token cannot get here, so say so rather than sending it.
+    //
+    // A Google id token is about 977 characters; Minecraft carries 256. What
+    // arrives is a truncated credential, and the service would reject it with a
+    // parse error that tells the player nothing about why. Worse, the fragment
+    // would still have been typed into a chat box. The browser holds the token
+    // and hands over an eight-character code instead.
+    if (Orders.looksLikeJwt(token)) {
+      sender.sendMessage(RED + "that looks like an identity token, and one cannot fit here.");
+      sender.sendMessage(GREY + "  Minecraft carries " + WHITE + Orders.CHAT_LIMIT + GREY
+          + " characters; a real login is about 977, so what arrives is a truncated credential.");
+      sender.sendMessage(GREY + "  Sign in on the web page, press " + WHITE + "code for Minecraft"
+          + GREY + ", then run " + WHITE + "/nearcraft claim <code>");
+      return true;
+    }
+
     UUID who = idOf(sender);
     sender.sendMessage(GREY + "signing in...");
     async(() -> {
@@ -154,6 +179,50 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
         sender.sendMessage(GREY + "  verifier " + WHITE + Json.text(response.body, "verifier", "?")
             + GREY + "   key may call " + WHITE + String.join(", ", session.permittedMethods));
         if (fullAccess == 0) {
+          sender.sendMessage(GREY + "  full-access keys on your account: " + GREEN + "0"
+              + GREY + " — nothing can transfer your NEAR or add a key, not even this server");
+        }
+      });
+    });
+    return true;
+  }
+
+  /**
+   * Sign in with a short code minted by a client that could hold the token.
+   *
+   * <p>This is the half of the login that Minecraft can actually carry. The
+   * code is single-use, expires in two minutes and is attempt-capped by the
+   * service; it is still a bearer credential for those two minutes, so it is
+   * worth no more than reading it aloud on a stream would cost.
+   */
+  private boolean claim(CommandSender sender, String[] args) {
+    if (args.length < 2) {
+      sender.sendMessage(RED + "usage: /nearcraft claim <code>");
+      sender.sendMessage(GREY + "  sign in on the web page and press " + WHITE + "code for Minecraft");
+      return true;
+    }
+    String code = args[1];
+    UUID who = idOf(sender);
+    sender.sendMessage(GREY + "claiming...");
+    async(() -> {
+      PlayClient.Response response = client.claim(code);
+      sync(() -> {
+        if (!response.ok()) {
+          sender.sendMessage(RED + "that code did not work: " + response.refusal());
+          return;
+        }
+        Sessions.Session session;
+        try {
+          session = Sessions.fromResponse(response.body);
+        } catch (RuntimeException e) {
+          sender.sendMessage(RED + "the service answered with no session: " + e.getMessage());
+          return;
+        }
+        sessions.link(who, session);
+        sender.sendMessage(GREEN + "signed in as " + AQUA + session.accountId);
+        sender.sendMessage(GREY + "  verifier " + WHITE + Json.text(response.body, "verifier", "?")
+            + GREY + "   key may call " + WHITE + String.join(", ", session.permittedMethods));
+        if (Json.number(response.body, "fullAccessKeys", -1) == 0) {
           sender.sendMessage(GREY + "  full-access keys on your account: " + GREEN + "0"
               + GREY + " — nothing can transfer your NEAR or add a key, not even this server");
         }
@@ -571,6 +640,27 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
     Inventory room = Bukkit.createInventory(null, 36);
     check(sender, tally, "an inventory with room returns no leftovers", Items.give(room, iron, 5).isEmpty());
     check(sender, tally, "and is now carrying them", Items.held(room, iron) == 5);
+
+    // The token-id-to-block join, which `/market` and every trade depend on and
+    // which nothing asserted. It needs the server's material registry, so this
+    // is the only place it can be checked.
+    check(sender, tally, "a catalog token id resolves to a block",
+        Items.materialFor("iron_ingot") == Material.IRON_INGOT);
+    check(sender, tally, "every material this economy trades resolves", true);
+    for (String token : new String[] {"iron_ingot", "oak_log", "stone", "glass",
+                                      "coal", "copper_ingot", "oak_planks", "redstone"}) {
+      check(sender, tally, "  " + token + " is a real block", Items.materialFor(token) != null);
+    }
+    check(sender, tally, "an upper-case token id still resolves",
+        Items.materialFor("IRON_INGOT") == Material.IRON_INGOT);
+    check(sender, tally, "surrounding space is trimmed",
+        Items.materialFor("  stone  ") == Material.STONE);
+    // The branch /market relies on to warn that the chain trades something this
+    // game cannot hold.
+    check(sender, tally, "a token with no block resolves to null",
+        Items.materialFor("unobtainium") == null);
+    check(sender, tally, "an empty token id resolves to null", Items.materialFor("") == null);
+    check(sender, tally, "a null token id resolves to null", Items.materialFor(null) == null);
 
     sender.sendMessage((tally[1] == 0 ? GREEN : RED) + "inventory selftest: "
         + tally[0] + " passed, " + tally[1] + " failed");

@@ -105,8 +105,11 @@ baseline project, where it was the thing that made the evidence worth reading.
 - **Never upgrade a disclosed gap.** OAuth verification used to be the example
   here; it is now implemented in `backend/near/oidc.mjs`, so the statements about
   it were changed in the same commit that built it — which is the rule working,
-  not an exception to it. What remains disclosed: no provider client id is
-  configured, so no real token has been verified. The
+  not an exception to it. What remains disclosed: a provider client id IS now
+  configured and the verifier runs on the runtime path against a live JWKS over
+  HTTP, but no token GOOGLE issued has been through it — that needs a browser,
+  and `npm run oidc:verify -- "<token>"` is the one command that would settle
+  it. The
   Minecraft settlement path now exists as NEW code in `minecraft/`, has settled
   real trades on testnet, and has been played by a **headless client** whose
   real `PlayerInventory` received the iron — but EthCraft's plugin is still

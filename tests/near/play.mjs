@@ -32,6 +32,7 @@ const LIMITS = [
     methodNames: ['buy_with_credit', 'sell'], allowance: '2000000000000000000000000' },
 ]
 
+let minted = 0
 function build(overrides = {}) {
   const relayed = []
   const svc = createPlayService({
@@ -61,7 +62,11 @@ function build(overrides = {}) {
       nearBalance: async () => '100000000000000000000000',
       ...(overrides.reader ?? {}),
     },
-    newSessionId: () => 'SESSION-1',
+    // Distinct ids, because the link code mints a SECOND session and a test
+    // that cannot tell them apart cannot check that they are separate.
+    newSessionId: overrides.newSessionId ?? (() => `SESSION-${++minted}`),
+    now: overrides.now,
+    log: overrides.log,
   })
   return { svc, relayed }
 }
@@ -349,4 +354,196 @@ test('if the one-time key cannot be persisted the sign-in is refused', async () 
     newSessionId: () => 'S3',
   })
   refuses(await svc.handle('POST', '/api/session', { token: 'brand-new' }), 'KEY_NOT_PERSISTED', 500)
+})
+
+// ---------------------------------------------------------------------------
+// Three failures that were only ever found by attempting a real login. Each one
+// was invisible because signing in as an EXISTING player takes an early return
+// and never touches the chain, so every test and every demo passed.
+
+test('a server with no root key says so, instead of blaming the login', async () => {
+  // near-api-js throws "Please set a signer" from deep inside the account
+  // creation. The service used to relay that as IDENTITY_REJECTED with a 401,
+  // telling a player their perfectly good token was refused.
+  const { svc } = build({
+    onboarding: {
+      signIn: async () => { throw new Error('Please set a signer') },
+    },
+  })
+  const res = await svc.handle('POST', '/api/session', { token: 'player-1' })
+  refuses(res, 'ONBOARDING_MISCONFIGURED', 503)
+  assert.match(res.body.detail, /not a problem with your login/)
+})
+
+test('an underfunded root is reported as such, in the words nearcore actually uses', async () => {
+  // The real message is "Not enough balance for X (balance: N, cost: M)". The
+  // pattern here used to look for `NotEnoughBalance` — the name of the error
+  // variant, not the text — so ROOT_UNDERFUNDED was documented in README.md
+  // and unreachable in code. Both spellings are covered now so neither can
+  // silently stop matching.
+  for (const message of [
+    'Not enough balance for nearcraftmc.testnet (balance: 91080802419303700000000, cost: 107607442456250000000000)',
+    'NotEnoughBalance',
+    'account has insufficient funds',
+  ]) {
+    const { svc } = build({ onboarding: { signIn: async () => { throw new Error(message) } } })
+    const res = await svc.handle('POST', '/api/session', { token: 'player-1' })
+    refuses(res, 'ROOT_UNDERFUNDED', 503)
+    assert.match(res.body.detail, /near-faucet\.io/, 'the refusal must say how to fix it')
+  }
+})
+
+test('an identity refusal keeps the code the verifier gave it', async () => {
+  // Twenty distinct refusals used to arrive as one. A caller cannot tell
+  // "your token expired, sign in again" from "the provider is unreachable"
+  // unless the code survives the trip.
+  for (const [code, status] of [['TOKEN_EXPIRED', 401], ['WRONG_AUDIENCE', 401], ['JWKS_UNREACHABLE', 502]]) {
+    const { svc } = build({
+      onboarding: {
+        signIn: async () => {
+          const e = new Error(`${code}: whatever the verifier said`)
+          e.code = 'IDENTITY_REJECTED'
+          e.identityCode = code
+          e.detail = 'the verifier detail'
+          throw e
+        },
+      },
+    })
+    const res = await svc.handle('POST', '/api/session', { token: 'x' })
+    refuses(res, code, status)
+    assert.equal(res.body.detail, 'the verifier detail')
+  }
+})
+
+test('health says whether this deployment can create a new player', async () => {
+  // Reported, rather than discovered by the first person who tries to sign up.
+  const { svc } = build()
+  assert.equal((await svc.handle('GET', '/api/health', {})).body.canOnboard, null,
+    'unknown is null, not a cheerful true')
+})
+
+// ---------------------------------------------------------------------------
+// The link code. A Google id token is 977 characters and Minecraft caps input
+// at 256, so this is the only way a real login reaches the game. It is a bearer
+// credential, so every property below is load-bearing.
+
+const claim = (svc, code) => svc.handle('POST', '/api/link', { code })
+const mintCode = async (svc, sessionId) => svc.handle('POST', '/api/link-code', { sessionId })
+
+test('a code signs a second client in on the same account', async () => {
+  const { svc } = build()
+  const browserSession = await signIn(svc)
+  const minted = await mintCode(svc, browserSession)
+  assert.equal(minted.status, 200, JSON.stringify(minted.body))
+
+  const code = minted.body.code
+  assert.equal(code.length, 8, 'eight characters is what a person is asked to type')
+  assert.match(code, /^[0-9A-HJKMNP-TV-Z]{8}$/, 'Crockford base32: no I, L, O or U to misread')
+
+  const claimed = await claim(svc, code)
+  assert.equal(claimed.status, 200, JSON.stringify(claimed.body))
+  assert.equal(claimed.body.accountId, PLAYER, 'the same account, or it is not a link')
+  assert.notEqual(claimed.body.sessionId, browserSession,
+    'a NEW session, so quitting the game does not sign the browser out')
+  assert.deepEqual(claimed.body.permittedMethods, ['buy_with_credit', 'sell'])
+  assert.equal(claimed.body.fullAccessKeys, 0)
+
+  // And the new session can actually trade.
+  const bought = await svc.handle('POST', '/api/buy',
+    { sessionId: claimed.body.sessionId, merchantId: 'ironmonger.x.testnet', item: 'iron_ingot', count: 1 })
+  assert.equal(bought.status, 200, 'a claimed session must be a working session')
+})
+
+test('a code works exactly once', async () => {
+  const { svc } = build()
+  const sessionId = await signIn(svc)
+  const code = (await mintCode(svc, sessionId)).body.code
+  assert.equal((await claim(svc, code)).status, 200)
+  refuses(await claim(svc, code), 'LINK_CODE_INVALID', 401)
+})
+
+test('a code expires', async () => {
+  let clock = 1_000_000
+  const { svc } = build({ now: () => clock })
+  const sessionId = await signIn(svc)
+  const code = (await mintCode(svc, sessionId)).body.code
+  clock += 119_000
+  assert.equal((await claim(svc, code)).status, 200, 'still valid inside the window')
+
+  const second = (await mintCode(svc, sessionId)).body.code
+  clock += 120_001
+  refuses(await claim(svc, second), 'LINK_CODE_INVALID', 401)
+})
+
+test('an expired code and a wrong one are indistinguishable', async () => {
+  // Otherwise this route tells an attacker which codes existed.
+  let clock = 1_000_000
+  const { svc } = build({ now: () => clock })
+  const sessionId = await signIn(svc)
+  const code = (await mintCode(svc, sessionId)).body.code
+  clock += 200_000
+  const expired = await claim(svc, code)
+  const wrong = await claim(svc, 'ZZZZZZZZ')
+  assert.deepEqual(expired.body, wrong.body, 'the two must answer identically')
+})
+
+test('guessing is capped', async () => {
+  // 40 bits is a loop away without this.
+  const { svc } = build()
+  for (let i = 0; i < 10; i++) refuses(await claim(svc, `WRONG${String(i).padStart(3, '0')}`), 'LINK_CODE_INVALID', 401)
+  refuses(await claim(svc, 'WRONG999'), 'TOO_MANY_LINK_ATTEMPTS', 429)
+
+  // And a real code is refused too while the cap holds — fail closed.
+  const sessionId = await signIn(svc)
+  const real = (await mintCode(svc, sessionId)).body.code
+  refuses(await claim(svc, real), 'TOO_MANY_LINK_ATTEMPTS', 429)
+})
+
+test('the cap self-heals, so guessing cannot lock anyone out for good', async () => {
+  let clock = 1_000_000
+  const { svc } = build({ now: () => clock })
+  for (let i = 0; i < 10; i++) await claim(svc, `WRONG${String(i).padStart(3, '0')}`)
+  refuses(await claim(svc, 'WRONG999'), 'TOO_MANY_LINK_ATTEMPTS', 429)
+  clock += 120_001
+  const sessionId = await signIn(svc)
+  const real = (await mintCode(svc, sessionId)).body.code
+  assert.equal((await claim(svc, real)).status, 200, 'the window must reopen')
+})
+
+test('a code cannot be minted without a verified session', async () => {
+  // Otherwise this mints sessions for arbitrary accounts.
+  const { svc } = build()
+  refuses(await svc.handle('POST', '/api/link-code', {}), 'NO_SESSION', 401)
+  refuses(await svc.handle('POST', '/api/link-code', { sessionId: 'made-up' }), 'SESSION_UNKNOWN', 401)
+})
+
+test('codes are not guessable from each other', async () => {
+  const { svc } = build()
+  const sessionId = await signIn(svc)
+  const seen = new Set()
+  for (let i = 0; i < 200; i++) seen.add((await mintCode(svc, sessionId)).body.code)
+  assert.equal(seen.size, 200, 'two hundred codes, two hundred distinct values')
+})
+
+test('a code is never echoed into the log', async () => {
+  const lines = []
+  const { svc } = build({ log: (e) => lines.push(JSON.stringify(e)) })
+  const sessionId = await signIn(svc)
+  const code = (await mintCode(svc, sessionId)).body.code
+  await claim(svc, code)
+  for (const line of lines) {
+    assert.ok(!line.includes(code), `the code reached the log: ${line}`)
+  }
+})
+
+test('claiming is case- and space-insensitive, because people type it', async () => {
+  const { svc } = build()
+  const sessionId = await signIn(svc)
+  const code = (await mintCode(svc, sessionId)).body.code
+  assert.equal((await claim(svc, `  ${code.toLowerCase()} `)).status, 200)
+})
+
+test('health advertises that link codes exist', async () => {
+  const { svc } = build()
+  assert.equal((await svc.handle('GET', '/api/health', {})).body.linkCodes, true)
 })

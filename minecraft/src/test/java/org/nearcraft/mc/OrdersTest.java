@@ -83,6 +83,26 @@ public final class OrdersTest {
     h.equals("a null market contract gives null", null, Orders.merchantId("ironmonger", null));
     h.equals("a blank name gives null", null, Orders.merchantId("  ", "market.nearcraftmc.testnet"));
 
+    // ------------------------------------------------- tokens that cannot fit
+    //
+    // A Google id token is about 977 characters and Minecraft carries 256, so
+    // the plugin has to recognise the attempt — including the truncated one a
+    // player would actually manage to send.
+    String header = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImFiYyJ9";
+    h.check("a whole JWT is recognised", Orders.looksLikeJwt(header + ".eyJzdWIiOiIxIn0.c2ln"));
+    h.check("a TRUNCATED JWT is still recognised", Orders.looksLikeJwt(header.substring(0, 30)));
+    h.check("just the eyJ prefix is enough", Orders.looksLikeJwt("eyJ"));
+    h.check("leading space does not hide it", Orders.looksLikeJwt("   eyJhbGciOi"));
+
+    // And the things that must NOT be mistaken for one, or a player cannot sign in.
+    h.check("a seed subject is not a token", !Orders.looksLikeJwt("player-1"));
+    h.check("a link code is not a token", !Orders.looksLikeJwt("K9FH2MQ7"));
+    h.check("an email is not a token", !Orders.looksLikeJwt("someone@example.com"));
+    h.check("an account id is not a token", !Orders.looksLikeJwt("p-1d6a3c5d.nearcraftmc.testnet"));
+    h.check("null is not a token", !Orders.looksLikeJwt(null));
+    h.check("empty is not a token", !Orders.looksLikeJwt(""));
+    h.equals("the chat limit is stated once, where the refusal reads it", 256, Orders.CHAT_LIMIT);
+
     return h.report();
   }
 

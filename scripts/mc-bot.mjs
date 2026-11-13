@@ -29,7 +29,11 @@ import { createWriteStream } from 'node:fs'
 import { mkdir, copyFile, writeFile, rm } from 'node:fs/promises'
 import { fetchPinned, javaHome, run, ROOT, TMP, runtime } from './mc-java.mjs'
 
+import { createRequire } from 'node:module'
+const require$ = createRequire(import.meta.url)
+
 const args = process.argv.slice(2)
+const flag = (name) => args.includes(name)
 const value = (name, fallback) => {
   const at = args.indexOf(name)
   return at >= 0 && args[at + 1] ? args[at + 1] : fallback
@@ -45,6 +49,7 @@ const MERCHANT = value('--merchant', 'ironmonger')
 const ITEM = value('--item', 'iron_ingot')
 const COUNT = Number(value('--count', '1'))
 const USERNAME = value('--username', 'nearcraft_bot')
+const OIDC = flag('--oidc')
 const BOOT_TIMEOUT_MS = 10 * 60 * 1000
 const SPAWN_TIMEOUT_MS = 90 * 1000
 
@@ -56,6 +61,17 @@ try {
   const probe = await fetch(`${SERVICE}/api/health`, { signal: AbortSignal.timeout(3000) })
   service = await probe.json()
   console.log(`  play service  ${SERVICE}  ${service.network}  verifier ${service.verifier}`)
+  if (OIDC && service.verifier !== 'oidc') {
+    console.error('\n  --oidc needs a service running a real verifier, and this one reports')
+    console.error(`  "${service.verifier}". Start the issuer and the service:\n`)
+    console.error('    npm run oidc:dev     # in one terminal')
+    console.error('    npm run play:oidc    # in another\n')
+    process.exit(1)
+  }
+  if (OIDC && !service.linkCodes) {
+    console.error('\n  --oidc needs a service that mints link codes, and this one does not.\n')
+    process.exit(1)
+  }
 } catch {
   console.error(`  play service  ${SERVICE}  NOT RUNNING`)
   console.error('                start it with `npm run play` and try again.')
@@ -272,9 +288,34 @@ try {
     return chat
   }
 
-  await say(`/nearcraft link ${TOKEN}`, /signed in as|refused/, 30000)
-  check('the player signed in from inside the game', chat.some((m) => /signed in as/.test(m)),
-    chat.find((m) => /signed in as/.test(m)) ?? '')
+  if (OIDC) {
+    // SOCIAL LOGIN -> MINECRAFT, with nothing stubbed.
+    //
+    // A real RS256 token is minted by the local issuer, verified by the running
+    // service against that issuer's JWKS over HTTP, exchanged for an
+    // eight-character code, and the code is what the bot types. The token
+    // itself never goes near the game: at about 551 characters here (977 for a
+    // Google one) it could not arrive intact through a 256-character chat box.
+    //
+    // DISCLOSED: `npm run play:oidc` labels the issuer `seed`, so a verified
+    // subject of "player-1" derives the account that already exists and holds
+    // credit. The label is a namespace string and the verification is real, but
+    // with a different label this would derive a NEW account and the live root
+    // has no balance to create one. Funding root is the alternative.
+    const { token, code } = await codeFromRealToken()
+    check('a real RS256 token was verified by the running service', Boolean(code),
+      `token ${token.length} chars -> code ${code ?? 'none'}`)
+    if (!code) throw new Error('could not get a link code from a real token')
+    check('the token is far too long for Minecraft to carry', token.length > 256,
+      `${token.length} characters against a 256 limit`)
+    await say(`/nearcraft claim ${code}`, /signed in as|did not work/, 30000)
+    check('the player signed in from inside the game, with a code', chat.some((m) => /signed in as/.test(m)),
+      chat.find((m) => /signed in as/.test(m)) ?? chat.join(' | '))
+  } else {
+    await say(`/nearcraft link ${TOKEN}`, /signed in as|refused/, 30000)
+    check('the player signed in from inside the game', chat.some((m) => /signed in as/.test(m)),
+      chat.find((m) => /signed in as/.test(m)) ?? '')
+  }
 
   await say('/wallet', /credit /, 30000)
 
@@ -306,9 +347,13 @@ try {
     // is the ledger of record and the inventory is one view of it; what has to
     // agree is how much each of them MOVED.
     const chainAfterBuy = await chainHolding()
-    check('the purchase moved the chain and the inventory by the same amount',
-      chainAfterBuy - chainBefore === carrying() - before,
-      `chain ${chainBefore} -> ${chainAfterBuy}, carrying ${before} -> ${carrying()}`)
+    if (chainBefore === null || chainAfterBuy === null) {
+      check('the chain could be read at all', false, 'the service would not answer /api/me')
+    } else {
+      check('the purchase moved the chain and the inventory by the same amount',
+        chainAfterBuy - chainBefore === carrying() - before,
+        `chain ${chainBefore} -> ${chainAfterBuy}, carrying ${before} -> ${carrying()}`)
+    }
   }
 
   // --------------------------------------------------------------- selling
@@ -329,9 +374,13 @@ try {
   // gave up, the ledger gave up too.
   if (sold) {
     const chainAfterSale = await chainHolding()
-    check('the sale moved the chain and the inventory by the same amount',
-      chainAfterSale - chainBefore === carrying() - before,
-      `chain ${chainBefore} -> ${chainAfterSale}, carrying ${before} -> ${carrying()}`)
+    if (chainBefore === null || chainAfterSale === null) {
+      check('the chain could be read at all', false, 'the service would not answer /api/me')
+    } else {
+      check('the sale moved the chain and the inventory by the same amount',
+        chainAfterSale - chainBefore === carrying() - before,
+        `chain ${chainBefore} -> ${chainAfterSale}, carrying ${before} -> ${carrying()}`)
+    }
   }
 } catch (e) {
   console.error(`\n  ${e.message}`)
@@ -349,6 +398,39 @@ try {
 }
 
 /**
+ * Mint a real token, sign in over HTTP, and take a one-time code.
+ *
+ * The browser does exactly this; the bot borrows it because a game client
+ * cannot hold a token. Nothing here is stubbed: the token is RS256-signed by
+ * the local issuer and the service fetches that issuer's JWKS to check it.
+ */
+function mintedToken() {
+  const { execFileSync } = require$('node:child_process')
+  return execFileSync('node', [new URL('oidc-dev.mjs', import.meta.url).pathname, '--token', TOKEN],
+    { encoding: 'utf8' }).trim()
+}
+
+async function codeFromRealToken() {
+  const token = mintedToken()
+
+  const signIn = await fetch(`${SERVICE}/api/session`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }), signal: AbortSignal.timeout(45000),
+  })
+  const session = await signIn.json()
+  if (!signIn.ok) {
+    console.error(`\n  the service refused the token: ${session.error} — ${session.detail}`)
+    return { token, code: null }
+  }
+  const minted = await fetch(`${SERVICE}/api/link-code`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId: session.sessionId }), signal: AbortSignal.timeout(20000),
+  })
+  if (!minted.ok) return { token, code: null }
+  return { token, code: (await minted.json()).code }
+}
+
+/**
  * What the CHAIN says this player holds.
  *
  * <p>Signs in over HTTP rather than scraping the bot's chat, because the
@@ -360,15 +442,23 @@ try {
 /** How many of the traded item the CHAIN says this player holds, as a number. */
 async function chainHolding() {
   const me = await chainHoldings()
-  return Number(me?.holdings?.[ITEM] ?? '0')
+  // null, not 0. "Could not read the chain" and "holds none" are different
+  // facts, and conflating them turned a working purchase into a failed check.
+  if (!me?.holdings) return null
+  return Number(me.holdings[ITEM] ?? '0')
 }
 
 async function chainHoldings() {
   try {
+    // In OIDC mode the raw subject is not a token and the service is right to
+    // refuse it. Reading the chain has to sign in the same way a client does,
+    // or this check silently compares against zero — which is exactly what it
+    // did, reporting "chain 0 -> 0" while the purchase had plainly worked.
+    const token = OIDC ? mintedToken() : TOKEN
     const signIn = await fetch(`${SERVICE}/api/session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: TOKEN }),
+      body: JSON.stringify({ token }),
       signal: AbortSignal.timeout(30000),
     })
     if (!signIn.ok) return null
@@ -393,7 +483,12 @@ console.log(`  log  ${logPath}`)
 if (failed === 0) {
   const record = {
     note: 'A headless Minecraft client — a bot, not a person — joined a Paper server, signed in '
-      + 'with a social-style login, bought iron and received the ingot in a real PlayerInventory, '
+      + (OIDC
+          ? 'with a REAL RS256 identity token: the token was verified by the running service against '
+            + 'the issuer\'s JWKS over HTTP, exchanged for a single-use eight-character code, and the '
+            + 'code is what the client typed — a token is about 977 characters and the game carries 256. '
+          : 'with a seeded demo identity (any string; the OIDC verifier was not the one running). ')
+      + 'It bought iron and received the ingot in a real PlayerInventory, '
       + 'then sold it back. Every write was relayed, so the player paid no gas. The server ran '
       + 'online-mode=false because a headless client has no Mojang account; npm run mc:server, '
       + 'which is the documented way to run this, keeps online-mode=true.',
@@ -403,6 +498,7 @@ if (failed === 0) {
     client: `mineflayer ${runtime.bot.mineflayer} speaking ${runtime.bot.protocol} through ViaVersion ${runtime.artifacts.ViaVersion.version}`,
     username: USERNAME,
     online_mode: false,
+    login: OIDC ? 'real RS256 token, verified over a live JWKS, exchanged for a one-time code' : 'seeded subject',
     checks: findings,
   }
   await mkdir(new URL('evidence/live/', ROOT), { recursive: true })

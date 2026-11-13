@@ -59,7 +59,8 @@ function shimDocument() {
     addEventListener(type, fn) { this.listeners.push([type, fn]) },
     value: '',
   })
-  const nodes = { '#banner': el(), '#main': el(), '#play': el(), '#tok': el(), '#signin': el() }
+  const nodes = { '#banner': el(), '#main': el(), '#play': el(), '#tok': el(), '#signin': el(),
+                  '#getcode': el(), '#code': el() }
   return { querySelector: (s) => nodes[s], nodes, querySelectorAll: () => [] }
 }
 
@@ -93,6 +94,15 @@ async function renderPage(fetchStub) {
     banner: document.nodes['#banner'].innerHTML,
     main: document.nodes['#main'].innerHTML,
     play: document.nodes['#play'],
+    document,
+    /// Fire a handler the page registered, the way a click would.
+    click: async (selector) => {
+      const node = document.nodes[selector]
+      assert.ok(node, `${selector} is not in the shim`)
+      const handler = node.listeners.find(([type]) => type === 'click')
+      assert.ok(handler, `${selector} has no click handler`)
+      await handler[1]()
+    },
   }
 }
 
@@ -265,4 +275,64 @@ test('trade buttons need a session, not merely an API', async () => {
   // offer buttons that would be refused.
   const { main } = await renderPage(playableFetch())
   assert.ok(!main.includes('data-act="buy"'), 'buttons must wait for a session')
+})
+
+test('a signed-in player can get a code for Minecraft, and is told what it is worth', async () => {
+  // The whole reason this control exists: a login token is about 977 characters
+  // and Minecraft carries 256, so the page has to hand over something a person
+  // can type. Driven through the page's own handlers, not asserted on source.
+  const base = liveFetch()
+  const fetchImpl = async (url, init) => {
+    const u = String(url)
+    if (u.includes('/api/health')) {
+      return { ok: true, json: async () => ({ playable: true, verifier: 'oidc', custodial: true, linkCodes: true }) }
+    }
+    if (u.includes('/api/session')) {
+      return { ok: true, json: async () => ({ sessionId: 'S1', accountId: 'p-abc.testnet', verifier: 'oidc' }) }
+    }
+    if (u.includes('/api/me')) {
+      return { ok: true, json: async () => ({
+        accountId: 'p-abc.testnet', credit: '4000000000000000000000', near: '100',
+        holdings: { iron_ingot: '2' }, permittedMethods: ['buy_with_credit', 'sell'],
+        fullAccessKeys: 0, scopedKeys: 1,
+      }) }
+    }
+    if (u.includes('/api/link-code')) {
+      return { ok: true, json: async () => ({ code: 'K9FH2MQ7', expiresInMs: 120000 }) }
+    }
+    return base(url, init)
+  }
+
+  const page = await renderPage(fetchImpl)
+  await page.click('#signin')
+  const signedIn = page.document.nodes['#play'].innerHTML
+  assert.match(signedIn, /Code for Minecraft/, 'a signed-in player must be offered a code')
+  assert.match(signedIn, /977/, 'and told why a token will not do')
+  assert.match(signedIn, /claim/, 'and told the command to run')
+
+  await page.click('#getcode')
+  const withCode = page.document.nodes['#play'].innerHTML
+  assert.match(withCode, /K9FH2MQ7/, 'the code must be shown')
+  assert.match(withCode, /expires in 120s/, 'with how long it lasts')
+  assert.match(withCode, /bearer credential/i, 'and what it is worth until then')
+})
+
+test('the code control is not offered before anyone has signed in', async () => {
+  // It mints against a session. Offering it first would be a button that cannot
+  // work, and the service refuses it anyway.
+  const { play } = await renderPage(playableFetch({ playable: true, verifier: 'seed', custodial: true, linkCodes: true }))
+  assert.ok(!play.innerHTML.includes('Code for Minecraft'), 'no code button without a session')
+})
+
+test('a service with no link codes does not advertise them', async () => {
+  const base = liveFetch()
+  const page = await renderPage(async (url, init) => {
+    const u = String(url)
+    if (u.includes('/api/health')) return { ok: true, json: async () => ({ playable: true, verifier: 'seed', custodial: true }) }
+    if (u.includes('/api/session')) return { ok: true, json: async () => ({ sessionId: 'S1', accountId: 'p-abc.testnet' }) }
+    if (u.includes('/api/me')) return { ok: true, json: async () => ({ accountId: 'p-abc.testnet', holdings: {}, permittedMethods: [], fullAccessKeys: 0 }) }
+    return base(url, init)
+  })
+  await page.click('#signin')
+  assert.ok(!page.document.nodes['#play'].innerHTML.includes('Code for Minecraft'))
 })

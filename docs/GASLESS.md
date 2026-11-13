@@ -150,9 +150,31 @@ JSON, which is NEAR's normal convention for 64-bit values.
   paying nothing. The relayer's balance falls in both cases. Approvals are
   granted once during onboarding and the bootstrap key is destroyed in the same
   transaction that installs the scoped one.
-- **Not established:** a login against a real provider. The verifier is built
-  and tested (`backend/near/oidc.mjs`, 25 offline tests), but no provider client
-  id is configured, so nothing here has verified a token Google actually issued.
+- **Established since this was written:** the verifier runs on the runtime
+  path. A Google client id is configured in gitignored `.local/oidc.json`,
+  `/api/health` reports `verifier: "oidc"`, and `tests/near/oidc-runtime.mjs`
+  drives the real verifier over a **real HTTP JWKS** inside the real service —
+  a genuine RS256 token signs in and derives its account from the verified
+  subject, and fifteen refusals are asserted by code at the service boundary.
+  Before that test, every OIDC test stubbed `fetchImpl`, so no JWKS had ever
+  been fetched and `JWKS_UNREACHABLE` was unreachable.
+
+  Making a real login actually work found three bugs that no amount of unit
+  testing would have: every refusal was flattened into one opaque
+  `IDENTITY_REJECTED`; the root signing key was read from the wrong file, so
+  creating a player failed with "Please set a signer" dressed up as a rejected
+  token; and `ROOT_UNDERFUNDED` matched `NotEnoughBalance` while nearcore says
+  "Not enough balance", so a documented refusal could never fire.
+
+- **Still not established:** a token **Google itself issued**. That needs a
+  browser and a consent screen, and `npm run oidc:verify -- "<token>"` settles
+  it in one command against Google's live JWKS.
+
+- **A real login cannot reach Minecraft, measured:** a Google id token is about
+  977 characters and the game carries 256. So the browser mints a single-use,
+  two-minute, attempt-capped eight-character code and the player types
+  `/nearcraft claim <code>`. The plugin refuses anything JWT-shaped outright
+  rather than sending a truncated credential.
   That is configuration rather than code, and it is the last external
   dependency. No Minecraft *client* is involved in any of it either — though a
   Minecraft *server* now is: the plugin in `minecraft/` drives this same relayed

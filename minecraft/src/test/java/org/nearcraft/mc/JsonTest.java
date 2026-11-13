@@ -79,6 +79,29 @@ public final class JsonTest {
     h.refuses("a top-level value where an object was needed", "expected an object",
         () -> Json.asObject(Json.parse("[1]")));
 
+    // ------------------------------------------------- the exception itself
+    //
+    // Every refusal above is caught as a RuntimeException by the harness, which
+    // never checks WHICH exception or whether the offset it carries is any use.
+    // A parser that reported "bad input" with no position would be much harder
+    // to debug against a live service, and the offset is the only thing that
+    // makes these messages actionable.
+    try {
+      Json.parse("{\"a\":1,}");
+      throw new IllegalStateException("a malformed document was accepted");
+    } catch (Json.JsonException e) {
+      h.check("the failure is a JsonException, not something generic", true);
+      h.check("and it names the offset", e.getMessage().contains("at offset"));
+      h.check("which points past the comma, not at zero", e.getMessage().contains("offset 7"));
+    }
+    try {
+      Json.parse("[1,2");
+      throw new IllegalStateException("an unterminated array was accepted");
+    } catch (Json.JsonException e) {
+      h.check("an unterminated array reports where the input ran out",
+          e.getMessage().contains("input ended early") && e.getMessage().contains("offset 4"));
+    }
+
     // ------------------------------------------------------------- encoding
     h.equals("an order encodes with count as a NUMBER",
         "{\"sessionId\":\"s\",\"merchantId\":\"ironmonger\",\"item\":\"iron_ingot\",\"count\":2}",

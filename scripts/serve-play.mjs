@@ -43,16 +43,40 @@ try {
 // ONE decision, made here, producing both the verifier onboarding will call and
 // the label the API reports. Choosing them in two places is how a service ends
 // up announcing "oidc" while a stub runs.
-const oidcConfigured = Boolean(process.env.OIDC_ISSUER && process.env.OIDC_AUDIENCE && process.env.OIDC_JWKS_URI)
+// Two places to configure it, one decision made from them.
+//
+// Environment variables win. `.local/oidc.json` is the fallback, because that
+// is where this project already keeps everything credential-shaped and it is
+// gitignored — and because asking an operator to export three variables before
+// every run is how a deployment ends up on the seed verifier by accident.
+//
+// There is no .env support anywhere in this repository and none is being added:
+// it has one runtime dependency and keeps it.
+let oidcFile = null
+try {
+  oidcFile = JSON.parse(await readFile(new URL('../.local/oidc.json', import.meta.url), 'utf8'))
+} catch { /* absent is the normal case */ }
+
+const oidc = {
+  issuer: process.env.OIDC_ISSUER ?? oidcFile?.issuer,
+  audience: process.env.OIDC_AUDIENCE ?? oidcFile?.audience,
+  jwksUri: process.env.OIDC_JWKS_URI ?? oidcFile?.jwksUri,
+  // Optional, and load-bearing: it is half the preimage of every player's
+  // account id. Unset, createOidcVerifier labels accounts with the issuer URL
+  // instead — so adding this later moves every existing player to an account
+  // that does not exist. Pin it once per deployment.
+  provider: process.env.OIDC_PROVIDER ?? oidcFile?.provider,
+}
+const oidcConfigured = Boolean(oidc.issuer && oidc.audience && oidc.jwksUri)
 
 let verifyIdentity
 let verifierKind
 if (oidcConfigured) {
   const verifier = createOidcVerifier({
-    issuer: process.env.OIDC_ISSUER,
-    audience: process.env.OIDC_AUDIENCE,
-    jwksUri: process.env.OIDC_JWKS_URI,
-    provider: process.env.OIDC_PROVIDER,
+    issuer: oidc.issuer,
+    audience: oidc.audience,
+    jwksUri: oidc.jwksUri,
+    provider: oidc.provider,
   })
   verifyIdentity = (token) => verifier.verifyIdentity(token)
   verifierKind = 'oidc'
@@ -66,9 +90,34 @@ if (oidcConfigured) {
 
 const cat = JSON.parse(await readFile(new URL('../config/catalog.json', import.meta.url), 'utf8'))
 
+// The ROOT key, which creates player accounts.
+//
+// It does NOT live in .local/nearcraft-keys.json — that file holds the
+// contracts, the merchants, the agents and the players, and has no entry for
+// the root account at all. It lives in .local/nearcraftmc-root.json under
+// `private_key`, and this line used to look only in the wrong file.
+//
+// The consequence was invisible until a real login was tried: signing in as an
+// EXISTING player takes an early return and never needs a signer, so every
+// test and every demo passed. Creating a new one threw "Please set a signer"
+// from deep inside near-api-js, which the service then reported as
+// IDENTITY_REJECTED — a chain failure dressed as a rejected token. The live
+// deployment's documented limit was "root is underfunded"; it would also have
+// failed on this.
+let rootKeyFile = null
+try {
+  rootKeyFile = JSON.parse(await readFile(new URL('../.local/nearcraftmc-root.json', import.meta.url), 'utf8'))
+} catch { /* absent on a clone */ }
+if (rootKeyFile && rootKeyFile.account_id && rootKeyFile.account_id !== manifest.root) {
+  console.error(`\n  .local/nearcraftmc-root.json is for ${rootKeyFile.account_id}, but the`)
+  console.error(`  deployment's root is ${manifest.root}. Refusing to sign with the wrong account.\n`)
+  process.exit(1)
+}
+const rootKey = process.env.NEAR_ROOT_KEY ?? keys[manifest.root] ?? rootKeyFile?.private_key ?? null
+
 const onboarding = createOnboarding({
   rootAccountId: manifest.root,
-  rootKey: process.env.NEAR_ROOT_KEY ?? keys[manifest.root],
+  rootKey,
   marketContract: manifest.contracts.market,
   itemsContract: manifest.contracts.items,
   sellableItems: cat.players?.sellable_items ?? [],
@@ -109,6 +158,7 @@ async function saveKey(accountId, secret) {
 
 const play = createPlayService({
   deployment: manifest, keys, verifierKind, onboarding, relayer, reader, saveKey,
+  canOnboard: Boolean(rootKey),
   log: (e) => console.log(`  ${e.event.padEnd(10)} ${JSON.stringify({ ...e, event: undefined })}`),
 })
 
@@ -149,10 +199,15 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   const player = manifest.players?.[0]?.account_id
+  if (!rootKey) {
+    console.log('  NOTE      this server cannot create NEW players: no key for the root')
+    console.log('            account in .local/. Existing players sign in normally, and')
+    console.log('            /api/health reports canOnboard: false.')
+  }
   console.log(`\n  NearCraft — playable: http://localhost:${PORT}/\n`)
   console.log(`  network   ${manifest.network ?? 'testnet'}  via ${manifest.rpc}`)
   console.log(`  login     ${verifierKind === 'oidc'
-    ? `real OIDC against ${process.env.OIDC_ISSUER}`
+    ? `real OIDC against ${oidc.issuer} (audience ...${String(oidc.audience).slice(-24)})`
     : 'SEEDED demo identity — any string is accepted. No OIDC provider is configured.'}`)
   console.log(`  relayer   ${manifest.relayer.account_id} pays the gas; players pay nothing`)
   if (player) console.log(`  try       sign in as "player-1" -> ${player}`)

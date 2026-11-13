@@ -124,6 +124,58 @@ so a normal run cannot inherit it. `npm run mc:server` keeps
 `online-mode=true` — that sentence elsewhere in this document is still true of
 the documented way to run this.
 
+## A real login, which cannot fit through a chat box
+
+This is the measurement that shaped the whole identity path:
+
+| | characters |
+|---|---|
+| a Google id token | **977** |
+| the local dev issuer's token | 551 |
+| what Minecraft carries | **256** |
+
+`mineflayer/lib/plugins/chat.js:9` caps chat at 256, which mirrors the vanilla
+client. So `/nearcraft link <token>` is not merely awkward with a real provider
+— it is impossible. What arrives is a truncated credential, and the service
+would reject it with a parse error that explains nothing.
+
+So the token stays in the browser, which can hold it, and hands over eight
+characters instead:
+
+```
+      browser:  sign in (977-char token)  ->  "Code for Minecraft"  ->  BYS7W823
+  in the game:  /nearcraft claim BYS7W823
+```
+
+The code is the security object, so its properties are the design:
+
+- **8 characters of Crockford base32** — 40 bits from `randomBytes`, with I, L,
+  O and U removed so nothing is misread off a screen.
+- **Single use.** Deleted on the first claim; a second is refused.
+- **Two minutes.** Swept on access, and checked again when redeemed.
+- **Attempt-capped**, because 40 bits is a loop away otherwise — and the cap
+  self-heals after the window, because a permanent lockout would be its own
+  denial of service.
+- **A wrong code and an expired one answer identically**, so the route cannot
+  be used to learn which codes existed.
+- **Claiming mints a new session**, so quitting the game revokes the game's and
+  leaves the browser signed in.
+
+The plugin refuses anything JWT-shaped outright — including a *truncated* one,
+by the `eyJ` prefix every JWT header starts with — and says why rather than
+sending a fragment of a credential.
+
+Proven end to end by `npm run mc:bot -- --oidc`: a real RS256 token minted by
+the local issuer, verified by the running service against that issuer's JWKS
+over HTTP, exchanged for a code, claimed in-game, and then a purchase settled on
+NEAR with the ingot landing in a real inventory.
+
+**Disclosed:** `npm run play:oidc` labels the local issuer `seed`, so a verified
+subject of `player-1` derives the account that already exists and holds credit.
+The label is a namespace string and the verification is entirely real, but with
+a different label this derives a *new* account and the live root has no balance
+to create one. Funding root is the alternative.
+
 ## What it is not
 
 **It is not a port of EthCraft's plugin.** That plugin is 5,201 lines across 28

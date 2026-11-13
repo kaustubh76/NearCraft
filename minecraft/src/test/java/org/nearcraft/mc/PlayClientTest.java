@@ -57,7 +57,20 @@ public final class PlayClientTest {
       int port = server.getAddress().getPort();
       PlayClient client = new PlayClient("http://127.0.0.1:" + port);
 
+      // `base()` is what every refusal message quotes back to a player, so a
+      // wrong one sends them to look at the wrong port.
+      h.equals("base reports the address it will use", "http://127.0.0.1:" + port, client.base());
+
       // ------------------------------------------------------------- reads
+      status = 200;
+      reply = "{\"materials\":[\"iron_ingot\",\"oak_log\",\"stone\"]}";
+      PlayClient.Response materials = client.materials();
+      h.check("materials succeeds", materials.ok());
+      h.equals("materials reaches the right path", "/api/materials", lastPath);
+      h.equals("and lists what the chain trades", 3, Json.asList(materials.body.get("materials")).size());
+      h.equals("in the order given", "iron_ingot",
+          String.valueOf(Json.asList(materials.body.get("materials")).get(0)));
+
       status = 200;
       reply = "{\"playable\":true,\"verifier\":\"seed\",\"network\":\"testnet\",\"custodial\":true}";
       PlayClient.Response health = client.health();
@@ -103,6 +116,14 @@ public final class PlayClientTest {
       // The approval id is never sent: the service reads it off the chain, so a
       // caller cannot name someone else's grant.
       h.check("sell does not send an approval id", !lastBody.contains("approval"));
+
+      reply = "{\"sessionId\":\"s-10\",\"accountId\":\"p-1.testnet\",\"permittedMethods\":[\"sell\"]}";
+      PlayClient.Response claimed = client.claim("K9FH2MQ7");
+      h.equals("claim posts to the link route", "/api/link", lastPath);
+      h.equals("and sends only the code", "{\"code\":\"K9FH2MQ7\"}", lastBody);
+      h.check("a claimed session is usable", claimed.ok());
+      h.equals("and carries the account", "p-1.testnet",
+          Sessions.fromResponse(claimed.body).accountId);
 
       client.invest("s-9", "ironmonger", "1000");
       h.equals("invest sends the amount as a string",
