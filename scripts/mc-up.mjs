@@ -120,12 +120,24 @@ try {
   check('a JDK is installed', false, '', runtime.java.install)
 }
 
+// Ordinary terrain is bigger than the flat world this used to generate, so the
+// floor moved with it: Paper, its libraries and a real world are closer to
+// 2 GiB than to 1.
+//
+// The catch used to call `check('disk space', true, ...)` — a measurement
+// failure reported as a PASS, which is a check that cannot fail. It is now its
+// own state: not a pass, not a hard failure, and visible. A pre-flight that
+// says "ok" when it learned nothing is worse than one that is missing, because
+// the reader stops looking.
 try {
   const fs = await statfs(ROOT.pathname)
   const freeGiB = (fs.bsize * fs.bavail) / 1024 ** 3
-  check('disk space', freeGiB > 1.5, `${freeGiB.toFixed(1)} GiB free`,
-    'the Paper server and its world need about 1 GiB; clear some space')
-} catch { check('disk space', true, 'could not measure, continuing') }
+  check('disk space', freeGiB > 2.5, `${freeGiB.toFixed(1)} GiB free`,
+    'Paper, its libraries and a generated world need about 2 GiB; clear some space')
+} catch (e) {
+  log(`  ??    ${'disk space'.padEnd(34)} could not be measured (${e?.code ?? e?.message ?? 'unknown'})`)
+  log('        -> continuing, but if the run dies mid-boot this is the first thing to check')
+}
 
 try {
   await fetchPinned('paper-api')

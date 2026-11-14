@@ -32,15 +32,33 @@ const results = []
 const ok = (what, detail = '') => results.push(['pass', what, detail])
 const bad = (what, detail = '') => results.push(['FAIL', what, detail])
 
-async function hit(url, { method = 'GET', headers = {}, body, redirect = 'manual' } = {}) {
+/// Never throws. A transient network failure is a RESULT, not a crash.
+///
+/// The first version let fetch reject, so one `read ETIMEDOUT` against a free
+/// instance waking up took the whole check down with an unhandled TypeError —
+/// twelve passing assertions thrown away and a stack trace instead of a
+/// verdict. Everything that reads a response already handles a non-200, so a
+/// zero status flows through the same way.
+///
+/// Retried twice, because a free Render instance spins down after fifteen idle
+/// minutes and the request that wakes it can take about a minute: a cold start
+/// is the expected state, not a fault.
+async function hit(url, { method = 'GET', headers = {}, body, redirect = 'manual', tries = 3 } = {}) {
   const started = Date.now()
-  const res = await fetch(url, {
-    method, headers, redirect,
-    body, signal: AbortSignal.timeout(120_000),
-  })
-  const text = await res.text()
-  return { status: res.status, headers: res.headers, text, ms: Date.now() - started,
-    json: () => { try { return JSON.parse(text) } catch { return null } } }
+  let last = null
+  for (let i = 0; i < tries; i++) {
+    try {
+      const res = await fetch(url, { method, headers, redirect, body, signal: AbortSignal.timeout(120_000) })
+      const text = await res.text()
+      return { status: res.status, headers: res.headers, text, ms: Date.now() - started,
+        json: () => { try { return JSON.parse(text) } catch { return null } } }
+    } catch (e) {
+      last = e?.cause?.code ?? e?.code ?? e?.message ?? String(e)
+      if (i < tries - 1) await new Promise((r) => setTimeout(r, 3000 * (i + 1)))
+    }
+  }
+  return { status: 0, headers: new Headers(), text: `could not be reached: ${last}`,
+    ms: Date.now() - started, json: () => null }
 }
 
 // ------------------------------------------------------------- the web page
@@ -119,6 +137,17 @@ if (health.status !== 200 || h === null) {
     ok('it is wired to the contracts this repository builds')
   } else {
     bad('it is wired to different contracts', JSON.stringify(h.contracts))
+  }
+
+  // The hosted secret file holds the relayer's key and one player's. No agent
+  // keys, so /api/agent must refuse — and `agents: []` is how a client knows
+  // not to offer the command rather than offering one that always fails. If
+  // this ever reports agents, a worker's key reached the host and should not
+  // have.
+  if (Array.isArray(h.agents) && h.agents.length === 0) {
+    ok('no agent keys reached the host', 'agents: []')
+  } else {
+    bad('AN AGENT KEY IS ON THE HOST', JSON.stringify(h.agents))
   }
 }
 
