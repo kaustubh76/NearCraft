@@ -184,6 +184,28 @@ public final class PlayClient {
     return post("/api/invest", body);
   }
 
+  /**
+   * Send a declared agent shopping.
+   *
+   * <p>The agent spends its OWN credit and its own gas — it is not the player's
+   * wallet under another name. The service refuses an agent it does not
+   * declare, so the {@code agent} argument is a short name the server resolves
+   * (<code>worker-1</code>), never an account id this plugin made up.
+   *
+   * <p>GAME_LOOP.md described this mechanic from the beginning and nothing
+   * implemented it: there was no {@code agent} command and no handler, so it
+   * was reachable only by running {@code npm run agent} against a sandbox.
+   */
+  public Response agent(String sessionId, String agent, String merchantId, String item, int count) {
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("sessionId", sessionId);
+    body.put("agent", agent);
+    body.put("merchantId", merchantId);
+    body.put("item", item);
+    body.put("count", Integer.valueOf(count));
+    return post("/api/agent", body);
+  }
+
   private static Map<String, Object> order(String sessionId, String merchantId, String item, int count) {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("sessionId", sessionId);

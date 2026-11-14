@@ -1,10 +1,13 @@
 package org.nearcraft.mc;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -91,6 +94,7 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
       case "sell": return trade(sender, args, false);
       case "wallet": return wallet(sender);
       case "invest": return invest(sender, args);
+      case "agent": return agent(sender, args);
       default: return false;
     }
   }
@@ -103,6 +107,7 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
       case "selftest": return selftest(sender);
       case "claim": return claim(sender, args);
       case "inventory-selftest": return inventorySelftest(sender);
+      case "world-selftest": return worldSelftest(sender);
       default:
         // Every subcommand, because the help listed exactly one of the four and
         // the rest were discoverable only by reading the source.
@@ -112,12 +117,14 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
         sender.sendMessage(GREY + "  /nearcraft status" + WHITE + "  which chain and which login this server uses");
         sender.sendMessage(GREY + "  /nearcraft selftest" + WHITE + "  reach the service and read live prices");
         sender.sendMessage(GREY + "  /nearcraft inventory-selftest" + WHITE + "  check the block arithmetic");
+        sender.sendMessage(GREY + "  /nearcraft world-selftest" + WHITE + "  can the traded materials be gathered here");
         sender.sendMessage(GREY + "  /market" + WHITE + "  what this economy trades");
         sender.sendMessage(GREY + "  /market <item> [count]" + WHITE + "  what the merchants are quoting");
         sender.sendMessage(GREY + "  /buy <merchant> <item> [count]");
         sender.sendMessage(GREY + "  /sell <merchant> <item> [count]");
         sender.sendMessage(GREY + "  /wallet" + WHITE + "  credit, holdings, and what your key may do");
         sender.sendMessage(GREY + "  /invest <merchant> <NEAR>" + WHITE + "  reopen a merchant that went broke");
+        sender.sendMessage(GREY + "  /agent <worker> buy <item> [count]" + WHITE + "  send an agent shopping on its own budget");
         return true;
     }
   }
@@ -457,6 +464,110 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
   }
 
   /**
+   * Send a declared agent shopping.
+   *
+   * <p><b>Why this exists.</b> GAME_LOOP.md has described
+   * {@code /agent worker task gather 64 iron} as a core mechanic since the
+   * first draft, and nothing implemented it — no entry in plugin.yml, no
+   * handler here. The agents were real on chain and drivable only from
+   * {@code npm run agent} against a sandbox, so the one mechanic that makes
+   * this an <i>agent</i> economy was the one a player could not reach.
+   *
+   * <p><b>What an agent is, and is not.</b> It is not the player's wallet with
+   * a different label. {@code worker-1} holds its own NEAR account, its own
+   * credit at the market and its own function-call key scoped to one method on
+   * one contract. It pays its own gas — the relayer exists so that PLAYERS
+   * never see a gas prompt, and an agent is not a player. The response says
+   * whose account moved, because "you bought it" and "your agent bought it"
+   * are different facts.
+   *
+   * <p>It does not gather. The documented verb was {@code task gather}, and
+   * nothing here can make an agent mine a block; what it can do is spend its
+   * budget at the market. GAME_LOOP.md now says that rather than the other.
+   *
+   * <p>No merchant argument: picking one is the shopping, and the point of
+   * sending an agent is not to do the shopping yourself. {@link Orders#cheapest}
+   * takes the cheapest row that will actually trade.
+   */
+  private boolean agent(CommandSender sender, String[] args) {
+    if (args.length < 3 || !"buy".equalsIgnoreCase(args[1])) {
+      sender.sendMessage(RED + "usage: /agent <worker> buy <item> [count]");
+      sender.sendMessage(GREY + "  sends an agent shopping. It spends " + WHITE + "its own"
+          + GREY + " credit and its own gas, not yours.");
+      // Name the agents this deployment actually has rather than making a
+      // player guess. The service is the only thing that knows.
+      async(() -> {
+        PlayClient.Response health = client.health();
+        sync(() -> {
+          if (!health.ok() || !(health.body.get("agents") instanceof List)) return;
+          List<Object> rows = Json.asList(health.body.get("agents"));
+          if (rows.isEmpty()) {
+            sender.sendMessage(GREY + "  this deployment holds no agent keys, so none can be sent.");
+            return;
+          }
+          StringBuilder names = new StringBuilder();
+          for (Object row : rows) {
+            if (!(row instanceof Map)) continue;
+            if (names.length() > 0) names.append(", ");
+            names.append(Json.text(Json.asObject(row), "name", "?"));
+          }
+          sender.sendMessage(GREY + "  available: " + WHITE + names);
+        });
+      });
+      return true;
+    }
+
+    Sessions.Session session = sessions.of(idOf(sender));
+    if (session == null) {
+      // A session is required even though the agent's credit is spent and not
+      // the player's: dispatching one costs that agent real gas, and an
+      // anonymous caller does not get to spend it.
+      sender.sendMessage(RED + "sign in first: " + WHITE + "/nearcraft link <token>");
+      return true;
+    }
+
+    String worker = args[0];
+    String item = args[2].toLowerCase();
+    int count = Orders.count(args, 3);
+    if (Items.materialFor(item) == null) {
+      sender.sendMessage(RED + WHITE + item + RED + " is not a block this game has");
+      return true;
+    }
+
+    sender.sendMessage(GREY + "sending " + WHITE + worker + GREY + " for " + count + " " + item + "...");
+    async(() -> {
+      PlayClient.Response quotes = client.market(item, count);
+      if (!quotes.ok()) {
+        sync(() -> sender.sendMessage(RED + "market: " + quotes.refusal()));
+        return;
+      }
+      Map<String, Object> row = Orders.cheapest(quotes);
+      if (row == null) {
+        sync(() -> {
+          sender.sendMessage(RED + "no merchant is selling " + WHITE + item + RED + " right now");
+          sender.sendMessage(GREY + "  /market " + item + WHITE + " shows why, in the contract's own words");
+        });
+        return;
+      }
+      String merchantId = Json.text(row, "merchantId", "");
+      String merchantName = Json.text(row, "merchantName", merchantId);
+      PlayClient.Response response = client.agent(session.id, worker, merchantId, item, count);
+      sync(() -> {
+        if (!response.ok()) {
+          sender.sendMessage(RED + "the agent was not sent: " + response.refusal());
+          return;
+        }
+        sender.sendMessage(GREEN + Json.text(response.body, "agentId", worker) + GREY + " bought "
+            + WHITE + count + " " + item + GREY + " from " + WHITE + merchantName);
+        sender.sendMessage(GREY + "  tx " + WHITE + Json.text(response.body, "hash", "?"));
+        sender.sendMessage(GREY + "  spent from the agent's own credit, on its own key — "
+            + "nothing came out of your wallet, and the blocks are the agent's too.");
+      });
+    });
+    return true;
+  }
+
+  /**
    * Back a merchant that went broke, so it reopens.
    *
    * <p>This is the `games` prompt's own closing sentence — "it closes its shop
@@ -574,6 +685,141 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
         sender.sendMessage(GREY + "  full-access keys " + WHITE + Json.number(response.body, "fullAccessKeys", -1)
             + GREY + "   scoped keys " + WHITE + Json.number(response.body, "scopedKeys", -1)
             + RESET);
+      });
+    });
+    return true;
+  }
+
+  /**
+   * Can the materials this economy trades actually be gathered in this world?
+   *
+   * <p><b>Why this had to be written.</b> The server generated a default
+   * superflat world — bedrock, two dirt, one grass — in survival mode. The
+   * economy trades iron_ingot, oak_log, stone, glass, coal, copper_ingot,
+   * oak_planks and redstone, and NOT ONE of those eight existed in the world a
+   * player spawned into. So the first of the three core actions in
+   * GAME_LOOP.md, "Mine, chop, or harvest one stack-worth of a material", could
+   * not be performed at all: you could trade, but only things you had bought.
+   * Nothing noticed for the same reason nothing ever notices this class of
+   * defect — no code asked the world what was in it, so no answer could be
+   * wrong.
+   *
+   * <p>The material list comes from the SERVICE, not from a constant here. The
+   * chain decides what this economy trades, and a second copy of that list in
+   * the plugin is one more thing to rot. The cost is that this check needs the
+   * service up, which is the same thing every other command needs.
+   *
+   * <p>The scan runs on the main thread, deliberately: {@code getBlockAt} is
+   * not safe off it. It reads the full height of a 49x49 column of already
+   * loaded chunks — a few hundred thousand reads, which is a blink — and this
+   * is a diagnostic rather than something in a player's way.
+   *
+   * <p>The bar is half the traded materials. It is not "all eight", because
+   * distribution is real: sand is a beach, redstone is deep, and a world can be
+   * entirely playable without either within 24 blocks of where you stand.
+   * Against the old flat world this reports zero of eight and fails, which is
+   * the comparison that matters.
+   */
+  private boolean worldSelftest(CommandSender sender) {
+    async(() -> {
+      PlayClient.Response response = client.materials();
+      sync(() -> {
+        if (!response.ok()) {
+          sender.sendMessage(RED + "the service would not list the materials: " + response.refusal());
+          sender.sendMessage(RED + "world selftest: 0 of 0 materials gatherable, 1 failed");
+          return;
+        }
+        Object list = response.body.get("materials");
+        if (!(list instanceof List)) {
+          sender.sendMessage(RED + "the service listed no materials");
+          sender.sendMessage(RED + "world selftest: 0 of 0 materials gatherable, 1 failed");
+          return;
+        }
+        List<Object> materials = Json.asList(list);
+        if (materials.isEmpty()) {
+          sender.sendMessage(RED + "world selftest: 0 of 0 materials gatherable, 1 failed");
+          return;
+        }
+
+        // A player stands somewhere; the console does not, so it asks about
+        // spawn — which is where a player arriving would stand.
+        Location centre;
+        if (sender instanceof Player) {
+          centre = ((Player) sender).getLocation();
+        } else if (!Bukkit.getWorlds().isEmpty()) {
+          centre = Bukkit.getWorlds().get(0).getSpawnLocation();
+        } else {
+          sender.sendMessage(RED + "world selftest: this server has no world, 1 failed");
+          return;
+        }
+        World world = centre.getWorld();
+        if (world == null) {
+          sender.sendMessage(RED + "world selftest: that location has no world, 1 failed");
+          return;
+        }
+
+        // One pass over the box, tallying only the blocks any material needs.
+        // Scanning once per material would be eight passes for the same answer.
+        Map<Material, Integer> seen = new LinkedHashMap<>();
+        for (Object material : materials) {
+          for (Material source : Items.sourcesFor(String.valueOf(material))) seen.putIfAbsent(source, 0);
+        }
+
+        // The FULL column, not a slab around the player. The first version
+        // scanned fifty blocks down and reported redstone missing from a world
+        // that has plenty of it — redstone generates below y=16 and spawn here
+        // is at y=95, so the answer was about the box rather than about the
+        // world. These chunks are already generated top to bottom, so reading
+        // all of them costs no chunk loads, only about 430,000 array reads.
+        int radius = 24;
+        int minY = world.getMinHeight();
+        int maxY = Math.min(world.getMaxHeight() - 1, centre.getBlockY() + 20);
+        for (int x = centre.getBlockX() - radius; x <= centre.getBlockX() + radius; x++) {
+          for (int z = centre.getBlockZ() - radius; z <= centre.getBlockZ() + radius; z++) {
+            for (int y = minY; y <= maxY; y++) {
+              Material type = world.getBlockAt(x, y, z).getType();
+              Integer count = seen.get(type);
+              if (count != null) seen.put(type, count + 1);
+            }
+          }
+        }
+
+        sender.sendMessage(GOLD + "--- NearCraft world selftest ---");
+        sender.sendMessage(GREY + "  world " + WHITE + world.getName() + GREY + "  centred on " + WHITE
+            + centre.getBlockX() + " " + centre.getBlockY() + " " + centre.getBlockZ()
+            + GREY + "  box " + WHITE + (radius * 2 + 1) + "x" + (radius * 2 + 1) + "x" + (maxY - minY + 1));
+
+        int gatherable = 0;
+        for (Object material : materials) {
+          String id = String.valueOf(material);
+          List<Material> sources = Items.sourcesFor(id);
+          int total = 0;
+          StringBuilder where = new StringBuilder();
+          for (Material source : sources) {
+            int n = seen.getOrDefault(source, 0);
+            total += n;
+            if (n > 0) {
+              if (where.length() > 0) where.append(", ");
+              where.append(source.name().toLowerCase()).append(" x").append(n);
+            }
+          }
+          if (total > 0) {
+            gatherable++;
+            sender.sendMessage(GREY + "  ok    " + WHITE + id + GREY + "  from " + where);
+          } else {
+            String names = sources.isEmpty() ? "nothing this plugin knows" : sources.toString().toLowerCase();
+            sender.sendMessage(RED + "  none  " + id + "  no " + names + " within reach");
+          }
+        }
+
+        int failed = gatherable * 2 < materials.size() ? 1 : 0;
+        sender.sendMessage((failed == 0 ? GREEN : RED) + "world selftest: " + gatherable + " of "
+            + materials.size() + " materials gatherable, " + failed + " failed");
+        if (failed != 0) {
+          sender.sendMessage(RED + "  this world cannot be played: there is nothing here to gather.");
+          sender.sendMessage(RED + "  check level-type in server.properties — a default superflat world");
+          sender.sendMessage(RED + "  is bedrock, two dirt and one grass, and holds none of these.");
+        }
       });
     });
     return true;

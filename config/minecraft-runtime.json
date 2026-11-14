@@ -6,6 +6,13 @@
     "home": "/opt/homebrew/opt/openjdk@25",
     "why": "Paper 26.3 refuses to start on anything older. macOS ships a /usr/bin/java stub that is not a JVM at all, so this path is used explicitly rather than trusting PATH."
   },
+  "world": {
+    "level_type": "minecraft:normal",
+    "seed": "nearcraft",
+    "difficulty": "easy",
+    "gamemode": "survival",
+    "why": "The human-playable server (npm run mc:server, npm run mc:up -- --keep) generates ORDINARY TERRAIN. It used to be minecraft:flat with default generator settings, which is bedrock, two dirt and one grass: no ores, no trees, no caves. The economy trades iron_ingot, oak_log, stone, glass, coal, copper_ingot, oak_planks and redstone, so not one of the eight materials existed in the world a player spawned into, and GAME_LOOP.md's first core action -- \"Mine, chop, or harvest one stack-worth of a material\" -- was impossible. The seed is pinned so the world is the same one every time and /nearcraft world-selftest means something. The BOT fixture in scripts/mc-bot.mjs deliberately keeps a flat world: it never sends position packets, so real terrain could leave it in water or inside a block, and the bot proves settlement rather than scenery."
+  },
   "compileClasspath": [
     "paper-api",
     "adventure-key",

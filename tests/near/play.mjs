@@ -64,6 +64,7 @@ function build(overrides = {}) {
     },
     // Distinct ids, because the link code mints a SECOND session and a test
     // that cannot tell them apart cannot check that they are separate.
+    agents: overrides.agents ?? null,
     newSessionId: overrides.newSessionId ?? (() => `SESSION-${++minted}`),
     now: overrides.now,
     log: overrides.log,
@@ -546,4 +547,101 @@ test('claiming is case- and space-insensitive, because people type it', async ()
 test('health advertises that link codes exist', async () => {
   const { svc } = build()
   assert.equal((await svc.handle('GET', '/api/health', {})).body.linkCodes, true)
+})
+
+// ------------------------------------------------------------ agent dispatch
+//
+// GAME_LOOP.md described sending an agent shopping from the first draft and
+// nothing implemented it: no command, no route. These cover the route; the
+// command is covered by the Java suite and by npm run mc:server.
+
+/// A stand-in for the real dispatcher in scripts/serve-play.mjs, which needs
+/// .local/ keys and a chain. What matters here is the ROUTE's contract.
+function fakeAgents({ fail = null } = {}) {
+  const sent = []
+  return {
+    sent,
+    list: () => [{ accountId: 'worker-1.x.testnet', name: 'worker-1', methods: ['buy_with_credit'], maxUnitsPerOrder: 16 }],
+    dispatch: async (order) => {
+      if (fail) throw fail
+      sent.push(order)
+      return { agentId: 'worker-1.x.testnet', hash: 'AGENTHASH1' }
+    },
+  }
+}
+
+test('health lists the agents that can be sent, and an empty list when none can', async () => {
+  // An empty list rather than a missing field: a client can then show the
+  // command or not, instead of offering one that always refuses.
+  const bare = await build().svc.handle('GET', '/api/health')
+  assert.deepEqual(bare.body.agents, [])
+
+  const { svc } = build({ agents: fakeAgents() })
+  const res = await svc.handle('GET', '/api/health')
+  assert.equal(res.body.agents.length, 1)
+  assert.equal(res.body.agents[0].name, 'worker-1')
+})
+
+test('dispatching an agent needs a session, because it spends that agent gas', async () => {
+  const { svc } = build({ agents: fakeAgents() })
+  refuses(await svc.handle('POST', '/api/agent',
+    { agent: 'worker-1', merchantId: 'ironmonger.x.testnet', item: 'iron_ingot', count: 1 }),
+    'NO_SESSION', 401)
+})
+
+test('a deployment with no agent keys refuses as a deployment fact, not a bad request', async () => {
+  // The hosted instance ships the relayer's key and one player's, so this is
+  // its normal state. A 400 would tell a caller to fix a request that was fine.
+  const { svc } = build()
+  const sessionId = await signIn(svc)
+  refuses(await svc.handle('POST', '/api/agent',
+    { sessionId, agent: 'worker-1', merchantId: 'ironmonger.x.testnet', item: 'iron_ingot', count: 1 }),
+    'NO_AGENT_KEYS', 503)
+})
+
+test('a dispatched agent answers with its OWN account and a hash', async () => {
+  const agents = fakeAgents()
+  const { svc, relayed } = build({ agents })
+  const sessionId = await signIn(svc)
+  const res = await svc.handle('POST', '/api/agent',
+    { sessionId, agent: 'worker-1', merchantId: 'ironmonger.x.testnet', item: 'iron_ingot', count: 4 })
+
+  assert.equal(res.status, 200)
+  assert.equal(res.body.agentId, 'worker-1.x.testnet')
+  assert.equal(res.body.hash, 'AGENTHASH1')
+  assert.equal(res.body.count, 4)
+  assert.deepEqual(agents.sent, [
+    { name: 'worker-1', merchantId: 'ironmonger.x.testnet', item: 'iron_ingot', count: 4 },
+  ])
+
+  // The POINT of the whole route: an agent is not the player's wallet under
+  // another name. It signs with its own key and pays its own gas, so the
+  // player's relayer must not have been touched at all.
+  assert.deepEqual(relayed, [], 'an agent dispatch must not go through the player relayer')
+})
+
+test("an agent's own policy refusal keeps its code instead of becoming a 500", async () => {
+  // backend/near/policy.mjs refuses an order larger than the cap, a merchant
+  // outside this world, a method the key does not grant. Those are the agent's
+  // wallet WORKING; reporting them as an internal error would hide the one
+  // thing the caller could act on.
+  const refusal = Object.assign(new Error('ironmonger.evil.testnet is not under x.testnet'),
+    { code: 'MERCHANT_OUTSIDE_WORLD' })
+  const { svc } = build({ agents: fakeAgents({ fail: refusal }) })
+  const sessionId = await signIn(svc)
+  const res = await svc.handle('POST', '/api/agent',
+    { sessionId, agent: 'worker-1', merchantId: 'ironmonger.evil.testnet', item: 'iron_ingot', count: 1 })
+  refuses(res, 'MERCHANT_OUTSIDE_WORLD', 403)
+  assert.match(res.body.detail, /not under/)
+})
+
+test('an unknown agent names the ones that exist', async () => {
+  const refusal = Object.assign(new Error('no agent named "worker-9" — this deployment has worker-1'),
+    { code: 'UNKNOWN_AGENT' })
+  const { svc } = build({ agents: fakeAgents({ fail: refusal }) })
+  const sessionId = await signIn(svc)
+  const res = await svc.handle('POST', '/api/agent',
+    { sessionId, agent: 'worker-9', merchantId: 'ironmonger.x.testnet', item: 'iron_ingot', count: 1 })
+  refuses(res, 'UNKNOWN_AGENT', 400)
+  assert.match(res.body.detail, /worker-1/)
 })

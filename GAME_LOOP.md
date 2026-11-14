@@ -7,7 +7,7 @@ quietly abandoned.
 
 ## The one-sentence loop
 
-You gather materials in a Minecraft recreation of South Mumbai and trade them
+You gather materials in a Minecraft world and trade them
 with merchants who are AI agents holding their own NEAR accounts, their own
 inventory and their own money — and because their prices come from their stock
 and from what you and everyone else just sold them, the market is the thing you
@@ -48,12 +48,24 @@ The tactical layer, where prices stop being a readout and start being a map:
 - **You reroute.** Two merchants hold different stock, so they quote different
   prices for the same material. Walking ten blocks is now worth something. This
   is the first strategy the game teaches and it requires no tutorial.
-- **You hire a worker.** `/agent worker task gather 64 iron`. A worker agent
-  takes a NEAR sub-account of its own (`worker-1.nearcraftmc.testnet`) and a
+- **You hire a worker.** `/agent worker-1 buy iron_ingot 8`. A worker agent
+  holds a NEAR sub-account of its own (`worker-1.nearcraftmc.testnet`) and a
   function-call access key with an explicit method list and a spending
-  allowance. It gathers while you build. Its key cannot transfer NEAR and
-  cannot add keys, so the worst it can do is spend its allowance on the
-  materials you scoped it to.
+  allowance. It shops while you build, paying out of **its** credit with **its**
+  key and its own gas — the relayer exists so that players never see a gas
+  prompt, and an agent is not a player. Its key cannot transfer NEAR and cannot
+  add keys, so the worst it can do is spend its allowance on the materials it
+  was scoped to, at a merchant inside this world. The command picks the cheapest
+  merchant that will actually trade, because choosing one is the shopping and
+  the point of sending an agent is not to do it yourself.
+
+  **This line used to read `/agent worker task gather 64 iron`, and that
+  command did not exist** — no entry in `plugin.yml`, no handler, nothing. It
+  was specified here and reachable from nowhere for two weeks. What is built is
+  a purchase, not a gather: nothing here can make an agent mine a block, and
+  claiming otherwise is how a document stops being worth reading.
+  `npm run check:docs` now fails when a command named in these files is absent
+  from the plugin, so this particular gap cannot reopen quietly.
 - **You notice a merchant is thin.** Its treasury is falling. It is still
   buying, but less eagerly, and the tooltip says so.
 

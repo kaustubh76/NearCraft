@@ -1,14 +1,18 @@
 name: NearCraft
 version: '0.1.0'
 main: org.nearcraft.mc.NearCraftPlugin
-api-version: '1.21.11'
+# The Paper API this plugin is compiled against, which is what this field means.
+# It used to read '1.21.11' — that is the mineflayer CLIENT protocol version from
+# config/minecraft-runtime.json, which ViaVersion bridges to this server. Paper
+# accepted the wrong value, so it was a mislabel rather than a failure.
+api-version: '26.3'
 description: An agent economy settled on NEAR, played from inside Minecraft.
 website: https://github.com/kaustubh76/NearCraft
 author: NearCraft
 commands:
   nearcraft:
     description: Sign in, check the service, or run a selftest from the console.
-    usage: /nearcraft <link|claim|status|selftest|inventory-selftest>
+    usage: /nearcraft <link|claim|status|selftest|inventory-selftest|world-selftest>
     aliases: [nc]
   market:
     description: What the merchants are quoting for a material, with the contract's own reason.
@@ -22,6 +26,9 @@ commands:
   wallet:
     description: Your credit, holdings, and exactly what your key is allowed to do.
     usage: /wallet
+  agent:
+    description: Send a declared agent shopping on its own budget and its own key.
+    usage: /agent <worker> buy <item> [count]
   invest:
     description: Back a broke merchant out of your credit so it reopens, and earn the stake back from its margin.
     usage: /invest <merchant> <amount in NEAR>

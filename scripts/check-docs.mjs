@@ -464,6 +464,61 @@ try {
   if (!/ENOENT/.test(e?.message ?? '')) fail('config/hosting.json', `could not be read: ${e.message}`)
 }
 
+// 8d. A Minecraft command the documents describe must actually exist.
+//
+// GAME_LOOP.md specified `/agent worker task gather 64 iron` as one of the core
+// mechanics from its first draft. There was no `agent` entry in plugin.yml and
+// no handler in the plugin — the documented verb was reachable from nothing, and
+// nothing noticed for two weeks. check-java-wiring.mjs catches the mirror image
+// of this (a method no test reaches) and this catches the version that faces a
+// reader: a command they are told to type.
+//
+// Two levels, because the subcommand is where it hid. `/nearcraft foo` passes
+// the first check — `nearcraft` is a real command — and only the usage string
+// knows whether `foo` is.
+try {
+  const pluginYml = await readFile(new URL('minecraft/src/main/resources/plugin.yml', ROOT), 'utf8')
+
+  // The command names are the keys indented two spaces under `commands:`.
+  const commandBlock = pluginYml.split(/^commands:\s*$/m)[1] ?? ''
+  const commands = new Set([...commandBlock.matchAll(/^ {2}([a-z][a-z0-9_-]*):\s*$/gm)].map((m) => m[1]))
+  if (commands.size === 0) {
+    fail('minecraft/src/main/resources/plugin.yml', 'no commands could be read out of it, so this '
+      + 'check now verifies nothing — the file was reformatted')
+  }
+
+  // The subcommands the `nearcraft` usage string advertises.
+  const usage = pluginYml.match(/usage:\s*\/nearcraft\s*<([^>]+)>/)
+  const subcommands = new Set((usage?.[1] ?? '').split('|').map((x) => x.trim()).filter(Boolean))
+
+  for (const doc of DOCS) {
+    const text = await readFile(new URL(doc, ROOT), 'utf8')
+    // Backticked, slash-led, and NOT a URL path: `/api/health` has a second
+    // slash and is the service's route table, not something anyone types.
+    for (const m of text.matchAll(/`\/([a-z][a-z0-9_-]*)((?: +[a-z0-9_<>|[\]-]+)*)`/g)) {
+      const name = m[1]
+      if (deniesExistence(text, m.index)) continue
+      if (!commands.has(name)) {
+        fail(doc, `tells a reader to type \`/${name}\`, which is not a command in plugin.yml`)
+        continue
+      }
+      commandsChecked++
+      if (name !== 'nearcraft' || subcommands.size === 0) continue
+      // The first word after the command, when it is a bare word rather than a
+      // placeholder like <token>.
+      const sub = m[2].trim().split(/\s+/)[0] ?? ''
+      if (!sub || !/^[a-z][a-z0-9-]*$/.test(sub)) continue
+      if (!subcommands.has(sub)) {
+        fail(doc, `describes \`/nearcraft ${sub}\`, which the plugin.yml usage string does not list `
+          + `(it offers ${[...subcommands].join(', ')})`)
+      } else { commandsChecked++ }
+    }
+  }
+} catch (e) {
+  // No plugin is a legitimate state for a fork that dropped the Minecraft half.
+  if (!/ENOENT/.test(e?.message ?? '')) fail('plugin.yml', `could not be read: ${e.message}`)
+}
+
 for (const { what, dir, pattern, claim, only, ext, all, denominator } of COUNTED_CLAIMS) {
   const actual = await countInFiles(dir, pattern, only ?? null, ext ?? '.rs')
   // `all` checks EVERY place the number is written, not just the first. The

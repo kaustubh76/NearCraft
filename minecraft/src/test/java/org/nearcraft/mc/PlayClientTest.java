@@ -141,6 +141,33 @@ public final class PlayClientTest {
       h.equals("invest sends the amount as a string",
           "{\"sessionId\":\"s-9\",\"merchantId\":\"ironmonger\",\"amount\":\"1000\"}", lastBody);
 
+      // An agent is dispatched with its own short name, and the count is a
+      // JSON number because the service does Number(body.count). The body is
+      // asserted byte for byte: a LinkedHashMap keeps the order stable, so a
+      // field silently renamed or dropped shows up here rather than as a
+      // refusal from a server nobody is running during this test.
+      client.agent("s-9", "worker-1", "ironmonger.nearcraftmc.testnet", "iron_ingot", 8);
+      h.equals("agent sends the worker, the merchant, the item and a numeric count",
+          "{\"sessionId\":\"s-9\",\"agent\":\"worker-1\","
+          + "\"merchantId\":\"ironmonger.nearcraftmc.testnet\","
+          + "\"item\":\"iron_ingot\",\"count\":8}", lastBody);
+
+      reply = "{\"agentId\":\"worker-1.nearcraftmc.testnet\",\"hash\":\"EHSKS6ai\"}";
+      PlayClient.Response sent = client.agent("s-9", "worker-1", "ironmonger", "iron_ingot", 1);
+      h.check("a dispatched agent is a success", sent.ok());
+      h.equals("the agent's own account comes back, not the player's",
+          "worker-1.nearcraftmc.testnet", Json.text(sent.body, "agentId", ""));
+      h.equals("so does the transaction hash", "EHSKS6ai", Json.text(sent.body, "hash", ""));
+
+      // The deployment that holds no agent keys — the hosted one — must refuse
+      // in a way a client can tell apart from a bad request.
+      status = 503;
+      reply = "{\"error\":\"NO_AGENT_KEYS\",\"detail\":\"this deployment holds no agent keys\"}";
+      PlayClient.Response noAgents = client.agent("s-9", "worker-1", "ironmonger", "iron_ingot", 1);
+      h.check("no agent keys is not a success", !noAgents.ok());
+      h.equals("and says which", "NO_AGENT_KEYS", noAgents.error());
+      status = 200;
+
       // --------------------------------------------------------- refusals
       status = 403;
       reply = "{\"error\":\"METHOD_NOT_PERMITTED\",\"detail\":\"the key grants buy_with_credit, sell\"}";

@@ -54,6 +54,57 @@ public final class Items {
   }
 
   /**
+   * The blocks a player would gather to obtain a traded material.
+   *
+   * <p>This is NOT {@link #materialFor}. That answers "what block is this token
+   * id", which is what a trade moves. This answers "what would you mine or chop
+   * to get one in the first place", which is a different question with a
+   * different answer for five of the eight materials: an {@code iron_ingot}
+   * comes out of {@code iron_ore} by way of a furnace, {@code glass} out of
+   * {@code sand}, {@code oak_planks} out of {@code oak_log}.
+   *
+   * <p><b>Why this exists.</b> The server generated a default superflat
+   * world — bedrock, two dirt, one grass — in survival mode, so NOT ONE of the
+   * eight traded materials could be gathered, and the first of the three core
+   * actions in GAME_LOOP.md was impossible. Nothing noticed, because nothing
+   * ever asked the world what was in it. {@code /nearcraft world-selftest}
+   * asks, and this is the table it asks with.
+   *
+   * <p>Deepslate variants are included because below roughly y=0 that is the
+   * only form the ore takes, and a scan that looked only for {@code iron_ore}
+   * would report a deep world as empty of iron.
+   *
+   * <p>Looked up by name through {@link Material#matchMaterial} rather than
+   * written as enum constants, so a material this server's version does not
+   * have is absent from the list instead of failing the build.
+   *
+   * @return the blocks that yield it, or an empty list when nothing here knows
+   */
+  public static List<Material> sourcesFor(String tokenId) {
+    if (tokenId == null || tokenId.isBlank()) return List.of();
+    String id = tokenId.trim().toLowerCase();
+    String[] names;
+    switch (id) {
+      case "iron_ingot":   names = new String[] {"iron_ore", "deepslate_iron_ore"}; break;
+      case "copper_ingot": names = new String[] {"copper_ore", "deepslate_copper_ore"}; break;
+      case "coal":         names = new String[] {"coal_ore", "deepslate_coal_ore"}; break;
+      case "redstone":     names = new String[] {"redstone_ore", "deepslate_redstone_ore"}; break;
+      case "glass":        names = new String[] {"sand"}; break;
+      case "oak_planks":   names = new String[] {"oak_log"}; break;
+      case "stone":        names = new String[] {"stone", "deepslate"}; break;
+      // oak_log, and anything else whose token id is already the block you
+      // gather, needs no translation.
+      default:             names = new String[] {id}; break;
+    }
+    List<Material> out = new ArrayList<>();
+    for (String name : names) {
+      Material material = Material.matchMaterial(name);
+      if (material != null && !out.contains(material)) out.add(material);
+    }
+    return List.copyOf(out);
+  }
+
+  /**
    * How many of a material this inventory is carrying.
    *
    * <p>Counted across every slot the inventory exposes, which for a player

@@ -20,12 +20,39 @@ import { extname } from 'node:path'
 import { resolveFile, TYPES } from './serve-web.mjs'
 import { createPlayService } from '../backend/near/play.mjs'
 import { createOnboarding, playerAccountId } from '../backend/near/onboarding.mjs'
+import { agentPolicy } from '../backend/near/policy.mjs'
+import { createAgentSigner, transactionHash } from '../backend/near/signer.mjs'
+import { buyWithCreditRequest } from '../backend/near/market.mjs'
 import { createRelayer } from '../backend/near/relayer.mjs'
 import { createMarketReader } from '../backend/near/market.mjs'
 import { createOidcVerifier } from '../backend/near/oidc.mjs'
 
 const ROOT = new URL('..', import.meta.url).pathname
 const PORT = Number(process.env.PORT ?? 8080)
+
+/// LOOPBACK BY DEFAULT, and explicitly.
+///
+/// This was `server.listen(PORT)` with no host, which binds the IPv6 wildcard
+/// `::`. That is two bugs at once.
+///
+/// The security one: this service is custodial — it holds players' scoped
+/// signing keys and submits calls for them — and docs/MINECRAFT.md says it is
+/// "meant to sit on loopback beside the game server". It was in fact listening
+/// on every interface, while the banner printed `localhost` and understated it.
+///
+/// The one that stopped the game working: a wildcard bind SILENTLY LOSES a
+/// race. If anything already holds IPv4 `*:8080` — a Docker published port, say
+/// — Node still binds `::` successfully, reports itself up, and is unreachable
+/// at `127.0.0.1:8080`, which is the literal address mc-up.mjs, mc-server.mjs,
+/// mc-bot.mjs and the plugin's own config.yml all dial. The result was
+/// `the play service never came up` after a 30-second timeout, from a service
+/// that had started perfectly.
+///
+/// Naming the address makes that collision an immediate EADDRINUSE instead.
+/// A host that needs every interface asks for it: Render sets
+/// NEARCRAFT_BIND=0.0.0.0, because a PaaS routes to the container's public
+/// interface and loopback would be unreachable there.
+const HOST = process.env.NEARCRAFT_BIND ?? '127.0.0.1'
 
 /// The same two overrides scripts/deploy.mjs reads, so a sandbox deployment can
 /// be served without the committed testnet manifest being involved at all.
@@ -248,8 +275,93 @@ async function saveKey(accountId, secret) {
 }
 
 
+// ------------------------------------------------------------- agent dispatch
+//
+// GAME_LOOP.md has always described sending an agent shopping from inside the
+// game. Nothing implemented it: there was no `agent` command in plugin.yml and
+// no handler, so the documented mechanic was reachable only by running
+// `npm run agent` against a sandbox.
+//
+// This dispatches a DECLARED agent, with its own scoped key, through the SAME
+// path scripts/agent-run.mjs uses — agentPolicy + createAgentSigner — rather
+// than opening a second way to sign. That matters: the signer verifies the
+// key's scope against the chain before it spends anything, refuses a deposit a
+// function-call key could not attach anyway, and bounds the order. None of that
+// would come for free in a hand-rolled route.
+//
+// The agent pays its own gas here. It is not a player; it has a budget and a
+// key of its own, and the relayer exists so that PLAYERS never see a gas
+// prompt.
+const MAX_AGENT_UNITS = 16
+
+/// Only accounts this deployment declares, and only the methods it declares for
+/// them. An agent id that came off the wire is never trusted as an account.
+const declaredAgents = (manifest.agents ?? []).filter(
+  (a) => typeof keys[`${a.account_id}#function-call`] === 'string',
+)
+
+const agents = declaredAgents.length === 0 ? null : {
+  /// What a caller may ask for, so a client does not have to guess.
+  list: () => declaredAgents.map((a) => ({
+    accountId: a.account_id,
+    // The short name the game uses: `worker-1`, not the whole account id.
+    name: a.account_id.split('.')[0],
+    methods: [...(a.permitted_methods ?? [])],
+    maxUnitsPerOrder: MAX_AGENT_UNITS,
+  })),
+
+  async dispatch({ name, merchantId, item, count }) {
+    const agent = declaredAgents.find((a) => a.account_id.split('.')[0] === name || a.account_id === name)
+    if (!agent) {
+      const known = declaredAgents.map((a) => a.account_id.split('.')[0]).join(', ')
+      throw Object.assign(new Error(`no agent named "${name}" — this deployment has ${known}`),
+        { code: 'UNKNOWN_AGENT' })
+    }
+
+    const policy = agentPolicy({
+      agentId: agent.account_id,
+      marketContract: manifest.contracts.market,
+      // From the manifest, not from this file: the key on chain is scoped to
+      // these and a wider list here would only produce a refusal later.
+      methods: [...(agent.permitted_methods ?? [])],
+      maxUnitsPerOrder: MAX_AGENT_UNITS,
+    })
+
+    const signer = createAgentSigner({
+      policy,
+      secretKey: keys[`${agent.account_id}#function-call`],
+      rpcUrl: manifest.rpc,
+      log: (e) => console.log(`  agent      ${JSON.stringify(e)}`),
+    })
+
+    const outcome = await signer.call({
+      contractId: manifest.contracts.market,
+      ...buyWithCreditRequest({ merchantId, item, count }),
+    })
+    // The hash comes out of the outcome through the shared helper, not by
+    // reaching into a field name. The first version of this route read
+    // `outcome.hash`, which does not exist on a raw nearcore outcome, so it
+    // answered HTTP 200 with `"hash": null` — a settled transaction reported as
+    // if nothing had happened. A dispatch with no hash is not provable, and
+    // this route exists to be provable.
+    const hash = transactionHash(outcome)
+    if (!hash) {
+      throw Object.assign(new Error('the call settled but no transaction hash could be read from it'),
+        { code: 'AGENT_HASH_UNREADABLE' })
+    }
+    return { agentId: agent.account_id, hash }
+  },
+}
+
+if (agents) {
+  console.log(`\n  ${agents.list().length} agent(s) can be dispatched from in game: `
+    + agents.list().map((a) => a.name).join(', '))
+} else {
+  console.log('\n  no agent keys in this key file, so /api/agent will refuse. Players are unaffected.')
+}
+
 const play = createPlayService({
-  deployment: manifest, keys, verifierKind, onboarding, relayer, reader, saveKey,
+  deployment: manifest, keys, verifierKind, onboarding, relayer, reader, saveKey, agents,
   canOnboard: Boolean(rootKey),
   log: (e) => console.log(`  ${e.event.padEnd(10)} ${JSON.stringify({ ...e, event: undefined })}`),
 })
@@ -342,14 +454,30 @@ function signInHint() {
   return { token: null, id: signable.join(', ') }
 }
 
-server.listen(PORT, () => {
+server.on('error', (e) => {
+  // Say which address, and say what to do. EADDRINUSE on a bare port number is
+  // how half an hour goes into discovering that another project's container
+  // publishes 8080.
+  if (e?.code === 'EADDRINUSE') {
+    console.error(`\n  ${HOST}:${PORT} is already taken by another process.`)
+    console.error('  Free it, or choose another port:  PORT=8099 npm run play')
+    console.error('  npm run mc:up takes --port <n> and tells the plugin and the bot about it.\n')
+    process.exit(1)
+  }
+  throw e
+})
+
+server.listen(PORT, HOST, () => {
   const hint = signInHint()
   if (!rootKey) {
     console.log('  NOTE      this server cannot create NEW players: no key for the root')
     console.log('            account in .local/. Existing players sign in normally, and')
     console.log('            /api/health reports canOnboard: false.')
   }
-  console.log(`\n  NearCraft — playable: http://localhost:${PORT}/\n`)
+  // The address actually bound, not a friendly fiction. The old line said
+  // `localhost` while listening on every interface.
+  const shown = HOST === '0.0.0.0' || HOST === '::' ? `all interfaces, port ${PORT}` : `http://${HOST}:${PORT}/`
+  console.log(`\n  NearCraft — playable: ${shown}\n`)
   console.log(`  network   ${manifest.network ?? 'testnet'}  via ${manifest.rpc}`)
   console.log(`  login     ${verifierKind === 'oidc'
     ? `real OIDC against ${oidc.issuer} (audience ...${String(oidc.audience).slice(-24)})`

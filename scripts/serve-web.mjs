@@ -12,6 +12,10 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = new URL('..', import.meta.url).pathname
 const PORT = Number(process.env.PORT ?? 8080)
+/// Loopback by default, for the reason spelled out in scripts/serve-play.mjs: a
+/// wildcard bind succeeds even when something else already holds IPv4 on this
+/// port, and then nothing can reach it at 127.0.0.1 while it reports itself up.
+const HOST = process.env.NEARCRAFT_BIND ?? '127.0.0.1'
 
 /// Exported so scripts/serve-play.mjs serves the same files the same way
 /// rather than keeping a second table that can drift.
@@ -71,8 +75,18 @@ const server = createServer(async (req, res) => {
 const isEntryPoint = process.argv[1] !== undefined &&
   fileURLToPath(import.meta.url) === resolve(process.argv[1])
 
-if (isEntryPoint) server.listen(PORT, () => {
-  console.log(`\n  NearCraft market page: http://localhost:${PORT}/\n`)
+if (isEntryPoint) {
+  server.on('error', (e) => {
+    if (e?.code === 'EADDRINUSE') {
+      console.error(`\n  ${HOST}:${PORT} is already taken. Try:  PORT=8099 npm run web\n`)
+      process.exit(1)
+    }
+    throw e
+  })
+}
+
+if (isEntryPoint) server.listen(PORT, HOST, () => {
+  console.log(`\n  NearCraft market page: http://${HOST}:${PORT}/\n`)
   console.log('  It reads the deployed contracts in deployment.json over public RPC.')
   console.log('  Offline, it falls back to web/market-snapshot.json and says so.\n')
 })

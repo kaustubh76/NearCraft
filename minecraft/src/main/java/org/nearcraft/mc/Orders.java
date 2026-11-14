@@ -55,6 +55,37 @@ public final class Orders {
     return null;
   }
 
+  /**
+   * The cheapest merchant that is actually open, for a caller that names none.
+   *
+   * <p>{@code /agent <worker> buy <item>} does not ask a player to pick a
+   * merchant — the point of sending an agent is not to do the shopping
+   * yourself. The service already returns the rows cheapest first (the market
+   * contract orders them, and a test in tests/near/web.mjs asserts it), so this
+   * walks them in order and takes the first that will trade.
+   *
+   * <p>A closed merchant is skipped rather than refused: a world where the
+   * cheapest merchant went broke is the normal state of this economy, and the
+   * next one along is the answer. Only when none will trade is there nothing to
+   * say.
+   *
+   * @return the cheapest open merchant's row, or null when none will trade
+   */
+  public static Map<String, Object> cheapest(PlayClient.Response quotes) {
+    if (quotes == null) return null;
+    if (!(quotes.body.get("merchants") instanceof List)) return null;
+    for (Object row : Json.asList(quotes.body.get("merchants"))) {
+      if (!(row instanceof Map)) continue;
+      Map<String, Object> m = Json.asObject(row);
+      if (Boolean.TRUE.equals(m.get("closed"))) continue;
+      // An ask of nothing is not a price; a row without one cannot be bought
+      // from whatever else it says.
+      if (Json.text(m, "unitPrice", "").isBlank()) continue;
+      return m;
+    }
+    return null;
+  }
+
   /** The short name a player types, taken from the account id the chain uses. */
   public static String handle(Map<String, Object> row) {
     String id = Json.text(row, "merchantId", "");

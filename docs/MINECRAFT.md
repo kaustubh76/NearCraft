@@ -217,7 +217,7 @@ process in the system, the one players connect to.
 | Class | Role |
 |---|---|
 | `NearCraftPlugin` | commands, async dispatch, inventory |
-| `PlayClient` | the eight routes; **no Bukkit types**, so it tests standalone |
+| `PlayClient` | the ten routes; **no Bukkit types**, so it tests standalone |
 | `Json` | a strict reader and writer |
 | `Amounts` | yoctoNEAR to NEAR by string arithmetic |
 | `Sessions` | player UUID to session, memory only |
@@ -228,10 +228,62 @@ The total is in `README.md` and is counted by `check:docs` rather than written
 by hand here — six line counts in a table is six numbers that would start
 rotting the next time a comment is added to one of these files.
 
-Six in-game commands: `/nearcraft link|status|selftest|inventory-selftest`,
-`/market`, `/buy`, `/sell`, `/wallet`, and `/invest`. All of them are runnable
-**from the server console** as well as by a player, which is what let the chain
-half be proven before any client could connect.
+Seven in-game commands: `/nearcraft link|claim|status|selftest|inventory-selftest|world-selftest`,
+`/market`, `/buy`, `/sell`, `/wallet`, `/invest`, and `/agent`. All of them are
+runnable **from the server console** as well as by a player, which is what let
+the chain half be proven before any client could connect.
+
+`/agent <worker> buy <item> [count]` sends a declared agent shopping. It is the
+one command here that spends somebody else's money: `worker-1` holds its own
+NEAR account, its own credit at the market and its own function-call key scoped
+to one method on one contract, and it pays its own gas — the relayer exists so
+that *players* never see a gas prompt, and an agent is not a player. The service
+dispatches it through the same `agentPolicy` + `createAgentSigner` path
+`npm run agent` uses rather than a second way to sign, so the order is bounded,
+a deposit is refused, the key's scope is re-read from the chain before anything
+is spent, and a merchant outside this world is turned down. Proved on testnet:
+`worker-1.nearcraftmc.testnet` → `market.nearcraftmc.testnet`,
+`buy_with_credit`, `SuccessValue`
+([`EHSKS6ai…`](https://testnet.nearblocks.io/txns/EHSKS6aiZnhAAEkYVE3Qfi1zAHfLkBFkWRpdqy1vmAT9)).
+
+**It was documented and unbuilt for two weeks.** `GAME_LOOP.md` specified
+`/agent worker task gather 64 iron` from its first draft; there was no `agent`
+entry in `plugin.yml` and no handler, so the one mechanic that makes this an
+*agent* economy was the one a player could not reach. What is built is a
+purchase, not a gather — nothing here can make an agent mine a block — and
+`check:docs` now fails when a command named in these documents is absent from
+the plugin, at the subcommand level too.
+
+`/nearcraft world-selftest` asks the world whether the materials this economy
+trades can actually be gathered in it. That question had never been asked, and
+the answer was no: the server generated a **default superflat** world — bedrock,
+two dirt, one grass — in survival mode, while the economy trades `iron_ingot`,
+`oak_log`, `stone`, `glass`, `coal`, `copper_ingot`, `oak_planks` and
+`redstone`. Not one of the eight existed in the world a player spawned into, so
+the first of the three core actions in `GAME_LOOP.md` — *"Mine, chop, or harvest
+one stack-worth of a material"* — was impossible. You could trade, but only
+things you had bought.
+
+`npm run mc:server` now generates ordinary terrain from a seed pinned in
+`config/minecraft-runtime.json`, and the check reports per material what it
+found. Measured on the flat world first, which is how the defect was
+demonstrated rather than argued:
+
+| world | result |
+|---|---|
+| `level-type=minecraft:flat` (what it was) | `world selftest: 0 of 8 materials gatherable, 1 failed` |
+| `level-type=minecraft:normal`, seed `nearcraft` | `world selftest: 7 of 8 materials gatherable, 0 failed` |
+
+The one that is still missing is `glass`: spawn is inland and sand is a beach.
+That is distribution rather than absence, which is why the bar is half the
+materials and not all of them — and why the per-material lines are printed
+either way. `mc-server.mjs` gates its exit on this, so a world nobody can play
+in now fails the run instead of booting quietly.
+
+**The bot fixture keeps its flat world on purpose.** `scripts/mc-bot.mjs` runs a
+headless client that never sends position packets, so real terrain could leave
+it in water or inside a block; what it proves is settlement, not scenery, and
+the 9-of-9 that already passes is not traded for a view.
 
 `/invest` is the `games` prompt's own closing sentence — *"it closes its shop
 until someone invests in it"*. It calls `invest_with_credit`, the non-payable
@@ -305,7 +357,7 @@ claims in this repository five times.
   drops the client's outgoing position packets — all three are properties of a
   test fixture for a client that never moves, and none of them touch the
   documented way to run this.
-- **The inventory arithmetic is proven, but not against every slot.** The twelve
+- **The inventory arithmetic is proven, but not against every slot.** The 27
   console checks run against a real `Bukkit.createInventory`, which has no
   offhand; `take` uses `removeItemAnySlot` specifically so the offhand is
   reachable, and only the bot run exercises a real `PlayerInventory` at all.
@@ -318,7 +370,11 @@ claims in this repository five times.
   written to disk and never logged by the plugin. In seeded demo mode the token
   is a subject like `player-1` and is worth nothing — but pointed at a real OIDC
   provider it would be a bearer JWT typed into a game client, which is the wrong
-  shape. The fix is a one-time code completed in the browser. It is not built.
+  shape. The fix is a one-time code completed in the browser, and it **is**
+  built — `/nearcraft claim <code>`, documented above. This sentence said "it
+  is not built" for a week after it was, which is the same defect in the
+  other direction: a limits section that understates what exists teaches a
+  reader to distrust the ones that do not.
 - **The service must be running.** The plugin is a client; with nothing on
   `127.0.0.1:8080` every command answers `SERVICE_UNREACHABLE` and says to start
   `npm run play`.

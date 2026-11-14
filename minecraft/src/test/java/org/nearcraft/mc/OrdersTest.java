@@ -45,6 +45,38 @@ public final class OrdersTest {
     h.check("a reply whose rows are not objects does not match",
         Orders.match(new PlayClient.Response(200, Map.of("merchants", List.of("ironmonger"))), "ironmonger") == null);
 
+    // ----------------------------------------------- cheapest, for an agent
+    //
+    // /agent names no merchant, because picking one IS the shopping. The rows
+    // arrive cheapest first, so this must take the first that will trade — and
+    // must keep walking when it will not.
+    h.equals("the cheapest open merchant is taken", "ironmonger.nearcraftmc.testnet",
+        Json.text(Orders.cheapest(quotes), "merchantId", ""));
+
+    PlayClient.Response firstClosed = new PlayClient.Response(200, Json.asObject(Json.parse(
+        "{\"merchants\":["
+        + "{\"merchantId\":\"ironmonger.nearcraftmc.testnet\",\"unitPrice\":\"1\",\"closed\":true},"
+        + "{\"merchantId\":\"stonecutter.nearcraftmc.testnet\",\"unitPrice\":\"6\",\"closed\":false}]}")));
+    h.equals("a closed merchant is skipped, not refused", "stonecutter.nearcraftmc.testnet",
+        Json.text(Orders.cheapest(firstClosed), "merchantId", ""));
+
+    PlayClient.Response noPrice = new PlayClient.Response(200, Json.asObject(Json.parse(
+        "{\"merchants\":["
+        + "{\"merchantId\":\"ironmonger.nearcraftmc.testnet\",\"closed\":false},"
+        + "{\"merchantId\":\"stonecutter.nearcraftmc.testnet\",\"unitPrice\":\"6\",\"closed\":false}]}")));
+    h.equals("a row with no ask is not a price", "stonecutter.nearcraftmc.testnet",
+        Json.text(Orders.cheapest(noPrice), "merchantId", ""));
+
+    PlayClient.Response allShut = new PlayClient.Response(200, Json.asObject(Json.parse(
+        "{\"merchants\":[{\"merchantId\":\"ironmonger.nearcraftmc.testnet\","
+        + "\"unitPrice\":\"1\",\"closed\":true}]}")));
+    h.check("when every merchant is shut there is nothing to take", Orders.cheapest(allShut) == null);
+    h.check("a null response has no cheapest", Orders.cheapest(null) == null);
+    h.check("a reply with no merchants list has no cheapest",
+        Orders.cheapest(new PlayClient.Response(200, Map.of())) == null);
+    h.check("a reply whose rows are not objects has no cheapest",
+        Orders.cheapest(new PlayClient.Response(200, Map.of("merchants", List.of("ironmonger")))) == null);
+
     // ------------------------------------------------------------- handles
     h.equals("a handle reads as name and short id", "Ironmonger (ironmonger)",
         Orders.handle(Json.asObject(Json.asList(quotes.body.get("merchants")).get(0))));

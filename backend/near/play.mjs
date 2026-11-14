@@ -66,6 +66,35 @@ const STATUS = {
   METHOD_NOT_RELAYED: 403,
   PLAYER_COULD_NOT_SIGN: 502,
 
+  // Agent dispatch. NO_AGENT_KEYS is a deployment fact like NO_PLAYER_KEY, not
+  // a bad request — the hosted instance ships no agent keys on purpose, so a
+  // 400 would tell a caller to fix a request that was fine. The rest are the
+  // agent's own wallet refusing, which is the policy working: 403, because the
+  // request was understood and is not permitted.
+  NO_AGENT_KEYS: 503,
+  UNKNOWN_AGENT: 400,
+  NO_AGENT_KEY: 503,
+  // Transcribed from backend/near/policy.mjs and backend/near/signer.mjs, not
+  // guessed. The first draft of this block invented TOO_MANY_UNITS and
+  // KEY_NOT_FUNCTION_CALL, neither of which anything raises, so those refusals
+  // would have fallen through to a bare 400 while looking handled.
+  CONTRACT_NOT_PERMITTED: 403,
+  DEPOSIT_NOT_PERMITTED: 403,
+  ORDER_TOO_LARGE: 403,
+  ORDER_ALREADY_OUTSTANDING: 429,
+  MERCHANT_OUTSIDE_WORLD: 403,
+  // A key that is not what the policy says it is stops the agent. This is the
+  // deployment being wrong, not the caller.
+  AGENT_KEY_IS_FULL_ACCESS: 500,
+  AGENT_KEY_UNRESTRICTED: 500,
+  AGENT_KEY_WIDER_THAN_POLICY: 500,
+  AGENT_KEY_WRONG_RECEIVER: 500,
+  AGENT_KEY_PERMISSION_UNREADABLE: 502,
+  COUNTERPARTY_BLOCKED: 403,
+  COUNTERPARTY_BLOCKED_SINCE_APPROVAL: 403,
+  COUNTERPARTY_VERDICT_UNKNOWN: 502,
+  AGENT_HASH_UNREADABLE: 502,
+
   // The identity verifier's own refusals, passed through rather than flattened.
   // The split matters: a bad token is the caller's problem and a 401 tells them
   // to sign in again, while a JWKS the provider will not serve is OUR problem
@@ -122,6 +151,15 @@ export function createPlayService({
   onboarding,
   relayer,
   reader,
+  /// Dispatch a declared agent to shop, or null when this deployment holds no
+  /// agent keys.
+  ///
+  /// Injected rather than built here for the same reason everything else is:
+  /// this module reads no files and holds no keys. `null` is a real and common
+  /// state — the hosted deployment ships two keys, the relayer's and one
+  /// player's, so it cannot dispatch anybody and `/api/health` says so instead
+  /// of a route failing in a way a client has to interpret.
+  agents = null,
   /// Called with a newly onboarded player's scoped key so the operator can
   /// persist it.
   ///
@@ -275,6 +313,9 @@ export function createPlayService({
             network: deployment?.network ?? 'testnet',
             rpc: deployment?.rpc ?? reader.rpcUrl,
             relayer: deployment?.relayer?.account_id ?? null,
+            /// Which agents this deployment can send shopping, so a client can
+            /// show the command or not rather than offering one that refuses.
+            agents: agents ? agents.list() : [],
           })
         }
 
@@ -529,6 +570,45 @@ export function createPlayService({
             merchantId: body?.merchantId, amount: String(body?.amount ?? ''),
           })
           return ok(await relayFor(s, req))
+        }
+
+        // ------------------------------------------------------- send an agent
+        //
+        // Needs a session: dispatching an agent spends that agent's credit and
+        // its gas, so it is not something an anonymous caller gets to do. It
+        // does NOT spend the player's credit, and the response says whose it
+        // was, because an agent buying on your behalf and you buying are
+        // different facts and a player should be able to tell them apart.
+        if (method === 'POST' && path === '/api/agent') {
+          session(body?.sessionId)
+          if (!agents) {
+            throw new PlayRefusal(
+              'NO_AGENT_KEYS',
+              'this deployment holds no agent keys, so it cannot dispatch one. ' +
+              'That is a deployment fact, not a problem with your request.',
+            )
+          }
+          try {
+            const out = await agents.dispatch({
+              name: String(body?.agent ?? ''),
+              merchantId: body?.merchantId,
+              item: body?.item,
+              count: Number(body?.count),
+            })
+            return ok({
+              agentId: out.agentId,
+              hash: out.hash,
+              item: body?.item,
+              count: Number(body?.count),
+              merchantId: body?.merchantId,
+            })
+          } catch (e) {
+            // A policy refusal carries its own code and is the agent's wallet
+            // working, not the service failing — surface it as itself rather
+            // than as a generic 500. The codes come from backend/near/policy.mjs.
+            if (e?.code) throw new PlayRefusal(e.code, e.detail ?? e.message)
+            throw e
+          }
         }
 
         throw new PlayRefusal('NOT_FOUND', `${method} ${path}`)

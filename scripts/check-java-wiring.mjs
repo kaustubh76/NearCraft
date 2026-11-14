@@ -35,6 +35,7 @@ const UNTESTABLE_OFFLINE = {
   'Items.take': 'takes a Bukkit Inventory; covered by inventory-selftest',
   'Items.give': 'takes a Bukkit Inventory; covered by inventory-selftest',
   'Items.giveOrDrop': 'needs a Player and a World; covered by npm run mc:bot',
+  'Items.sourcesFor': 'Material.matchMaterial needs the server registry; covered by world-selftest',
   'NearCraftPlugin.onEnable': 'Bukkit lifecycle',
   'NearCraftPlugin.onDisable': 'Bukkit lifecycle',
   'NearCraftPlugin.onQuit': 'Bukkit event dispatch',

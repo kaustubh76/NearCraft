@@ -36,6 +36,8 @@ const TOKEN = value('--token', null)
 const SELL = value('--sell', flag('--trade') ? 'ironmonger:iron_ingot:1' : null)
 const BUY = value('--buy', null)
 const TRADE = SELL ?? BUY
+/// Which agent to dispatch from the console, or null to skip it.
+const AGENT = value('--agent', null)
 const BOOT_TIMEOUT_MS = 10 * 60 * 1000
 
 console.log('\n=== NearCraft on Paper ===\n')
@@ -72,17 +74,40 @@ await writeFile(new URL('NearCraft/config.yml', PLUGINS), `service: '${SERVICE}'
 console.log('\n  I am accepting Mojang\'s EULA on your behalf, as agreed: eula=true')
 await writeFile(new URL('eula.txt', SERVER), 'eula=true\n')
 
-// A flat world, four chunks of view distance and no spawn protection: this
-// server exists to run two commands, not to be played, and world generation is
-// the slowest part of booting one. online-mode stays TRUE — a demo is not a
-// reason to turn authentication off.
+// ORDINARY TERRAIN, from a pinned seed.
+//
+// This was `level-type=minecraft:flat` with generator-settings left at the
+// default — bedrock, two dirt, one grass — in survival mode. The economy trades
+// iron_ingot, oak_log, stone, glass, coal, copper_ingot, oak_planks and
+// redstone, and NOT ONE of those eight exists in a default superflat world. So
+// a player spawned into a world where the first of GAME_LOOP.md's three core
+// actions, "Mine, chop, or harvest one stack-worth of a material", could not be
+// performed at all. The trading commands worked; there was nothing to trade
+// that you had not bought.
+//
+// Real generation costs twenty or thirty seconds on the first boot, and
+// --keep retains the world so it is paid once. That is the whole price.
+//
+// The seed is pinned (config/minecraft-runtime.json) so this is the same world
+// every time and `/nearcraft world-selftest` is a statement about a known
+// place rather than about whatever happened to generate.
+//
+// The BOT fixture keeps its flat world — see scripts/mc-bot.mjs. It never sends
+// position packets, so terrain could leave it in water or inside a block, and
+// what it proves is settlement, not scenery.
+//
+// online-mode stays TRUE: a demo is not a reason to turn authentication off.
+const world = runtime.world
 await writeFile(new URL('server.properties', SERVER), [
   `server-port=${PORT}`,
   'online-mode=true',
-  'level-type=minecraft\\:flat',
+  `level-type=${world.level_type.replace(':', '\\:')}`,
+  `level-seed=${world.seed}`,
+  `gamemode=${world.gamemode}`,
+  `difficulty=${world.difficulty}`,
   'level-name=nearcraft',
-  'view-distance=4',
-  'simulation-distance=4',
+  'view-distance=6',
+  'simulation-distance=6',
   'spawn-protection=0',
   'max-players=5',
   'motd=NearCraft - an agent economy settled on NEAR',
@@ -110,7 +135,7 @@ function onLine(line) {
   log.write(line + '\n')
   seen.push(line)
   if (/Done \(/.test(line)) ready = true
-  if (/NearCraft|selftest|settled on NEAR|signed in|refused|Enabling NearCraft|Exception|ERROR\]: Could not/.test(line)) {
+  if (/NearCraft|selftest|settled on NEAR|signed in|refused| bought |Enabling NearCraft|Exception|ERROR\]: Could not/.test(line)) {
     console.log('  ' + line.replace(/^\[[^\]]*\]:?\s*/, '').trim())
   }
 }
@@ -151,6 +176,9 @@ try {
   // Bukkit.createInventory, which is the only way the inventory arithmetic can
   // be checked on a machine with no Minecraft account.
   await send('nearcraft inventory-selftest', 5000)
+  // Asks the world what is in it, which nothing did before — see the javadoc on
+  // NearCraftPlugin.worldSelftest. A flat world answers "0 of 8" here.
+  await send('nearcraft world-selftest', 20000)
 
   if (TOKEN) {
     // The token is passed on the command line and never written to disk. It is
@@ -166,6 +194,11 @@ try {
       await send(`${verb} ${merchant} ${item} ${count ?? '1'}`, 45000)
       await send('wallet', 6000)
     }
+    // Send an agent too. This is the one command that spends somebody else's
+    // money — the worker's own credit, on the worker's own key — and it was
+    // documented in GAME_LOOP.md and implemented nowhere until now, so proving
+    // it from the console is worth the twenty seconds.
+    if (AGENT) await send(`agent ${AGENT} buy ${(TRADE ?? 'x:iron_ingot:1').split(':')[1]} 1`, 60000)
   } else if (TRADE) {
     console.log('\n  --trade needs --token <subject>; skipping the trade')
   }
@@ -253,7 +286,7 @@ async function retain() {
       { hash: m[2], explorer: `https://testnet.nearblocks.io/txns/${m[2]}` },
     ])),
     console_transcript: seen
-      .filter((l) => /NearCraft|selftest|signed in|credit |holds |settled on NEAR|balance moved|asks /.test(l))
+      .filter((l) => /NearCraft|selftest|signed in|credit |holds |settled on NEAR|balance moved|asks | bought /.test(l))
       .map((l) => l.replace(/^\[[^\]]*\]:?\s*/, '').trimEnd()),
   }
   const file = `minecraft-${hash}.json`
@@ -268,20 +301,28 @@ const retained = await retain()
 const enabled = seen.some((l) => /Enabling NearCraft/.test(l))
 const settled = seen.some((l) => /settled on NEAR/.test(l))
 const healthy = seen.some((l) => /health\s+200/.test(l))
+const dispatched = seen.find((l) => / bought /.test(l))
 const inventory = seen.find((l) => /inventory selftest: /.test(l))
 const inventoryOk = Boolean(inventory) && /0 failed/.test(inventory)
+const worldLine = seen.find((l) => /world selftest: /.test(l))
+const worldOk = Boolean(worldLine) && /0 failed/.test(worldLine)
 
 console.log('\n=== result ===')
 console.log(`  plugin loaded on Paper        ${enabled ? 'yes' : 'NO'}`)
 console.log(`  reached the play service      ${healthy ? 'yes' : 'no'}`)
 console.log(`  inventory arithmetic          ${inventory ? (inventoryOk ? 'all passed' : 'FAILED') : 'did not run'}`)
+const worldSays = worldLine ? worldLine.replace(/.*world selftest: /, '') : null
+console.log(`  the world can be gathered in  ${worldSays ? (worldOk ? worldSays : `FAILED — ${worldSays}`) : 'did not run'}`)
+if (AGENT) console.log(`  an agent shopped for itself     ${dispatched ? 'yes' : 'NO'}`)
 console.log(`  settled a trade on NEAR       ${settled ? 'yes' : (TRADE ? 'NO' : 'not attempted')}`)
 console.log(`  log                           ${logPath}`)
 if (retained) console.log(`  retained                      evidence/live/${retained}`)
 
 if (!flag('--keep')) {
-  // The world is 100 MiB of flat chunks nobody will visit again.
+  // Generated terrain is a few hundred MiB. A one-shot verification run should
+  // not leave it behind; --keep does, and is what you pass when you intend to
+  // come back and play, because then the generation is paid once.
   await rm(new URL('nearcraft/', SERVER), { recursive: true, force: true })
 }
 
-process.exit(enabled && inventoryOk && (!TRADE || settled) ? 0 : 1)
+process.exit(enabled && inventoryOk && worldOk && (!TRADE || settled) && (!AGENT || Boolean(dispatched)) ? 0 : 1)
