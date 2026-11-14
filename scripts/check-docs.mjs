@@ -102,6 +102,19 @@ for (const doc of DOCS) {
     // Globs and directories-with-wildcards are descriptive, not paths.
     if (path.includes('*')) continue
     linksChecked++
+    // THE SAME EXEMPTION RULE 6 HAS, one level deeper.
+    //
+    // `isIgnored` was called in exactly one place — the directory rule — after
+    // the first fresh-clone rehearsal failed on `.local/`. The file case came
+    // back: a clone of this commit failed `npm test` five times on
+    // `.local/oidc.json`, named in README.md, AGENTS.md and docs/GASLESS.md.
+    // It passed on the machine that wrote the docs because that file is sitting
+    // there, untracked, which is the whole trap — the check was green because
+    // of something not in the repository.
+    //
+    // A gitignored path is absent from a clone BY DESIGN. Saying so is the
+    // documentation being accurate, not inaccurate.
+    if (isIgnored(path)) continue
     if (!(await exists(path)) && !deniesExistence(text, m.index)) {
       fail(doc, `names \`${path}\`, which does not exist`)
     }
@@ -545,6 +558,64 @@ try {
 } catch (e) {
   // No plugin is a legitimate state for a fork that dropped the Minecraft half.
   if (!/ENOENT/.test(e?.message ?? '')) fail('plugin.yml', `could not be read: ${e.message}`)
+}
+
+// 8g. A command that needs a build must be documented with the build.
+//
+// GAME_LOOP.md's "What a judge can watch in sixty seconds" said `npm run sim`
+// and nothing else. A fresh clone of this repository ran it and failed: the
+// simulation deploys real wasm to a real node, wasm is gitignored build output,
+// and a clone has none. The test itself was helpful — it prints
+// `Build first: npm run build:contracts` — and the document that sent the
+// reader there was not. README.md's "The economy, running" block had the same
+// gap.
+//
+// This is the defect check-docs.mjs opens by describing: "a document has told a
+// reader to run a command that failed on line one". Rule 1 could not see it,
+// because it only asks whether the script NAME exists in package.json.
+{
+  // Verified by running each on a clean clone: these read contracts/target.
+  const NEEDS_BUILD = ['sim', 'test:sandbox']
+  for (const [doc, text] of DOC_TEXT) {
+    for (const script of NEEDS_BUILD) {
+      const mentions = [...text.matchAll(new RegExp(`npm run ${script}\\b`, 'g'))]
+      for (const m of mentions) {
+        if (deniesExistence(text, m.index)) continue
+        // INSTRUCTIONS, not mentions.
+        //
+        // The first version of this rule fired on every occurrence, including
+        // `RULES.md`'s "The intent was: npm run sim running rounds with twenty
+        // buyers" and `GAME_LOOP.md`'s "Neither was true: npm run sim runs
+        // against a local sandbox". Those discuss the command; they do not send
+        // anyone to a terminal, and demanding a build note beside them would be
+        // noise that teaches a reader to ignore this check.
+        //
+        // A fenced block is the mechanical signal, with no false positives: an
+        // even number of ``` before the match means we are outside one.
+        // Honest limit — prose that leads a section with the command, as
+        // GAME_LOOP.md's did, is NOT caught. That one is fixed; this rule holds
+        // the shape a reader copies.
+        if ((text.slice(0, m.index).split('```').length - 1) % 2 === 0) continue
+
+        // THE SAME BLOCK, not merely nearby.
+        //
+        // A 400-character window round the match passed on prose that happened
+        // to mention the build — including the sentence this rule's own fix
+        // added. But a reader copies the BLOCK, not the paragraph explaining
+        // it, so the block is what has to be runnable.
+        const open = text.lastIndexOf('```', m.index)
+        const lineAfterOpen = text.indexOf('\n', open) + 1
+        let close = text.indexOf('```', lineAfterOpen)
+        if (close === -1) close = text.length
+        const near = text.slice(lineAfterOpen, close)
+        if (!/build:contracts/.test(near)) {
+          fail(doc, `tells a reader to run \`npm run ${script}\` with no \`npm run build:contracts\` `
+            + 'in the same block — it reads gitignored build output, so a clean clone fails on '
+            + 'line one, and a block is what a reader copies')
+        } else { commandsChecked++ }
+      }
+    }
+  }
 }
 
 // 8f. One track list.
