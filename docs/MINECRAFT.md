@@ -432,8 +432,10 @@ across a network in clear text.
 
 **What a visitor does.** `/nearcraft link <any name you like>`. The hosted
 service lends them one of five pre-funded players, so they get their **own**
-account, their own credit and their own scoped key — not a shared one. The
-banner prints how many are left. Then `/market iron_ingot`, `/buy ironmonger
+account, their own credit and their own scoped key. The banner prints how many
+are left. Past the fifth distinct visitor it hands out a **shared** one rather
+than refusing — the reply says `shared: true` and the page says so in words,
+because a visitor who was not told would read another player's trade as a bug. Then `/market iron_ingot`, `/buy ironmonger
 iron_ingot 1`, `/wallet`.
 
 **Why a pool and not onboarding.** The service cannot create accounts: that
@@ -444,7 +446,8 @@ plus a cap — does not survive this topology: behind Vercel **and** Render the
 caller's address arrives in `x-forwarded-for`, whose leftmost entry the caller
 sets, and the counter would reset every time a free instance woke from its
 fifteen-minute sleep. Five accounts funded in advance need no header to be
-trustworthy and cannot be drained past their own number. `npm run check:hosted`
+trustworthy and cannot be drained at all: they hold spend credit, not NEAR to
+take, and the root key that could mint more is not here. `npm run check:hosted`
 proves it by signing in as a stranger and checking that **root's balance did not
 move**.
 

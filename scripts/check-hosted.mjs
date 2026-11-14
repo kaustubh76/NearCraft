@@ -180,7 +180,7 @@ async function rootBalance() {
 if (h?.canOnboard !== false) {
   bad('not probing: this instance says it CAN onboard',
     'the probe would create an account and spend root balance — fix canOnboard first')
-} else if (Array.isArray(h?.pool?.size ? [1] : null) || h?.pool) {
+} else if (h?.pool) {
   // POOL MODE. A stranger signing in SHOULD get an account — a pre-funded one,
   // lent rather than created. The first version of this check expected
   // ONBOARDING_MISCONFIGURED and reported the 200 as
@@ -219,6 +219,36 @@ if (h?.canOnboard !== false) {
     } else {
       bad('ROOT BALANCE MOVED while lending a player', `${before} -> ${after}`)
     }
+
+    // Was this visitor given an account of their own, or one they share?
+    // Both are correct answers -- the difference is whether a slot was free --
+    // and the thing that must hold either way is that the service SAYS which.
+    //
+    // Deliberately asserted on the identity above rather than by sending a new
+    // one. Sending distinct identities until the pool ran out would prove
+    // sharing and consume the demo in the process, which is the mistake the
+    // random-subject version of this check already made once.
+    const free = h.pool.free
+    if (got.shared === true && free > 0) {
+      bad('a visitor was told they SHARE while slots were free',
+        `${free} of ${h.pool.size} free — somebody is reading another player's credit as their own for no reason`)
+    } else if (got.shared === true) {
+      ok('the pool is full, so a visitor shares and is told so', `${got.accountId}, shared: true`)
+    } else {
+      ok('and it is theirs alone, not shared', `${free} of ${h.pool.size} free when health was read`)
+    }
+    // The CONVERSE is deliberately not asserted. "The pool is full, therefore
+    // this answer must be shared" looks like the stronger check and is simply
+    // wrong: this probe uses a fixed identity, so once it has been given a slot
+    // it is a HOLDER, and a holder's answer is correctly unshared however full
+    // the pool is. Asserting it would have cried wolf at a returning visitor --
+    // the same mistake the random-subject version of this check made, caught
+    // here before it ever ran rather than by reading a false alarm later.
+    //
+    // That property is tested where it can be tested without consuming the
+    // demo: `a pool that runs out shares an account rather than turning a
+    // visitor away` in tests/near/play.mjs, and once against real testnet on a
+    // pool of one -- tx G39zeHWiPm6HBRA4Msy4UadGS4dyMbCe7zVYdeQm9sAP.
   }
 } else {
   const subject = `check-hosted-${Math.random().toString(36).slice(2)}`

@@ -15,7 +15,8 @@ testnet. You pay no gas and you never see a key. A visitor arriving just now
 typed `judge-0et27q`, was lent `p-19ff5e8c…`, bought an iron ingot
 ([`EQsvL2rz…`](https://testnet.nearblocks.io/txns/EQsvL2rzGwNqTEANck4wfzGRnzf5zfmkvzd5GsRqcT9p)),
 and their NEAR balance moved by **0**. Five accounts are lent out, one per
-visitor; the page says how many are left. The play API behind it is at
+visitor, and the page says how many are left; a sixth distinct visitor is not
+turned away but shares one, and is told so on the page. The play API behind it is at
 <https://nearcraft-play.onrender.com>. Both are described in
 [Open it without cloning](#open-it-without-cloning) — including what the hosted
 service deliberately *cannot* do, and why that is the security control rather
@@ -670,8 +671,17 @@ It holds exactly six keys, built by `npm run secret:render`: the relayer's
 (full-access, because a `SignedDelegate` is not a function call, so it pays gas
 for everyone) and **five** pre-funded players' scoped keys — one contract, three
 methods, no transfer, no `AddKey` each. It lends one per visitor rather than
-creating accounts, so each person gets their own credit and holdings instead of
-sharing. `NEARCRAFT_POOL` is opt-in and never inferred from which keys happen to
+creating accounts, so the first five people each get their own credit and
+holdings. **Past five it shares rather than refusing**, and says which it did:
+the sign-in reply carries `shared: true` and the page prints, in those words,
+that credit and holdings there may move because somebody else is playing it
+too. Refusing was the earlier design and `check:hosted` read `1 of 5 free` on
+the morning of the deadline — the worst outcome for a link a judge opens once
+is not that two people shared a demo wallet, it is that the demo was closed
+when they looked at it. A shared account is **derived** from the identity
+(`pool[fnv1a(identity) % 5]`) rather than taken from a list, so it needs no
+slot to be free and survives one of Render's fifteen-minute sleeps, which the
+exclusive assignment does not. `NEARCRAFT_POOL` is opt-in and never inferred from which keys happen to
 be present, because an instance that silently became a pool would surprise in
 the one direction that matters. No agent keys either, so `/api/agent` refuses there and
 `/api/health` reports `agents: []` rather than offering a command that cannot
@@ -680,13 +690,20 @@ contract accounts, every merchant and every agent. The local key file has
 sixteen entries and three of them can redeploy this economy; those do not leave
 the deploying machine. `npm run secret:render` refuses to put them in the file.
 
-**Still open, and not dressed up.** The hosted service is *unauthenticated for
-the one player it can sign for*: anyone who opens the page can sign in as that
-player and trade with its testnet credit, and each call spends the relayer's
-gas. The protocol bounds it — the key reaches one contract and three methods and
-is re-read from the chain on every `/api/me` — but it is not a gate, and
-[docs/MINECRAFT.md](docs/MINECRAFT.md) keeps saying so. Closing it properly is a
-per-IP limit plus a shared secret, which is not built.
+**Still open, and not dressed up.** The login is not a secret. The seeded
+verifier accepts *any* string, so the name a visitor types **is** their whole
+credential: anyone who knows or guesses it signs in as them and spends their
+demo credit. And a visitor past the fifth shares an account by design, so a
+co-sharer can spend that credit too — disclosed in the reply and on the page,
+which makes it honest, not private. Every call also spends the relayer's gas.
+The protocol bounds all of it: the key reaches one contract and three methods,
+cannot transfer NEAR, cannot add another key, and is re-read from the chain on
+every `/api/me`; and there is no root key on the host, so nothing reachable
+there can create an account or drain one. But it is not a gate, and
+[docs/MINECRAFT.md](docs/MINECRAFT.md) keeps saying so. What closes it is a real
+identity provider — the OIDC gap disclosed above — **not** a per-IP limit, which
+is not built on purpose: behind Vercel and Render the caller's address arrives
+in a header the caller sets.
 
 Two operational facts worth knowing before you click. The service runs on
 Render's free tier, which spins down after fifteen idle minutes and takes about
