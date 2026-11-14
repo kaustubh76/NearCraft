@@ -1,0 +1,24 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.58s
+     Running unittests src/lib.rs (target/debug/deps/nearcraft_market-cf74c69643b1cbde)
+
+running 1 test
+EVENT_JSON:{"standard":"nearcraft_market","version":"1.0.0","event":"purchase","data":[{"buyer_id":"bob","merchant_id":"ironmonger.test.near","item":"iron_ingot","units":"4","paid":"4000000000000000000000000"}]}
+EVENT_JSON:{"standard":"nearcraft_market","version":"1.0.0","event":"purchase_rolled_back","data":[{"buyer_id":"bob","merchant_id":"ironmonger.test.near","item":"iron_ingot","units":"4","credited":"4096000000000000000000000"}]}
+EVENT_JSON:{"standard":"nearcraft_market","version":"1.0.0","event":"purchase","data":[{"buyer_id":"bob","merchant_id":"ironmonger.test.near","item":"iron_ingot","units":"2","paid":"2048000000000000000000000"}]}
+EVENT_JSON:{"standard":"nearcraft_market","version":"1.0.0","event":"sale","data":[{"seller_id":"bob","merchant_id":"ironmonger.test.near","item":"iron_ingot","units":"2","proceeds":"1657600000000000000000000"}]}
+EVENT_JSON:{"standard":"nearcraft_market","version":"1.0.0","event":"sale_unwound","data":[{"seller_id":"bob","merchant_id":"ironmonger.test.near","item":"iron_ingot","units":"2","reason":"the market could not pull the materials — approval missing, stale or exhausted"}]}
+EVENT_JSON:{"standard":"nearcraft_market","version":"1.0.0","event":"restock","data":[{"merchant_id":"ironmonger.test.near","item":"iron_ingot","units":"120","cost":"96000000000000000000000000","unit_cost":"800000000000000000000000"}]}
+EVENT_JSON:{"standard":"nearcraft_market","version":"1.0.0","event":"restock","data":[{"merchant_id":"ironmonger.test.near","item":"iron_ingot","units":"53","cost":"42400000000000000000000000","unit_cost":"800000000000000000000000"}]}
+EVENT_JSON:{"standard":"nearcraft_market","version":"1.0.0","event":"restock_unwound","data":[{"merchant_id":"ironmonger.test.near","item":"iron_ingot","units":"53","reason":"the items contract would not mint the units; the restock was unwound"}]}
+EVENT_JSON:{"standard":"nearcraft_market","version":"1.0.0","event":"payout_failed","data":[{"account_id":"bob","amount":"61620800000000000000000000","restored_to":"credit"}]}
+EVENT_JSON:{"standard":"nearcraft_market","version":"1.0.0","event":"payout_failed","data":[{"account_id":"ironmonger.test.near","amount":"42475200000000000000000000","restored_to":"treasury"}]}
+EVENT_JSON:{"standard":"nearcraft_market","version":"1.0.0","event":"investment","data":[{"backer_id":"bob","merchant_id":"ironmonger.test.near","amount":"7000000000000000000000000","reopened":false,"merchant_open":true,"source":"deposit"}]}
+EVENT_JSON:{"standard":"nearcraft_market","version":"1.0.0","event":"investment","data":[{"backer_id":"bob","merchant_id":"ironmonger.test.near","amount":"2000000000000000000000000","reopened":false,"merchant_open":true,"source":"credit"}]}
+EVENT_JSON:{"standard":"nearcraft_market","version":"1.0.0","event":"backer_bought_out","data":[{"backer_id":"bob","merchant_id":"ironmonger.test.near","repaid":"9000000000000000000000000"}]}
+EVENT_JSON:{"standard":"nearcraft_market","version":"1.0.0","event":"investment","data":[{"backer_id":"charlie","merchant_id":"ironmonger.test.near","amount":"30000000000000000000000000","reopened":false,"merchant_open":true,"source":"deposit"}]}
+EVENT_JSON:{"standard":"nearcraft_market","version":"1.0.0","event":"margin_paid","data":[{"backer_id":"charlie","merchant_id":"ironmonger.test.near","payout":"1248407751937984496124031","outstanding":"19751592248062015503875969"}]}
+EVENT_JSON:{"standard":"nearcraft_market","version":"1.0.0","event":"purchase","data":[{"buyer_id":"bob","merchant_id":"ironmonger.test.near","item":"iron_ingot","units":"2","paid":"4000000000000000000000000"}]}
+test tests::every_yocto_is_accounted_for ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 106 filtered out; finished in 0.62s
+

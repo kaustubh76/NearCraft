@@ -45,6 +45,26 @@ async fn a_purchase_moves_materials_across_contracts() -> anyhow::Result<()> {
 /// materials are NEP-245 balances in the items contract. If those ever diverge —
 /// which is exactly what a bug or a partial deploy would cause — a purchase must
 /// not take the player's money and deliver nothing.
+
+/// The one NEP-297 envelope for `event` among a receipt's logs, as its first
+/// data entry. Asserts the standard and version too, because an envelope an
+/// indexer cannot route is not an event.
+fn event_data(logs: &[&str], event: &str) -> serde_json::Value {
+    const PREFIX: &str = "EVENT_JSON:";
+    let found: Vec<serde_json::Value> = logs
+        .iter()
+        .filter_map(|l| l.strip_prefix(PREFIX))
+        .filter_map(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+        .filter(|v| v["event"] == event)
+        .collect();
+    assert_eq!(found.len(), 1,
+               "expected exactly one `{event}` envelope, found {}; logs were {logs:?}",
+               found.len());
+    assert_eq!(found[0]["standard"], "nearcraft_market", "wrong standard on `{event}`");
+    assert_eq!(found[0]["version"], "1.0.0", "wrong version on `{event}`");
+    found[0]["data"][0].clone()
+}
+
 #[tokio::test]
 async fn a_failed_delivery_rolls_the_whole_purchase_back() -> anyhow::Result<()> {
     let world = World::setup().await?;
@@ -87,7 +107,22 @@ async fn a_failed_delivery_rolls_the_whole_purchase_back() -> anyhow::Result<()>
     assert_eq!(world.balance_of(&player, "glass").await?, 0, "nothing was delivered");
     assert_eq!(credited, total, "the player must be made whole");
     assert_eq!(world.merchant_treasury().await?, treasury_before, "the merchant keeps nothing");
-    assert!(logs.contains("rolled back"), "the rollback must say so in the log");
+    // Read the ENVELOPE, not the prose.
+    //
+    // This was `logs.contains("rolled back")`, and it broke when the rollback
+    // started emitting a NEP-297 event instead of a sentence -- it failed
+    // while the behaviour got strictly better, which is the signature of a
+    // test pinned to wording. And the substring form was weak in the direction
+    // that matters: it would have gone on passing with a malformed envelope,
+    // the wrong `standard`, or data naming a different buyer. An indexer reads
+    // the envelope, so this reads the envelope.
+    let rolled = event_data(&outcome.logs(), "purchase_rolled_back");
+    assert_eq!(rolled["buyer_id"], player.id().to_string(), "the event names the wrong buyer");
+    assert_eq!(rolled["merchant_id"], world.ironmonger.id().to_string());
+    assert_eq!(rolled["item"], "glass");
+    assert_eq!(rolled["units"], "4");
+    assert_eq!(rolled["credited"], total.to_string(),
+               "the event must report the amount actually credited back");
 
     // And the shelf is restored, so the next buyer sees the same (wrong) stock
     // rather than a silently decremented one.

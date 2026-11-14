@@ -1,0 +1,141 @@
+
+Agent access keys, as the protocol reports them
+
+worker-1.nearcraftmc.testnet
+  ed25519:D9D4Eo6EmNSBPk66Uee6FMv6gqSSpgf9Y6Nv7V1X4NBJ
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit]
+    allowance     1.9969767839562296 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+    headroom      ~2979 more call(s) at the measured testnet burn; an operator key can re-key this account
+  ed25519:E1Qp6G9rCKpLGVp9XYHZJTTp3iQszpTDTA7K8jryCdgs
+    FULL ACCESS — the operator key, created with the account and kept in
+                  .local/. It is NOT given to the agent process, which
+                  holds only the scoped key below. Disclosed, not a
+                  failure: the operator owns the agent, so this does not
+                  widen what the AGENT can do. Players are different and
+                  delete theirs — see docs/GASLESS.md.
+
+worker-2.nearcraftmc.testnet
+  ed25519:2orZSEsAFb1wXEzP9xEALgXCidMsBBPk2kiNKWQQitjz
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit]
+    allowance     2 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+    headroom      ~2984 more call(s) at the measured testnet burn; an operator key can re-key this account
+  ed25519:AgRX8cS24BffEMd826VVFYHthLaTZHJBE8p7eFS9SB5C
+    FULL ACCESS — the operator key, created with the account and kept in
+                  .local/. It is NOT given to the agent process, which
+                  holds only the scoped key below. Disclosed, not a
+                  failure: the operator owns the agent, so this does not
+                  widen what the AGENT can do. Players are different and
+                  delete theirs — see docs/GASLESS.md.
+
+Player access keys, as the protocol reports them
+
+p-62b0b2438ca03ae4.nearcraftmc.testnet
+  ed25519:prMycaM98pq1R4pccvYVRo5izBMgsLovs5CNvKD7f64
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit, sell, invest_with_credit]
+    allowance     2 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+    headroom      ~2984 more call(s) at the measured testnet burn — and no full-access key to re-key it
+  no full-access key — this account cannot transfer NEAR, add a key, or
+  gain a method. Not by our restraint: by the runtime.
+
+p-62b0b243.nearcraftmc.testnet
+  ed25519:G1EqfQ3bzBBcWU4EXnj79ybaMj97Zs18n5MWL5ww9bgJ
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit, sell, invest_with_credit]
+    allowance     2 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+    headroom      ~2984 more call(s) at the measured testnet burn — and no full-access key to re-key it
+  no full-access key — this account cannot transfer NEAR, add a key, or
+  gain a method. Not by our restraint: by the runtime.
+
+p-6928989e.nearcraftmc.testnet
+  ed25519:GmaW6Y9biNiz7Xhz8y3CTYUpUjhe5yxgW384pRt37pTh
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit, sell, invest_with_credit]
+    allowance     2 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+    headroom      ~2984 more call(s) at the measured testnet burn — and no full-access key to re-key it
+  no full-access key — this account cannot transfer NEAR, add a key, or
+  gain a method. Not by our restraint: by the runtime.
+
+p-1d6a3c5d.nearcraftmc.testnet
+  ed25519:69tLBGBhuXTHU4mccA6EKfi7aieyC2GhFLffU1Gjpuus
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit, sell]
+    allowance     2 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+    headroom      ~2984 more call(s) at the measured testnet burn — and no full-access key to re-key it
+  no full-access key — this account cannot transfer NEAR, add a key, or
+  gain a method. Not by our restraint: by the runtime.
+
+p-78f47c3a4790c8d8.nearcraftmc.testnet
+  ed25519:tL3va6iQt2qbH8cKgtyr6L4REjdwVn3b6RrHeRUomq4
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit, sell, invest_with_credit]
+    allowance     2 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+    headroom      ~2984 more call(s) at the measured testnet burn — and no full-access key to re-key it
+  no full-access key — this account cannot transfer NEAR, add a key, or
+  gain a method. Not by our restraint: by the runtime.
+
+p-5d509cc30d941c6a.nearcraftmc.testnet
+  ed25519:CHkn8VbfTKqzHKzMRAUSZDopM6R1vWsqUJ2oy2MBdJmJ
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit, sell, invest_with_credit]
+    allowance     2 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+    headroom      ~2984 more call(s) at the measured testnet burn — and no full-access key to re-key it
+  no full-access key — this account cannot transfer NEAR, add a key, or
+  gain a method. Not by our restraint: by the runtime.
+
+p-1c59f6c2a86bffae.nearcraftmc.testnet
+  ed25519:DTmg8LgiF6YgoFLFdeU77vd4GAR7vnY3kri683cDFmqs
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit, sell, invest_with_credit]
+    allowance     2 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+    headroom      ~2984 more call(s) at the measured testnet burn — and no full-access key to re-key it
+  no full-access key — this account cannot transfer NEAR, add a key, or
+  gain a method. Not by our restraint: by the runtime.
+
+p-19ff5e8c0f2efbc9.nearcraftmc.testnet
+  ed25519:AhWkmUFAwXSee2Y8RVyVHvBjmGFi7AwYB8nzBfvmPZb5
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit, sell, invest_with_credit]
+    allowance     2 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+    headroom      ~2984 more call(s) at the measured testnet burn — and no full-access key to re-key it
+  no full-access key — this account cannot transfer NEAR, add a key, or
+  gain a method. Not by our restraint: by the runtime.
+
+p-7b1d6bbacf2fdb5e.nearcraftmc.testnet
+  ed25519:C3QPc7uZezgoRrRcKg9GBiADVUsZgtA8g9YHBGXfuexJ
+    receiver_id   market.nearcraftmc.testnet
+    method_names  [buy_with_credit, sell, invest_with_credit]
+    allowance     2 NEAR (gas only)
+    cannot transfer NEAR, cannot add keys — enforced by the runtime
+    headroom      ~2984 more call(s) at the measured testnet burn — and no full-access key to re-key it
+  no full-access key — this account cannot transfer NEAR, add a key, or
+  gain a method. Not by our restraint: by the runtime.
+
+Spend budgets (the second bound, enforced by the market contract)
+
+  worker-1.nearcraftmc.testnet         0.087976 NEAR remaining
+  worker-2.nearcraftmc.testnet             0.05 NEAR remaining
+  p-62b0b2438ca03ae4.nearcraftmc.testnet   0.040688 NEAR remaining
+  p-62b0b243.nearcraftmc.testnet      0.0484384 NEAR remaining
+  p-6928989e.nearcraftmc.testnet           0.05 NEAR remaining
+  p-1d6a3c5d.nearcraftmc.testnet           0.05 NEAR remaining
+  p-78f47c3a4790c8d8.nearcraftmc.testnet       0.04 NEAR remaining
+  p-5d509cc30d941c6a.nearcraftmc.testnet       0.04 NEAR remaining
+  p-1c59f6c2a86bffae.nearcraftmc.testnet       0.04 NEAR remaining
+  p-19ff5e8c0f2efbc9.nearcraftmc.testnet      0.036 NEAR remaining
+  p-7b1d6bbacf2fdb5e.nearcraftmc.testnet      0.036 NEAR remaining
+
+every agent and player key is scoped as recorded — 2 agent(s) and 9 player(s) audited, 2 operator key(s) disclosed
+

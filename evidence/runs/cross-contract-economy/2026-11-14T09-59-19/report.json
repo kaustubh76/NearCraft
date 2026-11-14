@@ -1,0 +1,12 @@
+{
+  "topic": "cross-contract-economy",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 20585,
+  "command": "cargo test -p nearcraft-integration --test economy -- --nocapture",
+  "cwd": "contracts",
+  "proves": "Buy, the rollback on a failed delivery, a sale through mt_transfer_call, a closed merchant refusing and the resolver refunding, withdrawals moving real NEAR, and a BACKER earning its stake back: it invests in a restocked merchant, that merchant is REFUSED when it tries to withdraw the principal it was just lent, and the next sale pays the backer half its margin as withdrawable credit, to the yoctoNEAR.",
+  "output_sha256": "781825a57b4d526fadad437c8159eab0aeb3c5fabaa43fb2eb00908bb97821f0",
+  "output_bytes": 2855,
+  "recorded_at": "2026-11-14T10:02:10.998Z"
+}

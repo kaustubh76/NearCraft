@@ -1,0 +1,37 @@
+
+Is the deployed code the code in this repo?
+rpc https://test.rpc.fastnear.com
+
+  items    items.nearcraftmc.testnet        DIFFERS  EDi8qhN2F9JdJp7Ad8jYx8LnyagPhCNPmdsp4rE3ftx1
+                                                     33BHVbGtdEbRgdF2juofqMKtSQoT9WYhnL73BFcUQD5o  <- local build
+  market   market.nearcraftmc.testnet       DIFFERS  BTWmAd91AGmdSwBGfujhpo7dZASN8wAak4kDEJKf6ZKc
+                                                     GQafk585F5AEbB3QgAN3jXaSgeyu35qnpJuW84Ryqesy  <- local build
+  guard    guard.nearcraftmc.testnet        DIFFERS  8QFzw1eetT3b4MfEAY3TaRZvwugNUc8hcfCph33VKSne
+                                                     6nCij78XNkcTUPRsvgybfGmak5MGerJLe2KA4CzZ91et  <- local build
+
+the chain is not running this repo's code (3):
+  items: the chain runs EDi8qhN2F9JdJp7Ad8jYx8LnyagPhCNPmdsp4rE3ftx1, this repo builds 33BHVbGtdEbRgdF2juofqMKtSQoT9WYhnL73BFcUQD5o
+  market: the chain runs BTWmAd91AGmdSwBGfujhpo7dZASN8wAak4kDEJKf6ZKc, this repo builds GQafk585F5AEbB3QgAN3jXaSgeyu35qnpJuW84Ryqesy
+  guard: the chain runs 8QFzw1eetT3b4MfEAY3TaRZvwugNUc8hcfCph33VKSne, this repo builds 6nCij78XNkcTUPRsvgybfGmak5MGerJLe2KA4CzZ91et
+
+SOURCE MOVED is not DIFFERS. The deployed bytes still match the wasm on
+this disk — but that wasm was built from a commit whose contract source is
+no longer what this repository contains, so the chain is not running this
+code. Rebuild and redeploy, or check out the commit the contract names.
+
+What DIFFERS means depends on which build you compared with.
+
+`cargo near build reproducible-wasm` IS byte-stable: it builds the
+committed commit inside a digest-pinned container, so a mismatch there
+means the deployed code is not this commit. That is the comparison a third
+party can make, and the one the deployed contracts were built for.
+
+`npm run build:contracts` uses non-reproducible-wasm and your local
+rustc, so it legitimately produces different bytes from the same source.
+A DIFFERS against THAT build tells you nothing on its own.
+
+To reproduce the deployed bytes yourself:
+  cargo near build reproducible-wasm --manifest-path contracts/<name>/Cargo.toml
+
+If it still differs, the remedy is:  NEAR_REDEPLOY=<name> npm run deploy
+

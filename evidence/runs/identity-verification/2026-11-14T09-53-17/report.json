@@ -1,0 +1,12 @@
+{
+  "topic": "identity-verification",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 844,
+  "command": "node --test tests/near/oidc.mjs --test tests/near/oidc-runtime.mjs",
+  "cwd": ".",
+  "proves": "Real OIDC token verification: JWKS fetch, JWT signature check, and iss/aud/exp/nbf/sub validation, with 25 tests that generate their own RS256 keypair and serve a JWKS from a stubbed fetch, so none of it needs a provider or a network. The attacks are the substance: alg:none refused, an HMAC alg signed with the public key refused before the signature is checked, a swapped payload refused, a token minted for a DIFFERENT application refused, rotation handled with exactly one refetch. It ALSO runs the runtime path, which was the real gap: tests/near/oidc-runtime.mjs drives the real verifier with its default global fetch against a real node:http JWKS server, inside the real play service. Before it, every OIDC test stubbed fetchImpl with a bare object literal rather than a Response, so no JWKS had ever been fetched over HTTP, the res.ok/res.json contract was unexercised, and JWKS_UNREACHABLE - the code a genuine network failure takes - was unreachable. A genuine RS256 token now signs in and derives its account from the verified subject, and fifteen refusals are asserted BY CODE at the service boundary rather than as one opaque rejection. Attempting a real login found three bugs that unit tests could not: every refusal was flattened into IDENTITY_REJECTED; the root signing key was read from the wrong file so creating a player failed with \"Please set a signer\" dressed as a rejected token; and ROOT_UNDERFUNDED matched NotEnoughBalance while nearcore says \"Not enough balance\", so a documented refusal could never fire. A Google client id IS now configured, in gitignored .local/oidc.json, and /api/health reports oidc. What remains is one step narrower than before: no token GOOGLE itself issued has been through it, because that needs a browser and a consent screen - npm run oidc:verify -- \"<token>\" settles it in one command against Google live JWKS.",
+  "output_sha256": "1105ea5ebb78dce1532a0f692e7e98088af6b0becf17c9e5e2b1cfb123c6ad6e",
+  "output_bytes": 2765,
+  "recorded_at": "2026-11-14T09:54:49.710Z"
+}

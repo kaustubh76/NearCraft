@@ -1,0 +1,15 @@
+ok    NEP-245 core: 10/10 present
+ok    NEP-245 enumeration: 2/2 present
+ok    NEP-245 approval management: 6/6 present
+ok    Metadata absent, as documented
+ok    security-relevant modifiers correct (payable / private / non-payable)
+note  mt_resolve_transfer: args deviates from nep-0245, as declared
+        spec  sender_id: string, receiver_id: string, token_ids: string[], approvals: unspecified
+        ours  sender_id: string, receiver_id: string, token_ids: string[], amounts: string[]
+note  mt_is_approved: args deviates from nep-0245, as declared
+        spec  token_ids: string[], approved_account_id: string, amounts: string[], approval_ids: integer[]?
+        ours  token_ids: string[], approved_account_id: string, amounts: string[], approval_ids: integer[]?, owner_id: string
+ok    54 signature facts match nep-0245 (18 methods: arguments, view/call kind, return type)
+
+conformance ok — items 23 methods, market 32 methods
+

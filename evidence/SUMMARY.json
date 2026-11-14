@@ -1,6 +1,6 @@
 {
   "note": "Written by npm run evidence. Each run keeps its own directory; failures are retained alongside passes and are never edited out.",
-  "recorded_at": "2026-11-14T07:14:00.017Z",
+  "recorded_at": "2026-11-14T09:59:19.433Z",
   "host": {
     "platform": "darwin",
     "arch": "arm64",
@@ -8,8 +8,8 @@
   },
   "wasm_built": true,
   "totals": {
-    "pass": 18,
-    "fail": 0,
+    "pass": 17,
+    "fail": 1,
     "skipped": 0
   },
   "boundaries": [
@@ -81,6 +81,66 @@
         "https://testnet.nearblocks.io/txns/6fe1RTHSf1sxH8LYRbC8ko3pQLgMF9feXZfBVn6S8f5t"
       ],
       "path": "evidence/live/onboard-2FNytLGEDMPRBjrf5TsYZBsT1ZVWrMu8uCUKeDKmCbp5.json"
+    },
+    {
+      "transactions": {
+        "created": "4DocBYeZBQrZi3Ggm9UtvYTsyALwZHfAjfqbX4axr8yM",
+        "restricted": "HZ7PoXkPQU2n7NW9WQw117rWmP7qZm44miprbnBmHDUR"
+      },
+      "what": "A login became a brand-new NEAR account on public testnet. Three transactions: create and fund with a temporary full-access key; grant the market its NEP-245 pull rights while that key still exists; then install a function-call key and DELETE the full-access one in the same transaction. The player never saw a key, and after this no full-access key for the account exists anywhere — which is what makes \"no seed phrase\" a fact rather than a slogan.",
+      "explorer": [
+        "https://testnet.nearblocks.io/txns/4DocBYeZBQrZi3Ggm9UtvYTsyALwZHfAjfqbX4axr8yM",
+        "https://testnet.nearblocks.io/txns/HZ7PoXkPQU2n7NW9WQw117rWmP7qZm44miprbnBmHDUR"
+      ],
+      "path": "evidence/live/onboard-4DocBYeZBQrZi3Ggm9UtvYTsyALwZHfAjfqbX4axr8yM.json"
+    },
+    {
+      "transactions": {
+        "created": "5NF1YbyDexMvaAgceW9dF7dndhk3ghdG9fWbzcymAFHv",
+        "restricted": "8LpNMGxFeucPtKhvP3QBSCcrvkGtpTHgUWgArB4BgrBr"
+      },
+      "what": "A login became a brand-new NEAR account on public testnet. Three transactions: create and fund with a temporary full-access key; grant the market its NEP-245 pull rights while that key still exists; then install a function-call key and DELETE the full-access one in the same transaction. The player never saw a key, and after this no full-access key for the account exists anywhere — which is what makes \"no seed phrase\" a fact rather than a slogan.",
+      "explorer": [
+        "https://testnet.nearblocks.io/txns/5NF1YbyDexMvaAgceW9dF7dndhk3ghdG9fWbzcymAFHv",
+        "https://testnet.nearblocks.io/txns/8LpNMGxFeucPtKhvP3QBSCcrvkGtpTHgUWgArB4BgrBr"
+      ],
+      "path": "evidence/live/onboard-5NF1YbyDexMvaAgceW9dF7dndhk3ghdG9fWbzcymAFHv.json"
+    },
+    {
+      "transactions": {
+        "created": "ANboMQfLJrn9yNGDXAtyJrPVPQyZNTAbHmZqrCMd2KLN",
+        "restricted": "8ibSG75a1JNNz6xZZUGY9AfHfvMthHuCe22qQeqqgvvY"
+      },
+      "what": "A login became a brand-new NEAR account on public testnet. Three transactions: create and fund with a temporary full-access key; grant the market its NEP-245 pull rights while that key still exists; then install a function-call key and DELETE the full-access one in the same transaction. The player never saw a key, and after this no full-access key for the account exists anywhere — which is what makes \"no seed phrase\" a fact rather than a slogan.",
+      "explorer": [
+        "https://testnet.nearblocks.io/txns/ANboMQfLJrn9yNGDXAtyJrPVPQyZNTAbHmZqrCMd2KLN",
+        "https://testnet.nearblocks.io/txns/8ibSG75a1JNNz6xZZUGY9AfHfvMthHuCe22qQeqqgvvY"
+      ],
+      "path": "evidence/live/onboard-ANboMQfLJrn9yNGDXAtyJrPVPQyZNTAbHmZqrCMd2KLN.json"
+    },
+    {
+      "transactions": {
+        "created": "BiqFAvTaWf94WNweBzuGKd3p8GGMGVpVGo3HWeTxdwcB",
+        "restricted": "4hZatNC8rku2pNjKFywm7jfP7DFNdY7p63kX1g6W9fXt"
+      },
+      "what": "A login became a brand-new NEAR account on public testnet. Three transactions: create and fund with a temporary full-access key; grant the market its NEP-245 pull rights while that key still exists; then install a function-call key and DELETE the full-access one in the same transaction. The player never saw a key, and after this no full-access key for the account exists anywhere — which is what makes \"no seed phrase\" a fact rather than a slogan.",
+      "explorer": [
+        "https://testnet.nearblocks.io/txns/BiqFAvTaWf94WNweBzuGKd3p8GGMGVpVGo3HWeTxdwcB",
+        "https://testnet.nearblocks.io/txns/4hZatNC8rku2pNjKFywm7jfP7DFNdY7p63kX1g6W9fXt"
+      ],
+      "path": "evidence/live/onboard-BiqFAvTaWf94WNweBzuGKd3p8GGMGVpVGo3HWeTxdwcB.json"
+    },
+    {
+      "transactions": {
+        "created": "CnMrCSjz8NggyL8NhWgVi3FMCc98RYFfzSdbcs1RGAey",
+        "restricted": "74wmbiv9qYineFbrShksLRqFMgXwvJLrvGcxy5zSU25Z"
+      },
+      "what": "A login became a brand-new NEAR account on public testnet. Three transactions: create and fund with a temporary full-access key; grant the market its NEP-245 pull rights while that key still exists; then install a function-call key and DELETE the full-access one in the same transaction. The player never saw a key, and after this no full-access key for the account exists anywhere — which is what makes \"no seed phrase\" a fact rather than a slogan.",
+      "explorer": [
+        "https://testnet.nearblocks.io/txns/CnMrCSjz8NggyL8NhWgVi3FMCc98RYFfzSdbcs1RGAey",
+        "https://testnet.nearblocks.io/txns/74wmbiv9qYineFbrShksLRqFMgXwvJLrvGcxy5zSU25Z"
+      ],
+      "path": "evidence/live/onboard-CnMrCSjz8NggyL8NhWgVi3FMCc98RYFfzSdbcs1RGAey.json"
     },
     {
       "transactions": {
@@ -201,92 +261,92 @@
     {
       "topic": "unit-tests",
       "status": "pass",
-      "path": "evidence/runs/unit-tests/2026-11-14T07-14-00/"
+      "path": "evidence/runs/unit-tests/2026-11-14T09-59-19/"
     },
     {
       "topic": "policy-and-injection",
       "status": "pass",
-      "path": "evidence/runs/policy-and-injection/2026-11-14T07-14-00/"
+      "path": "evidence/runs/policy-and-injection/2026-11-14T09-59-19/"
     },
     {
       "topic": "live-testnet-reads",
       "status": "pass",
-      "path": "evidence/runs/live-testnet-reads/2026-11-14T07-14-00/"
+      "path": "evidence/runs/live-testnet-reads/2026-11-14T09-59-19/"
     },
     {
       "topic": "live-testnet-keys",
       "status": "pass",
-      "path": "evidence/runs/live-testnet-keys/2026-11-14T07-14-00/"
+      "path": "evidence/runs/live-testnet-keys/2026-11-14T09-59-19/"
     },
     {
       "topic": "deployed-code-matches-repo",
-      "status": "pass",
-      "path": "evidence/runs/deployed-code-matches-repo/2026-11-14T07-14-00/"
+      "status": "fail",
+      "path": "evidence/runs/deployed-code-matches-repo/2026-11-14T09-59-19/"
     },
     {
       "topic": "agent-run",
       "status": "pass",
-      "path": "evidence/runs/agent-run/2026-11-14T07-14-00/"
+      "path": "evidence/runs/agent-run/2026-11-14T09-59-19/"
     },
     {
       "topic": "gasless-play",
       "status": "pass",
-      "path": "evidence/runs/gasless-play/2026-11-14T07-14-00/"
+      "path": "evidence/runs/gasless-play/2026-11-14T09-59-19/"
     },
     {
       "topic": "identity-verification",
       "status": "pass",
-      "path": "evidence/runs/identity-verification/2026-11-14T07-14-00/"
+      "path": "evidence/runs/identity-verification/2026-11-14T09-59-19/"
     },
     {
       "topic": "counterparty-and-approval",
       "status": "pass",
-      "path": "evidence/runs/counterparty-and-approval/2026-11-14T07-14-00/"
+      "path": "evidence/runs/counterparty-and-approval/2026-11-14T09-59-19/"
     },
     {
       "topic": "baseline-integrity",
       "status": "pass",
-      "path": "evidence/runs/baseline-integrity/2026-11-14T07-14-00/"
+      "path": "evidence/runs/baseline-integrity/2026-11-14T09-59-19/"
     },
     {
       "topic": "nep245-conformance",
       "status": "pass",
-      "path": "evidence/runs/nep245-conformance/2026-11-14T07-14-00/"
+      "path": "evidence/runs/nep245-conformance/2026-11-14T09-59-19/"
     },
     {
       "topic": "view-methods-callable",
       "status": "pass",
-      "path": "evidence/runs/view-methods-callable/2026-11-14T07-14-00/"
+      "path": "evidence/runs/view-methods-callable/2026-11-14T09-59-19/"
     },
     {
       "topic": "access-key-limits",
       "status": "pass",
-      "path": "evidence/runs/access-key-limits/2026-11-14T07-14-00/"
+      "path": "evidence/runs/access-key-limits/2026-11-14T09-59-19/"
     },
     {
       "topic": "money-invariant",
       "status": "pass",
-      "path": "evidence/runs/money-invariant/2026-11-14T07-14-00/"
+      "path": "evidence/runs/money-invariant/2026-11-14T09-59-19/"
     },
     {
       "topic": "solvency",
       "status": "pass",
-      "path": "evidence/runs/solvency/2026-11-14T07-14-00/"
+      "path": "evidence/runs/solvency/2026-11-14T09-59-19/"
     },
     {
       "topic": "state-migration",
       "status": "pass",
-      "path": "evidence/runs/state-migration/2026-11-14T07-14-00/"
+      "path": "evidence/runs/state-migration/2026-11-14T09-59-19/"
     },
     {
       "topic": "cross-contract-economy",
       "status": "pass",
-      "path": "evidence/runs/cross-contract-economy/2026-11-14T07-14-00/"
+      "path": "evidence/runs/cross-contract-economy/2026-11-14T09-59-19/"
     },
     {
       "topic": "minecraft-plugin",
       "status": "pass",
-      "path": "evidence/runs/minecraft-plugin/2026-11-14T07-14-00/"
+      "path": "evidence/runs/minecraft-plugin/2026-11-14T09-59-19/"
     }
   ]
 }

@@ -1,0 +1,12 @@
+{
+  "topic": "money-invariant",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 1363,
+  "command": "cargo test -p nearcraft-market --lib every_yocto_is_accounted_for -- --nocapture",
+  "cwd": "contracts",
+  "proves": "Every yoctoNEAR entering the market contract is still accounted for: sum(treasuries) + sum(credits) == deposited - paid out, asserted after EVERY ONE of the fourteen money-moving calls rather than once at the end, so a failure names the step rather than the session. Four payable entry points add, two withdrawals remove, and every other path — purchases, sales, the push path, restocks, credit investments and all four rollbacks — must net to exactly zero. Verified by injecting a real leak (a sale that credits the seller without debiting the treasury): the test names \"after sell\" and the 1.66 NEAR created from nothing.",
+  "output_sha256": "c7db47576b55ea54726458f361237b26ea183b76810c238e7cf14f41734a1a50",
+  "output_bytes": 3919,
+  "recorded_at": "2026-11-14T10:01:24.643Z"
+}

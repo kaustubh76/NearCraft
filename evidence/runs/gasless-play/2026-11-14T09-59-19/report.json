@@ -1,0 +1,12 @@
+{
+  "topic": "gasless-play",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 52485,
+  "command": "node --test tests/near/gasless.mjs",
+  "cwd": ".",
+  "proves": "On a real nearcore node, a player holding only a function-call access key buys goods and pays nothing: the player balance delta is exactly 0 and the relayer pays. It also SELLS: a player with no full-access key at all sells under a NEP-245 approval through the non-payable market.sell, and pays nothing. Records that a delegate action's inner call cannot carry a deposit, which is why selling cannot go through mt_transfer_call. And it BACKS a merchant for free: a relayed invest_with_credit records a 1 NEAR stake against the player, who pays nothing. invest is #[payable], so a scoped key could never reach it — without the non-payable twin the mechanic the games prompt describes would be unreachable for exactly the players it is for. The fourth test drives backend/near/play.mjs — the service a browser actually talks to — composing the real onboarding, relayer and market reader exactly as scripts/serve-play.mjs does: it signs a NEW player in, buys two and sells one, and the balance delta for that player is still exactly 0 while the service reports that same 0 rather than asserting it. That path also covers the three-transaction onboarding bootstrap: the NEP-245 approval granted while a temporary full-access key still exists, and the deletion of that key in the same transaction that installs the scoped one. This sentence used to say live testnet could not do that, because the root account was below the gas headroom to create an account. Root was funded and npm run live:onboard now does it on the public chain - p-62b0b243.nearcraftmc.testnet was created by 2FNytLGEDMPRBjrf5TsYZBsT1ZVWrMu8uCUKeDKmCbp5 and restricted by 6fe1RTHSf1sxH8LYRbC8ko3pQLgMF9feXZfBVn6S8f5t, with zero full-access keys read back from the chain afterwards. This test keeps the local-node version because that is where it is cheap to run repeatedly. After trading, the player still holds zero full-access keys.",
+  "output_sha256": "b4384bf8b0682e6e46b041161aa36587102f6955cfe68554eb41c60a164e3341",
+  "output_bytes": 2517,
+  "recorded_at": "2026-11-14T10:00:47.075Z"
+}
