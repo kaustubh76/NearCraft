@@ -1,5 +1,5 @@
 {
-  "note": "Written by npm run deploy. Public ids only \u2014 no secret material.",
+  "note": "Written by npm run deploy. Public ids only — no secret material.",
   "network": "testnet",
   "rpc": "https://test.rpc.fastnear.com",
   "deployed_at": "2026-11-12T11:18:46.312Z",
@@ -109,5 +109,11 @@
       ],
       "scoped_to": "market.nearcraftmc.testnet"
     }
-  ]
+  ],
+  "built_from": {
+    "items": "46d812fb4d661ede3cdba1a92c81b8c3bbff313c",
+    "market": "46d812fb4d661ede3cdba1a92c81b8c3bbff313c",
+    "guard": "46d812fb4d661ede3cdba1a92c81b8c3bbff313c"
+  },
+  "built_from_note": "The commit each deployed contract names in its own contract_source_metadata, copied from the chain by `npm run verify:deployed -- --record`. check:docs holds the README's `git checkout` line to this, and a plain verify:deployed run fails if it drifts from what the chain says."
 }

@@ -383,41 +383,59 @@ function isQuotation(text, index) {
 //
 // It said `git checkout 4da447eb…` for three deployments after that commit had
 // been superseded, so anyone following the instructions got a mismatch and the
-// strongest claim in this project looked false. A reproducible build embeds
-// the commit IN the wasm, which makes this checkable offline rather than
-// hand-maintained: read it back out of the artifact.
+// strongest claim in this project looked false.
 //
-// Skipped, not failed, when the contracts have not been built — a fresh clone
-// has no artifacts and has nothing to be wrong about. Both forms in the README
-// are checked, the full hash and the abbreviated one, because they rotted
-// together and would again.
+// THE FIRST FIX READ THE WRONG THING. It took the commit out of the locally
+// built wasm, because a reproducible build embeds it there and that made the
+// check offline instead of hand-maintained. But the local artifact is a PROXY
+// for "what is deployed", and a proxy that is only right while two things agree.
+// The moment this tree was built ahead of its deployment, the rule began
+// demanding that the README name a commit which does not reproduce what is
+// running — the same failure it exists to prevent, arriving from the other side.
+//
+// The authority is the chain, which states its commit in
+// `contract_source_metadata`. `npm run verify:deployed -- --record` copies that
+// into deployment.json's `built_from`, and a plain `verify:deployed` run fails if
+// the record drifts. So this stays offline and is held to the deployment rather
+// than to a build.
+//
+// Skipped, not failed, when nothing is recorded — a fork that has deployed
+// nothing has nothing to be wrong about. Both forms in the README are checked,
+// the full hash and the abbreviated one, because they rotted together and would
+// again.
 try {
-  const wasm = await readFile(
-    new URL('contracts/target/near/nearcraft_items/nearcraft_items.wasm', ROOT),
-  )
-  const built = wasm.toString('latin1').match(/rev=([0-9a-f]{40})/)?.[1]
-  if (built) {
+  const deployed = JSON.parse(await readFile(new URL('deployment.json', ROOT), 'utf8'))
+  const record = deployed.built_from ?? null
+  const commits = record ? [...new Set(Object.values(record))] : []
+
+  if (record && commits.length > 1) {
+    fail('deployment.json', `records ${commits.length} different deployed commits `
+      + `(${commits.map((c) => c.slice(0, 8)).join(', ')}). That is legal, but the README's single `
+      + '`git checkout` line cannot reproduce all of them, so say which contract it is for')
+  } else if (commits.length === 1) {
+    const live = commits[0]
     const full = readmeText.match(/git checkout ([0-9a-f]{40})/)
     if (!full) {
       fail('README.md', 'no `git checkout <commit>` line found — the reproducible-build '
         + 'instructions were reworded, so this check now verifies nothing')
-    } else if (full[1] !== built) {
-      fail('README.md', `tells a verifier to check out ${full[1].slice(0, 8)}…, but the built `
-        + `contract was made from ${built.slice(0, 8)}… — following the README would mismatch`)
+    } else if (full[1] !== live) {
+      fail('README.md', `tells a verifier to check out ${full[1].slice(0, 8)}…, but the chain `
+        + `reports the deployed contracts were built from ${live.slice(0, 8)}… — following the `
+        + 'README would not reproduce what is running')
     } else { commandsChecked++ }
 
     const short = readmeText.match(/\?rev=([0-9a-f]{8})…/)
     if (!short) {
       fail('README.md', 'no abbreviated `?rev=…` line found — it was reworded, so this '
         + 'check now verifies nothing')
-    } else if (!built.startsWith(short[1])) {
-      fail('README.md', `shows source_code_snapshot rev=${short[1]}…, but the built contract `
-        + `was made from ${built.slice(0, 8)}…`)
+    } else if (!live.startsWith(short[1])) {
+      fail('README.md', `shows source_code_snapshot rev=${short[1]}…, but the deployed contracts `
+        + `were built from ${live.slice(0, 8)}…`)
     } else { commandsChecked++ }
   }
 } catch (e) {
-  // No artifact is a legitimate state. A malformed one is not.
-  if (!/ENOENT/.test(e?.message ?? '')) fail('contracts/target', `could not be read: ${e.message}`)
+  // No manifest is a legitimate state for a fresh fork. A malformed one is not.
+  if (!/ENOENT/.test(e?.message ?? '')) fail('deployment.json', `could not be read: ${e.message}`)
 }
 
 // 8b. What the deployment actually contains, counted from the manifest.

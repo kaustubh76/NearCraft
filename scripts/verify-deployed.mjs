@@ -27,7 +27,7 @@
 // rustc — so comparing against that build proves nothing, which the failure
 // message spells out.
 
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -125,7 +125,15 @@ console.log(`rpc ${manifest.rpc}\n`)
 
 const problems = []
 const revs = new Set()
+/// What the CHAIN says each contract was built from, keyed by contract name.
+/// Both the record check below and `--record` read this, so they cannot disagree.
+const observed = {}
 let checked = 0
+
+/// `npm run verify:deployed -- --record` writes what the chain reports into
+/// deployment.json's `built_from`. Reproducible by anyone, rather than a number
+/// somebody pasted in once.
+const RECORD = process.argv.includes('--record')
 
 for (const [name, wasmUrl] of Object.entries(WASM)) {
   const accountId = n[name]
@@ -157,7 +165,7 @@ for (const [name, wasmUrl] of Object.entries(WASM)) {
   checked += 1
   const info = await buildInfo(accountId)
   const rev = revOf(info)
-  if (rev) revs.add(rev)
+  if (rev) { revs.add(rev); observed[name] = rev }
   if (live === NO_CODE) {
     problems.push(`${name}: ${accountId} has no contract deployed at all`)
     console.log(`  ${name.padEnd(8)} ${accountId.padEnd(32)} NO CODE`)
@@ -197,6 +205,53 @@ for (const [name, wasmUrl] of Object.entries(WASM)) {
 
 // ----------------------------------------------------------------- verdict
 
+// What commit is DEPLOYED, recorded where an offline check can read it.
+//
+// check-docs.mjs rule 8a tells a verifier `git checkout <commit>` so they can
+// reproduce the deployed bytes. It used to read that commit out of the locally
+// built wasm, which is a proxy for "what is deployed" and is only correct while
+// the two agree. The moment this tree built ahead of its deployment, the rule
+// demanded the README name a commit that does NOT reproduce what is running —
+// the exact failure it was written to prevent, from the other direction.
+//
+// The chain knows the answer and says so in `contract_source_metadata`. This
+// copies it into deployment.json so `npm run check:docs` can hold the README to
+// it without a network, and asserts it has not drifted so the committed record
+// cannot quietly go stale. `--record` writes; a plain run checks.
+if (RECORD) {
+  const path = new URL('../deployment.json', import.meta.url)
+  const doc = JSON.parse(await readFile(path, 'utf8'))
+  doc.built_from = { ...observed }
+  doc.built_from_note =
+    'The commit each deployed contract names in its own contract_source_metadata, ' +
+    'copied from the chain by `npm run verify:deployed -- --record`. check:docs holds ' +
+    "the README's `git checkout` line to this, and a plain verify:deployed run fails if " +
+    'it drifts from what the chain says.'
+  await writeFile(path, JSON.stringify(doc, null, 2) + '\n')
+  console.log(`\n  recorded built_from in deployment.json: ${JSON.stringify(observed)}`)
+} else if (Object.keys(observed).length > 0) {
+  const recorded = manifest.built_from ?? null
+  if (!recorded) {
+    problems.push(
+      'deployment.json records no `built_from`, so nothing offline knows which commit ' +
+      'reproduces the deployed bytes. Run: npm run verify:deployed -- --record',
+    )
+  } else {
+    for (const [name, rev] of Object.entries(observed)) {
+      if (recorded[name] !== rev) {
+        problems.push(
+          `deployment.json says ${name} was built from ${recorded[name] ?? '(nothing)'}, but the ` +
+          `chain says ${rev}. The record is stale — re-record it, because check:docs holds the ` +
+          "README's instructions to it.",
+        )
+      }
+    }
+    if (problems.length === 0) {
+      console.log(`\n  deployment.json's built_from matches what the chain reports  ${[...revs].join(', ')}`)
+    }
+  }
+}
+
 if (problems.length) {
   console.error(`\nthe chain is not running this repo's code (${problems.length}):`)
   for (const x of problems) console.error(`  ${x}`)
@@ -218,6 +273,41 @@ if (problems.length) {
     '\nIf it still differs, the remedy is:  NEAR_REDEPLOY=<name> npm run deploy\n'
   )
   process.exit(1)
+}
+
+// Is the migration test's fixture still the bytes testnet is running?
+//
+// contracts/integration/tests/migration.rs deploys
+// contracts/integration/fixtures/market-live.wasm and its whole claim, quoted
+// from capture-evidence.mjs, is "the migration mechanism, against the bytes
+// testnet is actually running". The fixture is pinned so it cannot be swapped
+// for a convenient local build — and pinned is not the same as current. It was
+// fetched on 12 November, market has been redeployed since, and the fixture had
+// drifted to bytes nobody runs. Nothing noticed, because nothing compared it to
+// the chain.
+//
+// A stale fixture does not fail the migration test. It makes it pass about the
+// wrong contract, which is worse.
+try {
+  const fixture = await readFile(new URL('../contracts/integration/fixtures/market-live.wasm', import.meta.url))
+  const fixtureHash = baseEncode(createHash('sha256').update(fixture).digest())
+  const marketId = manifest.contracts.market
+  const state = await p.query({ request_type: 'view_account', finality: 'final', account_id: marketId })
+  if (state.code_hash === fixtureHash) {
+    console.log(`\n  migration fixture matches the bytes ${marketId} is running  ${fixtureHash}`)
+  } else {
+    problems.push(
+      `the migration fixture is stale: contracts/integration/fixtures/market-live.wasm hashes to ` +
+      `${fixtureHash}, but ${marketId} is running ${state.code_hash}. The migration test claims to ` +
+      `run against the bytes testnet is actually running, and it is not. Re-fetch it with a ` +
+      `view_code call.`,
+    )
+    console.log(`\n  migration fixture STALE  ${fixtureHash}  vs chain ${state.code_hash}`)
+  }
+} catch (e) {
+  if (!/ENOENT/.test(e?.message ?? '')) {
+    problems.push(`the migration fixture could not be checked: ${e.message?.split('\n')[0] ?? e}`)
+  }
 }
 
 console.log(

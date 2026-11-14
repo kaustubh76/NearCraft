@@ -27,7 +27,7 @@
 // immediately after deploying and fails loudly if the contract has been
 // bricked, rather than leaving that to be discovered by a player.
 
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { Account, JsonRpcProvider, baseEncode } from 'near-api-js'
 import { names, provider, rootAccountId, RPC_URL } from './near-env.mjs'
@@ -49,7 +49,12 @@ if (wanted.length === 0) {
   process.exit(2)
 }
 
-const manifest = JSON.parse(await readFile(new URL('deployment.json', ROOT), 'utf8'))
+const MANIFEST_PATH = new URL('deployment.json', ROOT)
+const manifest = JSON.parse(await readFile(MANIFEST_PATH, 'utf8'))
+
+/// Which commit each redeployed contract's bytes name, harvested as we go so
+/// the record written at the end is taken from what actually went to the chain.
+const deployedCommits = new Map()
 const n = names(manifest.root ?? rootAccountId())
 
 /// A contract's OWN key, not the root's.
@@ -151,6 +156,13 @@ for (const name of wanted) {
   const after = await settledHash(accountId, local)
   const ok = after === local
   console.log(`    ${ok ? 'deployed' : 'MISMATCH'}  ${after}${ok ? '' : `  expected ${local}`}`)
+  if (ok) {
+    // Out of the bytes, not out of git: a reproducible build embeds its commit,
+    // and the bytes are what the chain now runs.
+    const rev = code.toString('latin1').match(/rev=([0-9a-f]{40})/)?.[1]
+    if (rev) deployedCommits.set(name, rev)
+    else console.log('    NOTE      these bytes name no commit — built non-reproducibly, so')
+  }
   if (!ok) failed++
 
   // The check this script exists for.
@@ -169,6 +181,27 @@ for (const name of wanted) {
     failed++
   }
   console.log('')
+}
+
+// Record which commit is now deployed, because an offline check depends on it.
+//
+// check-docs.mjs rule 8a holds the README's `git checkout <commit>` line to
+// deployment.json's `built_from`, so that a verifier is told the commit which
+// actually reproduces the deployed bytes. If a redeploy did not update the
+// record, the README would go on naming the previous deployment and the rule
+// would cheerfully agree — which is the hand-maintenance problem rule 8a was
+// written to end, reintroduced one level down.
+//
+// Taken from the wasm just deployed rather than from git HEAD: a reproducible
+// build embeds its commit in the bytes, and the bytes are what went to the
+// chain. HEAD may have moved since the build.
+if (CONFIRM && failed === 0 && deployedCommits.size > 0) {
+  const doc = JSON.parse(await readFile(MANIFEST_PATH, 'utf8'))
+  doc.built_from = { ...(doc.built_from ?? {}) }
+  for (const [name, rev] of deployedCommits) doc.built_from[name] = rev
+  await writeFile(MANIFEST_PATH, JSON.stringify(doc, null, 2) + '\n')
+  console.log(`  recorded built_from for ${[...deployedCommits.keys()].join(', ')} in deployment.json`)
+  console.log('  npm run verify:deployed checks that record against the chain.\n')
 }
 
 if (CONFIRM) {

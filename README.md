@@ -28,7 +28,7 @@ column before the description.
 | `RULES.md` — round rules + sequence diagram | **Done.** Required by the `swarms` prompt before any code. |
 | `BASELINE.md` + hash-verified baseline import | **Done, machine-checked.** `npm run verify:baseline` |
 | `contracts/items` — NEP-245 materials | **Built and tested.** 33 unit tests. NEP-245 core 10/10 + Enumeration 2/2 + Approval Management **6/6**, verified against the compiled ABI. Three spec ambiguities are decided and disclosed in the module header, including that `mt_is_approved` takes an explicit `owner_id` — the spec's signature names none, which a multi-token cannot answer. |
-| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 107 unit tests (the pricing rule, the payout rollbacks, restocking, investment and the money invariant — including the three interleaved ones that caught `sell`, `buy` and `restock` each paying somebody before the goods had moved). |
+| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 107 unit tests (the pricing rule, the payout rollbacks, restocking, investment and the money invariant — including the three interleaved ones that caught `sell`, `buy` and `restock` each paying somebody before the goods had moved). **NEP-297 events are built and NOT YET DEPLOYED.** `buy` and `sell` emitted nothing at all — not a plain log line — so the two central events of the economy are silent on chain; the token leg of a trade is visible through `items`' NEP-245 `mt_transfer`, the money leg names no merchant, no price and no margin. Ten kinds of event under its own standard, `nearcraft_market` `1.0.0`, emitted where a trade *settles* rather than where it is requested — in **source**, with 4 unit tests on the envelope and a sandbox rehearsal that redeployed over the real deployed bytes and watched the event fire on a real nearcore node carrying the price. What is deployed today predates all of it: `npm run verify:deployed` reports three `DIFFERS` and says so. The redeploy is one command and has not been run. |
 | `contracts/guard` — the shared blocklist, on-chain | **Built and tested.** 13 unit tests. Public, attributed by the runtime, not deletable by us. |
 | `backend/near/counterparty.mjs` — allow/warn/block | **Built and tested.** 23 tests. Pure scoring, no API key, no indexer. |
 | `backend/near` — signer, policy, warn→human approval | **Built and tested.** 90 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
@@ -608,11 +608,16 @@ and a line; none of them is claimed to be harmless.
   type. What it cannot see is whether the number coming back is the right
   number. `mt_balance_of` returning a correctly-typed lie passes it. Semantics
   rest on the unit tests, and that is a real limit, not a formality.
-- **`market`'s events do not make it NEP-245 conformant**, and are not meant
-  to. It is not a multi-token contract, has no `mt_` methods and claims none;
-  its events are its own standard under NEP-297, `nearcraft_market` version
-  `1.0.0`, across 10 kinds of NEP-297 event. An indexer has to be told that
-  name — nothing would tell it.
+- **`market`'s NEP-297 events are in source and not on chain.** The deployed
+  build predates them, so the money leg of a trade is still invisible to an
+  indexer today: nothing on chain names the merchant, the price or the margin.
+  `npm run verify:deployed` reports three `DIFFERS` rather than hiding it. The
+  redeploy is built, rehearsed against the real deployed bytes, and not run.
+- **And they do not make `market` NEP-245 conformant**, nor are they meant to.
+  It is not a multi-token contract, has no `mt_` methods and claims none; the
+  events are its own standard, `nearcraft_market` version `1.0.0`, spanning
+  10 kinds of NEP-297 event. An indexer has to be told that name — nothing
+  would tell it.
 - **An audit is not a proof of correctness.** The second round found three
   things the first one missed, including a money bug in a function the first
   round had read. There is no reason to believe a third would find nothing.
