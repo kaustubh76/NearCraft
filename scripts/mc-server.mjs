@@ -5,11 +5,16 @@
 //   npm run mc:server -- --trade      also sign in and settle a real trade
 //   npm run mc:server -- --token seed:player-1 --sell ironmonger:iron_ingot:1
 //
-// WHY A CONSOLE AND NOT A PLAYER. Joining a server needs a paid Minecraft
-// account and the game client, and neither exists on this machine. Every
-// command is therefore console-runnable, and the one thing the console cannot
-// do — move blocks in an inventory — is the one thing the plugin says out loud
-// it skipped. That is a smaller gap than proving nothing at all.
+// WHY EVERY COMMAND IS ALSO CONSOLE-RUNNABLE. There is no PAID Minecraft
+// account on this machine, so an unattended run cannot join its own server;
+// the console drives it instead, and the one thing the console cannot do —
+// move blocks in an inventory — is the one thing the plugin says out loud it
+// skipped. That is a smaller gap than proving nothing at all.
+//
+// A client does exist here, though, and `--offline` is what lets it in: it
+// turns off Mojang authentication for a non-premium launcher and binds the
+// server to 127.0.0.1 in the same breath. So the console path is still how
+// this is tested unattended, and a person can now also play it.
 //
 // THE EULA. Starting a Minecraft server means agreeing to Mojang's End User
 // Licence Agreement. This script writes eula=true because the operator of this
@@ -18,7 +23,8 @@
 import { spawn } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
 import { mkdir, copyFile, writeFile, rm } from 'node:fs/promises'
-import { fetchPinned, javaHome, run, ROOT, TMP, runtime } from './mc-java.mjs'
+import { fetchPinned, javaHome, run, ROOT, TMP, runtime, serverProperties, protocolBridge, typistNote }
+  from './mc-java.mjs'
 
 const args = process.argv.slice(2)
 const flag = (name) => args.includes(name)
@@ -46,6 +52,14 @@ const AGENT = value('--agent', null)
 /// to print the tunnel's address rather than the loopback one it binds. Live
 /// while this machine is on, which is a demo window and not hosting;
 /// docs/MINECRAFT.md says so in those words.
+/// Turn off Mojang authentication, for a client that has no Mojang account.
+///
+/// Opt-in, and it carries a cost that is stated rather than buried: the server
+/// then trusts whatever username a client asserts, and the UUID it records is
+/// the offline, name-derived kind. So a session played this way proves that A
+/// PERSON at a real client did it, not WHICH person. serverProperties() binds
+/// the same branch to 127.0.0.1 so that trust cannot extend past this machine.
+const OFFLINE = flag('--offline')
 const PUBLIC = value('--public', null)
 const BOOT_TIMEOUT_MS = 10 * 60 * 1000
 
@@ -60,7 +74,14 @@ let servicePlayable = false
 /// ANSWERED, instead of hard-coding one.
 let health = null
 try {
-  const probe = await fetch(`${SERVICE}/api/health`, { signal: AbortSignal.timeout(3000) })
+  // 20s, not 3s. A free Render instance sleeps after fifteen idle minutes and
+  // answers its first request in about twenty-three seconds, so a 3s probe
+  // timed out against a service that was merely asleep -- and `health` then
+  // stayed null, which makes the join banner below offer `/nearcraft claim
+  // <code>` when the right instruction is `/nearcraft link <any name>`. The
+  // cost of being wrong the other way is twenty seconds on a genuinely dead
+  // service, which is a run that was not going to be played anyway.
+  const probe = await fetch(`${SERVICE}/api/health`, { signal: AbortSignal.timeout(20_000) })
   servicePlayable = probe.ok
   const body = await probe.json()
   health = body
@@ -81,6 +102,22 @@ const paper = await fetchPinned('paper')
 await mkdir(PLUGINS, { recursive: true })
 await copyFile(JAR, new URL('NearCraft.jar', PLUGINS))
 
+// ViaVersion and ViaBackwards, on EVERY run.
+//
+// Paper 26.3 refuses a client on an older protocol, and no Minecraft Java
+// client ships on 26.3 -- so without these, nothing a person can launch is
+// able to join at all. This was the second reason a human could not play, and
+// it is not behind a flag because a flag is the failure mode: pass --offline,
+// forget the other one, wait out world generation and read "Outdated client".
+//
+// It cannot break the case it is not needed for (a client already on the
+// server's protocol passes straight through) and it needs no new evidence:
+// scripts/mc-bot.mjs already loads these two jars as server plugins on this
+// same pinned Paper build, and a client joined through them.
+for (const name of protocolBridge()) {
+  await copyFile(await fetchPinned(name), new URL(`${name}.jar`, PLUGINS))
+}
+
 // The plugin's own config, written each run so --service is honoured.
 await mkdir(new URL('NearCraft/', PLUGINS), { recursive: true })
 await writeFile(new URL('NearCraft/config.yml', PLUGINS), `service: '${SERVICE}'\n`)
@@ -88,46 +125,18 @@ await writeFile(new URL('NearCraft/config.yml', PLUGINS), `service: '${SERVICE}'
 console.log('\n  I am accepting Mojang\'s EULA on your behalf, as agreed: eula=true')
 await writeFile(new URL('eula.txt', SERVER), 'eula=true\n')
 
-// ORDINARY TERRAIN, from a pinned seed.
+// ORDINARY TERRAIN, from a pinned seed, and the authentication posture.
 //
-// This was `level-type=minecraft:flat` with generator-settings left at the
-// default — bedrock, two dirt, one grass — in survival mode. The economy trades
-// iron_ingot, oak_log, stone, glass, coal, copper_ingot, oak_planks and
-// redstone, and NOT ONE of those eight exists in a default superflat world. So
-// a player spawned into a world where the first of GAME_LOOP.md's three core
-// actions, "Mine, chop, or harvest one stack-worth of a material", could not be
-// performed at all. The trading commands worked; there was nothing to trade
-// that you had not bought.
-//
-// Real generation costs twenty or thirty seconds on the first boot, and
-// --keep retains the world so it is paid once. That is the whole price.
-//
-// The seed is pinned (config/minecraft-runtime.json) so this is the same world
-// every time and `/nearcraft world-selftest` is a statement about a known
-// place rather than about whatever happened to generate.
-//
-// The BOT fixture keeps its flat world — see scripts/mc-bot.mjs. It never sends
-// position packets, so terrain could leave it in water or inside a block, and
-// what it proves is settlement, not scenery.
-//
-// online-mode stays TRUE: a demo is not a reason to turn authentication off.
+// Both now come from serverProperties() in scripts/mc-java.mjs, because this
+// file cannot be imported -- it has a top-level await fetch and a spawn -- so
+// nothing inline here could ever be tested. The long WHY for each line lives
+// with the function; the short version is that the world used to be superflat,
+// in which none of the eight traded materials existed, and that --offline is
+// five properties rather than one because Paper needs all five before a
+// non-premium client can get through the door.
 const world = runtime.world
-await writeFile(new URL('server.properties', SERVER), [
-  `server-port=${PORT}`,
-  'online-mode=true',
-  `level-type=${world.level_type.replace(':', '\\:')}`,
-  `level-seed=${world.seed}`,
-  `gamemode=${world.gamemode}`,
-  `difficulty=${world.difficulty}`,
-  'level-name=nearcraft',
-  'view-distance=6',
-  'simulation-distance=6',
-  'spawn-protection=0',
-  'max-players=5',
-  'motd=NearCraft - an agent economy settled on NEAR',
-  'sync-chunk-writes=false',
-  '',
-].join('\n'))
+await writeFile(new URL('server.properties', SERVER),
+  serverProperties({ port: PORT, world, offline: OFFLINE }))
 
 // ------------------------------------------------------------------- the run
 const logPath = new URL('mc-server.log', TMP).pathname
@@ -173,6 +182,13 @@ const until = (test, ms, what) => new Promise((resolve, reject) => {
     if (Date.now() - started > ms) { clearInterval(tick); reject(new Error(`timed out waiting for ${what}`)); }
   }, 250)
 })
+
+// SIGINT reaches the Java child too. If it exits before the `finally` below
+// sends `stop`, that write lands on a closed pipe -- and an EPIPE on a stream
+// with no error listener is an uncaught exception, which kills the process
+// before retain() runs. The evidence for a session that went perfectly would
+// be lost at the last step. One listener.
+server.stdin.on('error', () => {})
 
 const send = async (command, settleMs = 4000) => {
   console.log(`\n  > ${command}`)
@@ -228,6 +244,15 @@ try {
     console.log(`\n=== staying up ===`)
     console.log(`  join at   ${PUBLIC ?? `127.0.0.1:${PORT}`}   (Minecraft Java ${runtime.client})`)
     if (PUBLIC) console.log(`  bound to  127.0.0.1:${PORT} — ${PUBLIC} is a tunnel to it`)
+    // Print the posture rather than leaving the operator to assume it. A
+    // server that trusts any username should say so in the same breath as the
+    // address somebody is about to connect to.
+    console.log(OFFLINE
+      ? `  login     AUTHENTICATION OFF (--offline) — bound to 127.0.0.1 only, so only this\n`
+        + '            machine can reach it. Any username is accepted; the UUID is the\n'
+        + '            offline kind, which identifies a client and not a person.'
+      : '  login     Mojang authentication ON — a premium account is required to join')
+    console.log(`  bridge    ${protocolBridge().join(' + ')} — so a client older than 26.3 can connect`)
 
     // Derived from the service's own answer. This line read
     // `/nearcraft link player-1` — the stale token replaced in web/market.html
@@ -289,11 +314,13 @@ async function retain() {
   const what = ran.length > 1
     ? `${ran[0]} and ${ran.slice(1).join(' and ')}`
     : (ran[0] ?? 'A trade')
+  const who = typistNote(text, { offline: OFFLINE })
+
   const record = {
     note: `${what} settled on public NEAR testnet from inside a Minecraft server. `
       + 'Every line below was printed by the NearCraft plugin running on Paper '
-      + `${runtime.artifacts.paper.version} build ${runtime.artifacts.paper.build}; the commands were issued at the `
-      + 'server console, because there is no Minecraft account on the machine that ran this. '
+      + `${runtime.artifacts.paper.version} build ${runtime.artifacts.paper.build}; `
+      + who
       + 'The plugin holds no keys: it calls the play service, which holds the player\'s scoped key.',
     recorded_at: new Date().toISOString(),
     network: 'testnet',
@@ -301,6 +328,12 @@ async function retain() {
     paper: `${runtime.artifacts.paper.version} build ${runtime.artifacts.paper.build}`,
     paper_sha256: runtime.artifacts.paper.sha256,
     java: runtime.java.minimum,
+    // Carried as fields, not only prose, so a reader does not have to parse the
+    // note to learn what the server trusted. mc-bot.mjs already records
+    // online_mode for the same reason.
+    online_mode: !OFFLINE,
+    bound_to: OFFLINE ? `127.0.0.1:${PORT}` : `*:${PORT}`,
+    protocol_bridge: protocolBridge().map((n) => `${n} ${runtime.artifacts[n].version}`),
     player: account ? account[1] : null,
     merchant: settlement[1],
     credit_before_near: credits[0] ?? null,
@@ -316,7 +349,11 @@ async function retain() {
       { hash: m[2], explorer: `https://testnet.nearblocks.io/txns/${m[2]}` },
     ])),
     console_transcript: seen
-      .filter((l) => /NearCraft|selftest|signed in|credit |holds |settled on NEAR|balance moved|asks | bought /.test(l))
+      // Paper's own join and command lines are kept too. Without them a
+      // human-played transcript showed the plugin's replies with nothing to
+      // say who had caused them, which is the one thing a console run never
+      // needed to prove.
+      .filter((l) => /NearCraft|selftest|signed in|credit |holds |settled on NEAR|balance moved|asks | bought |issued server command|joined the game|logged in with entity id|UUID of player/.test(l))
       .map((l) => l.replace(/^\[[^\]]*\]:?\s*/, '').trimEnd()),
   }
   const file = `minecraft-${hash}.json`

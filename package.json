@@ -16,7 +16,7 @@
     "sim": "cargo test --manifest-path contracts/Cargo.toml -p nearcraft-integration --test simulation -- --nocapture",
     "verify:baseline": "node scripts/verify-baseline.mjs",
     "test": "npm run test:contracts && npm run test:near && npm run verify:baseline && npm run --silent mc:test -- --optional && npm run --silent check:java-wiring && npm run check:docs",
-    "test:near": "node --test tests/near/policy.mjs tests/near/injection.mjs tests/near/market.mjs tests/near/counterparty.mjs tests/near/human-approval.mjs tests/near/onboarding.mjs tests/near/relayer.mjs tests/near/signer-scope.mjs tests/near/web.mjs tests/near/oidc.mjs tests/near/play.mjs tests/near/deployment.mjs --test tests/near/oidc-runtime.mjs",
+    "test:near": "node --test tests/near/policy.mjs tests/near/injection.mjs tests/near/market.mjs tests/near/counterparty.mjs tests/near/human-approval.mjs tests/near/onboarding.mjs tests/near/relayer.mjs tests/near/signer-scope.mjs tests/near/web.mjs tests/near/oidc.mjs tests/near/play.mjs tests/near/deployment.mjs tests/near/minecraft.mjs --test tests/near/oidc-runtime.mjs",
     "check:nep245": "node scripts/check-nep245.mjs",
     "test:sandbox": "cargo test --manifest-path contracts/Cargo.toml -p nearcraft-integration --test smoke --test views --test keys --test economy --test migration",
     "evidence": "node scripts/capture-evidence.mjs",

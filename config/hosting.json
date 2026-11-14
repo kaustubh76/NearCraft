@@ -14,8 +14,13 @@
     "can_onboard": false,
     "keys_held": [
       "relayer.nearcraftmc.testnet",
-      "p-62b0b2438ca03ae4.nearcraftmc.testnet#scoped"
+      "p-78f47c3a4790c8d8.nearcraftmc.testnet#scoped",
+      "p-5d509cc30d941c6a.nearcraftmc.testnet#scoped",
+      "p-1c59f6c2a86bffae.nearcraftmc.testnet#scoped",
+      "p-19ff5e8c0f2efbc9.nearcraftmc.testnet#scoped",
+      "p-7b1d6bbacf2fdb5e.nearcraftmc.testnet#scoped"
     ],
+    "keys_held_note": "The relayer (full-access, because a SignedDelegate is not a function call) plus one scoped key per pre-funded pool player, which is what scripts/build-render-secret.mjs ships. This field used to name a single legacy player that is not in the pool; nothing reads it, which is why it went stale.",
     "keys_withheld": "the root account, the items/market/guard contract accounts, every merchant and every agent"
   },
   "minecraft": {

@@ -183,6 +183,19 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
         long fullAccess = Json.number(response.body, "fullAccessKeys", -1);
         sender.sendMessage(GREEN + "signed in as " + AQUA + session.accountId
             + GREY + (created ? " (account created for you)" : ""));
+        // WHY THIS IS LOGGED AND NOT ONLY SENT.
+        //
+        // A reply to a PLAYER goes to their chat and nowhere else. The server's
+        // stdout is the only thing scripts/mc-server.mjs can scrape into
+        // evidence/live/, so a session a human actually played left NO record
+        // at all -- the three records already committed here were console runs,
+        // where the console IS stdout and sendMessage was enough.
+        //
+        // Gated on the sender being a player precisely so a console run does
+        // not ALSO log: retain() counts settlements with matchAll, and a
+        // doubled line would read as two trades for one command and mis-key
+        // transactions.sell against transactions.buy.
+        if (sender instanceof Player) getLogger().info("signed in as " + session.accountId);
         sender.sendMessage(GREY + "  verifier " + WHITE + Json.text(response.body, "verifier", "?")
             + GREY + "   key may call " + WHITE + String.join(", ", session.permittedMethods));
         if (fullAccess == 0) {
@@ -227,6 +240,7 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
         }
         sessions.link(who, session);
         sender.sendMessage(GREEN + "signed in as " + AQUA + session.accountId);
+        if (sender instanceof Player) getLogger().info("signed in as " + session.accountId);
         sender.sendMessage(GREY + "  verifier " + WHITE + Json.text(response.body, "verifier", "?")
             + GREY + "   key may call " + WHITE + String.join(", ", session.permittedMethods));
         if (Json.number(response.body, "fullAccessKeys", -1) == 0) {
@@ -457,6 +471,13 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
             + GREY + "  tx " + WHITE + hash);
         sender.sendMessage(GREY + "  your NEAR balance moved by " + WHITE + Amounts.near(delta)
             + GREY + ("0".equals(delta) ? " - the relayer paid the gas" : ""));
+        // Two statements, worded exactly as the console's own two lines are, so
+        // retain() scrapes a human-played session and a console run through the
+        // same regexes and the three records already on disk stay comparable.
+        if (player != null) {
+          getLogger().info("settled on NEAR with " + shown + "  tx " + hash);
+          getLogger().info("your NEAR balance moved by " + Amounts.near(delta));
+        }
         if (player == null) sender.sendMessage(GREY + "  (console: chain only, no inventory to move)");
       });
     });
@@ -640,6 +661,10 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
         String delta = Json.text(response.body, "playerNearDelta", "0");
         sender.sendMessage(GREEN + "staked " + Amounts.nearWithUnit(stake) + GREY + " in " + WHITE + merchantId);
         sender.sendMessage(GREY + "  tx " + WHITE + Json.text(response.body, "hash", "?"));
+        if (sender instanceof Player) {
+          getLogger().info("staked " + Amounts.nearWithUnit(stake) + " in " + merchantId
+              + "  tx " + Json.text(response.body, "hash", "?"));
+        }
         sender.sendMessage(GREY + "  your NEAR balance moved by " + WHITE + Amounts.near(delta)
             + GREY + ("0".equals(delta) ? " - the relayer paid the gas" : ""));
         // The contract repays a backer out of half of every later sale's
@@ -665,6 +690,9 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
         sender.sendMessage(GOLD + Json.text(response.body, "accountId", session.accountId));
         sender.sendMessage(GREY + "  credit " + WHITE + Amounts.nearWithUnit(Json.text(response.body, "credit", "0"))
             + GREY + " of spend budget, set by the market contract");
+        if (sender instanceof Player) {
+          getLogger().info("credit " + Amounts.nearWithUnit(Json.text(response.body, "credit", "0")));
+        }
         sender.sendMessage(GREY + "  NEAR   " + WHITE + Amounts.nearWithUnit(Json.text(response.body, "near", "0"))
             + GREY + " - gas is never taken from this");
         Object holdings = response.body.get("holdings");
@@ -673,6 +701,7 @@ public final class NearCraftPlugin extends JavaPlugin implements Listener {
           for (Map.Entry<String, Object> e : Json.asObject(holdings).entrySet()) {
             if ("0".equals(String.valueOf(e.getValue()))) continue;
             sender.sendMessage(GREY + "  holds  " + WHITE + e.getValue() + " " + e.getKey());
+            if (sender instanceof Player) getLogger().info("holds  " + e.getValue() + " " + e.getKey());
             shown++;
           }
         }
