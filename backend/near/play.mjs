@@ -73,7 +73,6 @@ const STATUS = {
   // request was understood and is not permitted.
   // A demo that ran out of demo accounts is a deployment limit, not a bad
   // request, and not something the caller can fix by changing their request.
-  POOL_EXHAUSTED: 503,
   NO_AGENT_KEYS: 503,
   UNKNOWN_AGENT: 400,
   NO_AGENT_KEY: 503,
@@ -225,14 +224,42 @@ export function createPlayService({
   /// service.
   const LINK_MAX_FAILURES = 10
 
+  // [] is truthy, so an empty pool array took the pool path, found no slot and
+  // -- once the refusal above became a derivation -- indexed into nothing,
+  // handing a visitor `undefined` as an account id for the signer to fail on.
+  // A misconfiguration belongs at the place it is configured.
+  if (pool && pool.length === 0) {
+    throw new Error('createPlayService was given an empty pool. Pass null for no pool, or at '
+      + 'least one pre-funded account id this process holds a key for.')
+  }
+
   /// identity hash -> the pool account it holds. In-process, like `sessions`:
   /// persisting it would mean a store, and a restart reshuffling who gets which
   /// demo account is cosmetic rather than a correctness problem.
   const poolAssignments = new Map()
 
+  /// The verifier's own refusal code, or the generic one as a fallback so
+  /// nothing depends on a new code existing.
+  ///
+  /// Used by BOTH sign-in paths, and it has to be. The deriving path refuses
+  /// inside `signIn`; the pool path refuses inside `identify`, which is called
+  /// from somewhere else entirely. While only the first path mapped this, a
+  /// POOLED deployment collapsed twenty distinct refusals back into one --
+  /// exactly what `an identity refusal keeps the code the verifier gave it`
+  /// was written to prevent, on a path that test did not walk. Running that
+  /// same table in pool mode is what found it.
+  function identityRefusal(e) {
+    return new PlayRefusal(e?.identityCode ?? 'IDENTITY_REJECTED', e?.detail ?? e?.message ?? String(e))
+  }
+
   /// Give this identity its own account out of the pool, or the same one again.
   async function assignFromPool(token) {
-    const identity = await onboarding.identify(token)
+    let identity
+    try {
+      identity = await onboarding.identify(token)
+    } catch (e) {
+      throw identityRefusal(e)
+    }
     // The key is the account id this identity WOULD have derived — a one-way
     // hash of provider and subject that onboarding already computes. So nothing
     // here stores a raw subject, which is the same property the derived-account
@@ -243,16 +270,41 @@ export function createPlayService({
 
     const taken = new Set(poolAssignments.values())
     const free = pool.find((id) => !taken.has(id))
-    if (!free) {
-      throw new PlayRefusal(
-        'POOL_EXHAUSTED',
-        `all ${pool.length} demo players are in use. This deployment hands out pre-funded ` +
-        'accounts rather than creating them, because creating one needs a key that would ' +
-        'make this endpoint a faucet. Run it locally with `npm run play` to onboard your own.',
-      )
+    if (free) {
+      poolAssignments.set(key, free)
+      return { accountId: free, created: false, pooled: true }
     }
-    poolAssignments.set(key, free)
-    return { accountId: free, created: false, pooled: true }
+
+    // Out of exclusive slots. This used to refuse, and refusing was right
+    // while the alternative was handing over somebody else's credit in
+    // silence. It is the wrong trade for a URL a judge opens once: the worst
+    // outcome is not two people sharing a demo wallet, it is the demo being
+    // closed when they look at it. And the ceiling was not distant -- the live
+    // pool read 1 of 5 free with only a check and one visitor having used it.
+    //
+    // So the visitor gets an account DERIVED from their identity instead of
+    // taken from a list. That needs no slot to be free, so there is no arrival
+    // this cannot serve; it is stable, so a returning visitor lands on the
+    // same account even across a restart, because nothing was stored to lose;
+    // and it is reported, so nobody reads another player's credit as their own.
+    //
+    // Deliberately NOT stored in poolAssignments: `free` above must keep
+    // meaning "nobody holds this alone", and health's count of what is left
+    // must not be moved by a visitor who took nothing.
+    return { accountId: pool[spread(key) % pool.length], created: false, pooled: true, shared: true }
+  }
+
+  /// A stable index for a string. FNV-1a, over the whole key rather than a
+  /// slice of it: the key is a derived account id today, but that derivation
+  /// has already changed width once in this repository, and a hash that read
+  /// fixed hex digits would have silently stopped spreading when it did.
+  function spread(key) {
+    let h = 0x811c9dc5
+    for (let i = 0; i < key.length; i += 1) {
+      h ^= key.charCodeAt(i)
+      h = Math.imul(h, 0x01000193) >>> 0
+    }
+    return h
   }
 
   const linkCodes = new Map()
@@ -434,7 +486,7 @@ export function createPlayService({
             // Surface the specific refusal when the verifier gave one. The
             // generic code remains the fallback, so nothing depends on a new
             // one existing.
-            throw new PlayRefusal(e?.identityCode ?? 'IDENTITY_REJECTED', e?.detail ?? e?.message ?? String(e))
+            throw identityRefusal(e)
           }
 
           const accountId = result.accountId
@@ -479,6 +531,10 @@ export function createPlayService({
             verifier: verifierKind,
             permittedMethods: scoped?.methodNames ?? [],
             fullAccessKeys: limits.filter((k) => k.fullAccess).length,
+            // Present only when it is true. A visitor on a shared demo account
+            // has to know, or they read another player's credit as their own
+            // and a trade they did not make as a bug.
+            ...(result.shared ? { shared: true } : {}),
             // Present only on the run that CREATED the account, because only
             // that run had anything to send. A caller retaining evidence needs
             // somewhere an explorer can be pointed at; a returning player has

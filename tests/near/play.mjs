@@ -404,25 +404,37 @@ test('an underfunded root is reported as such, in the words nearcore actually us
   }
 })
 
-test('an identity refusal keeps the code the verifier gave it', async () => {
+test('an identity refusal keeps the code the verifier gave it, pool or no pool', async () => {
   // Twenty distinct refusals used to arrive as one. A caller cannot tell
   // "your token expired, sign in again" from "the provider is unreachable"
   // unless the code survives the trip.
-  for (const [code, status] of [['TOKEN_EXPIRED', 401], ['WRONG_AUDIENCE', 401], ['JWKS_UNREACHABLE', 502]]) {
-    const { svc } = build({
-      onboarding: {
-        signIn: async () => {
-          const e = new Error(`${code}: whatever the verifier said`)
-          e.code = 'IDENTITY_REJECTED'
-          e.identityCode = code
-          e.detail = 'the verifier detail'
-          throw e
-        },
-      },
-    })
-    const res = await svc.handle('POST', '/api/session', { token: 'x' })
-    refuses(res, code, status)
-    assert.equal(res.body.detail, 'the verifier detail')
+  //
+  // Run in BOTH modes, which is the half that was missing. The two modes
+  // refuse an identity in different functions -- `signIn` when the account is
+  // derived, `identify` when it comes from the pool -- and only the first was
+  // mapped. So this table passed while a pooled deployment, the one actually
+  // hosted, flattened every code back to IDENTITY_REJECTED. A table that
+  // covers the codes but not the paths covers one path.
+  for (const pool of [null, ['pool-1.x.testnet']]) {
+    for (const [code, status] of [['TOKEN_EXPIRED', 401], ['WRONG_AUDIENCE', 401], ['JWKS_UNREACHABLE', 502]]) {
+      const refuse = async () => {
+        const e = new Error(`${code}: whatever the verifier said`)
+        e.code = 'IDENTITY_REJECTED'
+        e.identityCode = code
+        e.detail = 'the verifier detail'
+        throw e
+      }
+      const { svc } = build({
+        ...(pool ? { pool, keys: { 'pool-1.x.testnet#scoped': 'ed25519:k' } } : {}),
+        // Whichever one this mode reaches first.
+        onboarding: { signIn: refuse, identify: refuse },
+      })
+      const res = await svc.handle('POST', '/api/session', { token: 'x' })
+      const where = pool ? 'pool mode' : 'deriving mode'
+      assert.equal(res.body.error, code, `${where}: expected ${code}, got ${res.body.error}`)
+      assert.equal(res.status, status, `${where}: expected ${status}, got ${res.status}`)
+      assert.equal(res.body.detail, 'the verifier detail', where)
+    }
   }
 })
 
@@ -693,16 +705,64 @@ test('a visitor who comes back gets the account they already had', async () => {
   assert.notEqual(again.sessionId, first.sessionId)
 })
 
-test('an exhausted pool refuses rather than sharing an account', async () => {
-  // The important half. Handing a fourth visitor somebody else's account would
-  // let them spend that player's credit, which is exactly what the pool exists
-  // to prevent.
+test('a pool that runs out shares an account rather than turning a visitor away', async () => {
+  // This test replaces one that asserted the exact opposite, and the reversal
+  // is deliberate rather than a loosened bar.
+  //
+  // Refusing was right while the only alternative was silently handing over
+  // somebody else's credit. It is wrong for a URL a judge opens once: the
+  // worst outcome is not "two people shared a demo wallet", it is "the demo
+  // was closed when I looked at it". The live pool reached 1 of 5 free with
+  // nobody but a check and one visitor having used it, so the refusal was not
+  // a distant edge — it was one arrival away.
+  //
+  // The share is DERIVED from the identity rather than taken from a list, so
+  // it needs no slot to be free, and the visitor is told.
   const { svc } = build({ pool: POOL, keys: poolKeys })
   for (const who of ['a', 'b', 'c']) assert.ok((await sessionFor(svc, who)).accountId)
   const res = await svc.handle('POST', '/api/session', { token: 'd' })
-  refuses(res, 'POOL_EXHAUSTED', 503)
-  assert.match(res.body.detail, /3 demo players/)
-  assert.match(res.body.detail, /npm run play/, 'it must say how to get an account of your own')
+  assert.equal(res.status, 200, `a fourth visitor was turned away: ${JSON.stringify(res.body)}`)
+  assert.ok(POOL.includes(res.body.accountId), `${res.body.accountId} is not from the pool`)
+  assert.equal(res.body.shared, true,
+    'a visitor on a shared account was not told — they would read another player\'s credit as their own')
+})
+
+test('a shared account is the same one whenever that visitor returns, restart or not', async () => {
+  // Derived, not remembered: nothing is stored for a sharing visitor, so a
+  // free instance waking from sleep cannot move them onto a different
+  // player's account mid-demo.
+  const first = build({ pool: POOL, keys: poolKeys }).svc
+  for (const who of ['a', 'b', 'c']) await sessionFor(first, who)
+  const got = await sessionFor(first, 'd')
+  assert.equal((await sessionFor(first, 'd')).accountId, got.accountId)
+
+  const afterRestart = build({ pool: POOL, keys: poolKeys }).svc
+  for (const who of ['a', 'b', 'c']) await sessionFor(afterRestart, who)
+  assert.equal((await sessionFor(afterRestart, 'd')).accountId, got.accountId,
+    'a restart moved a sharing visitor onto a different account')
+})
+
+test('sharing never displaces a visitor who holds an account of their own', async () => {
+  // The property the pool exists for, and the one sharing could plausibly
+  // break: an exclusive holder must keep their account and must not be told
+  // they are sharing when they are not.
+  const { svc } = build({ pool: POOL, keys: poolKeys })
+  const held = {}
+  for (const who of ['a', 'b', 'c']) held[who] = (await sessionFor(svc, who)).accountId
+  for (const who of ['d', 'e', 'f', 'g', 'h']) assert.ok((await sessionFor(svc, who)).accountId)
+  for (const who of ['a', 'b', 'c']) {
+    const back = await sessionFor(svc, who)
+    assert.equal(back.accountId, held[who], `${who} lost the account they were given`)
+    assert.equal(back.shared, undefined, `${who} holds an account alone and was told they share it`)
+  }
+})
+
+test('a pool configured empty is refused at boot, not at a visitor', () => {
+  // [] is truthy, so an empty pool took the pool path, found no slot and —
+  // once refusing was gone — indexed into nothing. A visitor would have been
+  // handed `undefined` as an account id and the signer would have failed on
+  // it. A misconfiguration should fail where it is configured.
+  assert.throws(() => build({ pool: [], keys: poolKeys }), /empty/i)
 })
 
 test('health says how many pre-funded players are left', async () => {
@@ -738,9 +798,11 @@ test('a refused identity is still an identity refusal, not a pool problem', asyn
     },
   })
   const res = await svc.handle('POST', '/api/session', { token: 'stale' })
-  // Whatever code it carries, it must not be POOL_EXHAUSTED: telling a visitor
-  // the demo is full when their token was simply bad sends them away for the
-  // wrong reason.
-  assert.notEqual(res.body.error, 'POOL_EXHAUSTED')
-  assert.equal(res.status >= 400, true)
+  // The old form of this asserted the code was not POOL_EXHAUSTED. That code
+  // no longer exists anywhere in the service, so the assertion had quietly
+  // become one that cannot fail. Assert what it must be instead: a bad token
+  // is the identity's problem, and a visitor must not be told the demo is
+  // full -- or that they are sharing -- when their login was simply stale.
+  refuses(res, 'TOKEN_EXPIRED', 401)
+  assert.equal(res.body.accountId, undefined, 'a refused identity was still handed an account')
 })

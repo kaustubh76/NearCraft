@@ -156,7 +156,7 @@ function quoteTable(item, rows, canTrade) {
 // The panel below appears only when an API is actually behind this page
 // (`npm run play`). Under `npm run web` the probe fails and the page is exactly
 // what it has always been: read-only, credential-free, no buttons that lie.
-const PLAY = { health: null, sessionId: null, accountId: null, nearAtSignIn: null, refresh: null };
+const PLAY = { health: null, sessionId: null, accountId: null, nearAtSignIn: null, refresh: null, shared: false };
 
 async function api(method, path, body) {
   // The session id goes in a header, never in the URL. A query string is
@@ -250,6 +250,11 @@ function renderPlay(msg) {
       [moved === null ? '—' : (moved < 0n ? '-' : '') + near(moved < 0n ? -moved : moved), 'NEAR you have spent on gas'],
     ]) +
     '<p class="note"><code>' + esc(PLAY.accountId) + '</code> &mdash; holding ' + esc(held) + '. ' +
+    (PLAY.shared
+      ? '<span class="reason">Every pre-funded player was already taken, so this one is SHARED: ' +
+        'credit and holdings here may move because somebody else is playing it too. Everything you ' +
+        'do is still a real transaction on public testnet.</span> '
+      : '') +
     'Your key may call <code>' + esc((me.permittedMethods || []).join(', ')) + '</code> on one contract and ' +
     'nothing else; it cannot transfer NEAR and cannot add another key. That is the runtime enforcing it, ' +
     'not this page. ' +
@@ -287,6 +292,10 @@ async function signIn() {
     const out = await api('POST', '/api/session', { token });
     PLAY.sessionId = out.sessionId;
     PLAY.accountId = out.accountId;
+    // The service sends this only when it is true. A visitor who is sharing a
+    // demo account has to be told, or the next thing they see is credit they
+    // did not spend and a holding they did not buy.
+    PLAY.shared = Boolean(out.shared);
     PLAY.me = await api('GET', '/api/me');
     PLAY.nearAtSignIn = PLAY.me.near;
     renderPlay();
