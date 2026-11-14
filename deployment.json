@@ -81,6 +81,51 @@
       ],
       "function_call_public_key": "ed25519:69tLBGBhuXTHU4mccA6EKfi7aieyC2GhFLffU1Gjpuus",
       "note": "Onboarded under the previous 32-bit account derivation. Still a real player with a real scoped key, and kept here so npm run keys keeps auditing it; the derivation is 64 bits now, so the same login derives a longer id. See backend/near/onboarding.mjs."
+    },
+    {
+      "account_id": "p-78f47c3a4790c8d8.nearcraftmc.testnet",
+      "permitted_methods": [
+        "buy_with_credit",
+        "sell",
+        "invest_with_credit"
+      ],
+      "function_call_public_key": "ed25519:tL3va6iQt2qbH8cKgtyr6L4REjdwVn3b6RrHeRUomq4"
+    },
+    {
+      "account_id": "p-5d509cc30d941c6a.nearcraftmc.testnet",
+      "permitted_methods": [
+        "buy_with_credit",
+        "sell",
+        "invest_with_credit"
+      ],
+      "function_call_public_key": "ed25519:CHkn8VbfTKqzHKzMRAUSZDopM6R1vWsqUJ2oy2MBdJmJ"
+    },
+    {
+      "account_id": "p-1c59f6c2a86bffae.nearcraftmc.testnet",
+      "permitted_methods": [
+        "buy_with_credit",
+        "sell",
+        "invest_with_credit"
+      ],
+      "function_call_public_key": "ed25519:DTmg8LgiF6YgoFLFdeU77vd4GAR7vnY3kri683cDFmqs"
+    },
+    {
+      "account_id": "p-19ff5e8c0f2efbc9.nearcraftmc.testnet",
+      "permitted_methods": [
+        "buy_with_credit",
+        "sell",
+        "invest_with_credit"
+      ],
+      "function_call_public_key": "ed25519:AhWkmUFAwXSee2Y8RVyVHvBjmGFi7AwYB8nzBfvmPZb5"
+    },
+    {
+      "account_id": "p-7b1d6bbacf2fdb5e.nearcraftmc.testnet",
+      "permitted_methods": [
+        "buy_with_credit",
+        "sell",
+        "invest_with_credit"
+      ],
+      "function_call_public_key": "ed25519:C3QPc7uZezgoRrRcKg9GBiADVUsZgtA8g9YHBGXfuexJ"
     }
   ],
   "relayer": {

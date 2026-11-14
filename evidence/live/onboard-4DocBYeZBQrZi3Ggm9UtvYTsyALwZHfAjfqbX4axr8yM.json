@@ -1,0 +1,106 @@
+{
+  "note": "A login became a brand-new NEAR account on public testnet. Three transactions: create and fund with a temporary full-access key; grant the market its NEP-245 pull rights while that key still exists; then install a function-call key and DELETE the full-access one in the same transaction. The player never saw a key, and after this no full-access key for the account exists anywhere — which is what makes \"no seed phrase\" a fact rather than a slogan.",
+  "recorded_at": "2026-11-14T09:30:28.568Z",
+  "network": "testnet",
+  "rpc": "https://test.rpc.fastnear.com",
+  "login": {
+    "kind": "seed",
+    "subject": "pool-2",
+    "provider": "seed"
+  },
+  "root": "nearcraftmc.testnet",
+  "account": "p-5d509cc30d941c6a.nearcraftmc.testnet",
+  "explorer": "https://testnet.nearblocks.io/address/p-5d509cc30d941c6a.nearcraftmc.testnet",
+  "transactions": {
+    "created": {
+      "hash": "4DocBYeZBQrZi3Ggm9UtvYTsyALwZHfAjfqbX4axr8yM",
+      "explorer": "https://testnet.nearblocks.io/txns/4DocBYeZBQrZi3Ggm9UtvYTsyALwZHfAjfqbX4axr8yM"
+    },
+    "restricted": {
+      "hash": "HZ7PoXkPQU2n7NW9WQw117rWmP7qZm44miprbnBmHDUR",
+      "explorer": "https://testnet.nearblocks.io/txns/HZ7PoXkPQU2n7NW9WQw117rWmP7qZm44miprbnBmHDUR"
+    }
+  },
+  "approval_transaction_note": "step 2 sends no hash back: callFunction returns the contract value, not an outcome. The approval is proven by reading it back with mt_token_approval instead.",
+  "read_back_from_chain": {
+    "full_access_keys": 0,
+    "function_call_keys": 1,
+    "receiver_id": "market.nearcraftmc.testnet",
+    "method_names": [
+      "buy_with_credit",
+      "invest_with_credit",
+      "sell"
+    ],
+    "catalog_methods": [
+      "buy_with_credit",
+      "invest_with_credit",
+      "sell"
+    ],
+    "approvals": {
+      "iron_ingot": true,
+      "oak_log": true,
+      "stone": true,
+      "glass": true,
+      "coal": true,
+      "copper_ingot": true,
+      "oak_planks": true,
+      "redstone": true
+    }
+  },
+  "root_near_before": "1619611854422470700000000",
+  "root_near_after": "1512496864884970700000000",
+  "root_near_spent": "107114989537500000000000",
+  "credit_after_yocto": "40000000000000000000000",
+  "checks": [
+    {
+      "what": "the account does not exist yet",
+      "ok": true,
+      "detail": "p-5d509cc30d941c6a.nearcraftmc.testnet"
+    },
+    {
+      "what": "the account was CREATED by this run, not reused",
+      "ok": true,
+      "detail": "created=true"
+    },
+    {
+      "what": "it landed where the derivation said it would",
+      "ok": true,
+      "detail": "p-5d509cc30d941c6a.nearcraftmc.testnet"
+    },
+    {
+      "what": "it holds ZERO full-access keys — no seed phrase exists",
+      "ok": true,
+      "detail": "0 full-access"
+    },
+    {
+      "what": "it holds exactly one function-call key",
+      "ok": true,
+      "detail": "1 scoped"
+    },
+    {
+      "what": "that key can only reach the market",
+      "ok": true,
+      "detail": "market.nearcraftmc.testnet"
+    },
+    {
+      "what": "it grants exactly the methods the catalog lists",
+      "ok": true,
+      "detail": "[buy_with_credit,invest_with_credit,sell] vs catalog [buy_with_credit,invest_with_credit,sell]"
+    },
+    {
+      "what": "the market may pull every sellable material",
+      "ok": true,
+      "detail": "8/8 approved"
+    },
+    {
+      "what": "root actually paid for it",
+      "ok": true,
+      "detail": "0.1071150 NEAR"
+    },
+    {
+      "what": "the new player can afford to trade",
+      "ok": true,
+      "detail": "0.0400000 NEAR"
+    }
+  ]
+}

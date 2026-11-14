@@ -52,7 +52,26 @@ if (!account) {
   console.error('\n  No player to top up. Pass --account <id>.\n')
   process.exit(1)
 }
-const fromKey = keys[fromId]
+/// The root account's key lives in its own file, not the shared one.
+///
+/// scripts/serve-play.mjs has always read `.local/nearcraftmc-root.json` as a
+/// fallback; this did not, so `--from <root>` failed with "no key" while the key
+/// was sitting right there. It matters because root is the only account with
+/// enough NEAR to fund a pool of players, and the workers hold about 0.1 NEAR
+/// between them.
+///
+/// Only when the funder IS the manifest's root, and only when the file agrees
+/// about which account it is for — the same check serve-play.mjs makes, because
+/// signing with the wrong account is worse than refusing.
+async function rootKeyFor(accountId) {
+  if (accountId !== (manifest.root ?? rootAccountId())) return null
+  try {
+    const file = JSON.parse(await readFile(new URL('../.local/nearcraftmc-root.json', import.meta.url), 'utf8'))
+    return file?.account_id === accountId ? file.private_key : null
+  } catch { return null }
+}
+
+const fromKey = keys[fromId] ?? await rootKeyFor(fromId)
 if (!fromKey) {
   console.error(`\n  No key for ${fromId} in .local/nearcraft-keys.json.`)
   console.error(`  Available: ${Object.keys(keys).filter((k) => !k.includes('#')).join(', ')}\n`)
