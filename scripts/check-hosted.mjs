@@ -125,19 +125,31 @@ if (health.status !== 200 || h === null) {
 /// Prove the faucet is shut by trying to use it, not by reading a flag. A random
 /// subject has certainly never been onboarded, so this is the exact request an
 /// abuser would send.
-const subject = `check-hosted-${Math.random().toString(36).slice(2)}`
-const session = await hit(`${PLAY_URL}/api/session`, {
-  method: 'POST', redirect: 'follow',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ token: subject }),
-})
-const refusal = session.json()
-if (session.status === 200) {
-  bad('A STRANGER WAS ONBOARDED', `it created ${refusal?.accountId} and funded it from root`)
-} else if (refusal?.error === 'ONBOARDING_MISCONFIGURED') {
-  ok('an unknown identity is refused, not funded', `HTTP ${session.status} ${refusal.error}`)
+///
+/// Sent ONLY when /api/health has already said canOnboard is false. Against an
+/// instance that can onboard, this request is not a test — it is the attack: it
+/// creates an account and moves 0.11 NEAR out of the root account, and running
+/// the check twice would spend it twice. A check that damages what it is
+/// inspecting is worse than no check, so when the flag says the capability is
+/// there, this reports that and sends nothing.
+if (h?.canOnboard !== false) {
+  bad('not probing the faucet: this instance says it CAN onboard',
+    'sending the probe would create an account and spend root balance — fix canOnboard first')
 } else {
-  bad('refused for an unexpected reason', `HTTP ${session.status} ${refusal?.error ?? session.text.slice(0, 80)}`)
+  const subject = `check-hosted-${Math.random().toString(36).slice(2)}`
+  const session = await hit(`${PLAY_URL}/api/session`, {
+    method: 'POST', redirect: 'follow',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: subject }),
+  })
+  const refusal = session.json()
+  if (session.status === 200) {
+    bad('A STRANGER WAS ONBOARDED', `it created ${refusal?.accountId} and funded it from root`)
+  } else if (refusal?.error === 'ONBOARDING_MISCONFIGURED') {
+    ok('an unknown identity is refused, not funded', `HTTP ${session.status} ${refusal.error}`)
+  } else {
+    bad('refused for an unexpected reason', `HTTP ${session.status} ${refusal?.error ?? session.text.slice(0, 80)}`)
+  }
 }
 
 // ------------------------------------------------------------- and the proxy

@@ -1,0 +1,55 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.55s
+     Running tests/keys.rs (target/debug/deps/keys-f7beca6d63ac283d)
+
+running 4 tests
+
+--- the key, as the protocol reports it ---
+FunctionCall(
+    FunctionCallPermission {
+        allowance: Some(
+            NearToken {
+                inner: 2000000000000000000000000,
+            },
+        ),
+        receiver_id: "market.dev-20261114054908-51829577870019.test.near",
+        method_names: [
+            "buy_with_credit",
+        ],
+    },
+)
+
+--- the permitted call ---
+  buy_with_credit(8 iron_ingot)  ALLOWED
+  shelf 256 -> 248, agent now holds 8 iron_ingot
+  budget spent: 3200000000000000000000000 yoctoNEAR
+
+--- every other method, same contract, same key ---
+
+--- allowance below one call's prepaid gas ---
+  allowance 0.05 NEAR, call needs ~0.2 NEAR of headroom
+  rejected: InvalidAccessKeyError(NotEnoughAllowance { account_id: AccountId("worker-4.dev-20261114054908-79229358480710.test.near")
+  spend budget untouched — the call never executed
+
+test an_allowance_below_one_call_makes_the_key_unusable ... ok
+
+budget 0.9 NEAR bought 2 iron_ingot; 97600000000000000000000 yoctoNEAR left unspent
+test the_spend_budget_binds_even_with_a_valid_key ... ok
+
+mt_transfer on the items contract REFUSED (rejected: InvalidAccessKeyError(DepositWithFunctionCall)])
+
+test a_scoped_key_cannot_reach_a_different_contract ... ok
+  withdraw           REFUSED  (rejected: InvalidAccessKeyError(MethodNameMismatch { method_name: "withdraw" })])
+  withdraw_treasury  REFUSED  (rejected: InvalidAccessKeyError(MethodNameMismatch { method_name: "withdraw_treasury" })])
+  register_merchant  REFUSED  (rejected: InvalidAccessKeyError(MethodNameMismatch { method_name: "register_merchant" })])
+  fund_credit        REFUSED  (rejected: InvalidAccessKeyError(MethodNameMismatch { method_name: "fund_credit" })])
+  list_item          REFUSED  (rejected: InvalidAccessKeyError(MethodNameMismatch { method_name: "list_item" })])
+  buy                REFUSED  (rejected: InvalidAccessKeyError(MethodNameMismatch { method_name: "buy" })])
+
+--- value transfer with the same key ---
+  transfer 1 NEAR    REFUSED  (rejected: InvalidAccessKeyError(RequiresFullAccess)])
+  add full-access key REFUSED  (rejected: InvalidAccessKeyError(RequiresFullAccess)])
+
+test a_function_call_key_can_buy_and_can_do_nothing_else ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 31.41s
+

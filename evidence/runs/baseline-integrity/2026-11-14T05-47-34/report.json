@@ -1,0 +1,12 @@
+{
+  "topic": "baseline-integrity",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 410,
+  "command": "npm run --silent verify:baseline",
+  "cwd": ".",
+  "proves": "11 vendored baseline files are byte-identical to their recorded SHA-256, AND no file sits in backend/baseline/ without being recorded. Checked in both directions, because iterating the manifest alone can only catch a recorded file that changed, never an unrecorded one that appeared. An empty manifest is a failure rather than a vacuous pass. This is what makes the eligibility disclosure checkable rather than a promise.",
+  "output_sha256": "99af85e9d45672c53476e3128e88891890366a73a9bd892c29c50abe9da001a3",
+  "output_bytes": 738,
+  "recorded_at": "2026-11-14T05:48:57.653Z"
+}
