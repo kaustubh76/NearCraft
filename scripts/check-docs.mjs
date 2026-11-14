@@ -332,6 +332,34 @@ if (await exists('minecraft/')) {
 
 const readmeText = await readFile(new URL('README.md', ROOT), 'utf8')
 
+const DOC_TEXT = new Map()
+for (const doc of DOCS) DOC_TEXT.set(doc, await readFile(new URL(doc, ROOT), 'utf8'))
+
+/// Is this match inside a double-quoted span on its own line?
+///
+/// The same escape hatch rule 5 uses for denials, narrowed to quotation. This
+/// repository quotes its own past mistakes on purpose — AGENTS.md's catalogue of
+/// recurring defects contains the sentence `check:nep245` reported
+/// "Approval Management 5/5" while the spec defines six — and a count being
+/// REPORTED is not a count being ASSERTED. Without this, the first thing
+/// scanning every document achieved was to fail on the write-up of the bug it
+/// was scanning for.
+///
+/// Deliberately line-local and quote-delimited rather than a keyword list: a
+/// heuristic looking for "said" or "used to" would exempt live claims written
+/// in the past tense.
+function isQuotation(text, index) {
+  const start = text.lastIndexOf('\n', index) + 1
+  let end = text.indexOf('\n', index)
+  if (end === -1) end = text.length
+  const before = text.slice(start, index)
+  const after = text.slice(index, end)
+  // An odd number of quotes before AND at least one after means the match sits
+  // between an opening quote and its closing one.
+  return (before.split('"').length - 1) % 2 === 1 && after.includes('"')
+}
+
+
 // 8a. The commit the README tells a verifier to check out.
 //
 // It said `git checkout 4da447eb…` for three deployments after that commit had
@@ -519,28 +547,136 @@ try {
   if (!/ENOENT/.test(e?.message ?? '')) fail('plugin.yml', `could not be read: ${e.message}`)
 }
 
+// 8f. One track list.
+//
+// README.md's second sentence said the tracks entered were `games`, `security`
+// and `swarms`. Eight other places said two — including README.md:53 ("Not
+// built, and that track is not entered"), README.md:1029, AGENTS.md:169
+// ("Do not enter a track whose requirements are unmet"), BASELINE.md and
+// RULES.md — and the "How the tracks are addressed" table the header introduces
+// has no `swarms` row at all. RETIRED_CLAIMS even encodes "the swarms track is
+// not entered" as an invariant. One line, against the rest of the repository,
+// in the first thing a judge reads, for three days.
+//
+// Rule 1 could not see it: it only validates that `npm run` names exist. So:
+// every list of entered tracks must name the same set.
+{
+  const LIST = /[Tt]racks?(?: are)? entered:?\s*((?:[^.]|\n)*?)\./g
+  const seen = []
+  for (const [doc, text] of DOC_TEXT) {
+    for (const m of text.matchAll(LIST)) {
+      if (isQuotation(text, m.index)) continue
+      const tracks = [...m[1].matchAll(/`([a-z]+)`/g)].map((t) => t[1]).sort()
+      if (tracks.length === 0) continue
+      seen.push({ doc, tracks: tracks.join(', '), at: m.index })
+    }
+  }
+  if (seen.length < 2) {
+    fail('README.md', 'fewer than two "tracks entered" lists found, so this check compares nothing '
+      + '— the sentence was reworded')
+  } else {
+    const first = seen[0]
+    for (const other of seen.slice(1)) {
+      if (other.tracks !== first.tracks) {
+        fail(other.doc, `names the tracks entered as [${other.tracks}], but ${first.doc} says `
+          + `[${first.tracks}] — a judge reads whichever they reach first`)
+      } else { commandsChecked++ }
+    }
+  }
+}
+
+// 8e. One Node version, across three files that each named a different one.
+//
+// package.json demanded ">=26.3.1". README.md said "Node 22+". ci.yml ran
+// node-version '22' — and PASSED, because there is no .npmrc, so EBADENGINE is
+// a warning and CI contradicted package.json on every run without failing. The
+// dependency tree's real floor is near-api-js's >=22.22.2 and nothing in
+// node_modules asks for more than 22, so the 26.3.1 was the dev machine's
+// version and nothing else. That unbounded range is also what forced an
+// explicit NODE_VERSION pin on Render, whose own docs say always to include an
+// upper bound.
+//
+// Three files, one fact. Rewording any of them fails rather than going blind.
+try {
+  const ci = await readFile(new URL('.github/workflows/ci.yml', ROOT), 'utf8')
+  const declared = pkg.engines?.node
+  if (!declared) {
+    fail('package.json', 'has no engines.node, so nothing pins the Node version')
+  } else {
+    const floor = declared.match(/>=\s*(\d+)\.(\d+)\.(\d+)/)
+    const bound = /<\s*\d+/.test(declared)
+    if (!floor) {
+      fail('package.json', `engines.node is "${declared}", which names no >=x.y.z floor — `
+        + 'this check cannot compare it to anything')
+    } else if (!bound) {
+      fail('package.json', `engines.node is "${declared}", an unbounded range. Render resolves `
+        + 'one to whatever `latest` happens to be, and its docs say always to include an upper bound')
+    } else { commandsChecked++ }
+
+    // The README has to name the same floor a reader would be held to.
+    const stated = readmeText.match(/Needs Rust and Node (\d+(?:\.\d+\.\d+)?)\+/)
+    if (!stated) {
+      fail('README.md', 'no "Needs Rust and Node <version>+" line found, so this check now verifies nothing')
+    } else if (floor && stated[1] !== `${floor[1]}.${floor[2]}.${floor[3]}`) {
+      fail('README.md', `says Node ${stated[1]}+, but package.json requires "${declared}"`)
+    } else { commandsChecked++ }
+
+    // And CI must run inside the range it declares, or the suite is green on an
+    // engine the package says it does not support.
+    const used = [...ci.matchAll(/node-version:\s*'(\d+)'/g)].map((m) => Number(m[1]))
+    if (used.length === 0) {
+      fail('.github/workflows/ci.yml', 'no node-version found, so this check now verifies nothing')
+    }
+    for (const major of used) {
+      if (floor && major < Number(floor[1])) {
+        fail('.github/workflows/ci.yml', `runs Node ${major}, below package.json's floor of `
+          + `${floor[1]}.${floor[2]}.${floor[3]} — the suite is green on an engine the package refuses`)
+      } else { commandsChecked++ }
+    }
+  }
+} catch (e) {
+  if (!/ENOENT/.test(e?.message ?? '')) fail('ci.yml', `could not be read: ${e.message}`)
+}
+
+// EVERY document, not just the README.
+//
+// This loop read `readmeText` and nothing else, and that single fact is why
+// four numbers rotted at once. `docs/MINECRAFT.md` said "84 Java checks" while
+// the README was corrected to 211 in the same commit that found it; the same
+// file said "six classes" three lines above a table with seven rows, and "21
+// unit tests" for a file with 42. Each was the README's twin, written in
+// another file where nothing was looking.
+//
+// A count is a count wherever it is written. The README still has to carry the
+// claim — that is what the empty-match failure below protects — but every other
+// document is now held to it too.
 for (const { what, dir, pattern, claim, only, ext, all, denominator } of COUNTED_CLAIMS) {
   const actual = await countInFiles(dir, pattern, only ?? null, ext ?? '.rs')
-  // `all` checks EVERY place the number is written, not just the first. The
-  // README once carried the same count twice and the two disagreed, which a
-  // first-match check passes happily.
-  const found = all ? [...readmeText.matchAll(claim)] : [readmeText.match(claim)].filter(Boolean)
-  if (found.length === 0) {
+  let anywhere = 0
+  for (const [doc, text] of DOC_TEXT) {
+    // `all` checks EVERY place the number is written, not just the first. The
+    // README once carried the same count twice and the two disagreed, which a
+    // first-match check passes happily.
+    const found = all ? [...text.matchAll(claim)] : [text.match(claim)].filter(Boolean)
+    anywhere += found.length
+    for (const m of found) {
+      // Counted as checked above, so exempting it cannot make the row vacuous.
+      if (isQuotation(text, m.index)) continue
+      if (Number(m[1]) !== actual) {
+        fail(doc, `claims ${m[1]} ${what}, but ${actual} exist`)
+      }
+      // An "N of M" claim where M is fixed by a spec, not by us. Reading only N
+      // let `5/5` slip through, because the regex that looked for `.../6` simply
+      // did not match the wrong row.
+      if (denominator !== undefined && Number(m[2]) !== denominator) {
+        fail(doc, `claims ${m[1]}/${m[2]} ${what}, but the standard defines ${denominator}`)
+      }
+    }
+  }
+  if (anywhere === 0) {
     // Not "no claim, no problem": the row was reworded and this check went
     // blind, which is how a vacuous check is born.
     fail('README.md', `no ${what} count found to check — the row was reworded, so this check now verifies nothing`)
-    continue
-  }
-  for (const m of found) {
-    if (Number(m[1]) !== actual) {
-      fail('README.md', `claims ${m[1]} ${what}, but ${actual} exist`)
-    }
-    // An "N of M" claim where M is fixed by a spec, not by us. Reading only N
-    // let `5/5` slip through, because the regex that looked for `.../6` simply
-    // did not match the wrong row.
-    if (denominator !== undefined && Number(m[2]) !== denominator) {
-      fail('README.md', `claims ${m[1]}/${m[2]} ${what}, but the standard defines ${denominator}`)
-    }
   }
 }
 

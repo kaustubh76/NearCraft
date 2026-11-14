@@ -13,7 +13,7 @@ access-key primitives. Tracks entered: **`games`** and **`security`**.
 
 ## Run every check
 
-Needs Rust and Node 22+. Nothing here needs a NEAR account, a faucet, an API
+Needs Rust and Node 22.22.2+. Nothing here needs a NEAR account, a faucet, an API
 key or a Minecraft server. The Minecraft plugin is the one exception and it is
 kept out of `npm test` on purpose: `npm run mc:test` needs a JDK, so a clone
 without one records that check as *skipped* rather than failing.
@@ -63,7 +63,7 @@ which is why this needs neither the root account nor a faucet.
 `npm run agent` is the single best summary of what this project does, and
 `npm run mc:server -- --token player-1 --trade` is the one that looks like a
 game: a Paper server boots, the plugin loads, and a sale settles on testnet
-while the player's balance moves by zero. It downloads a 55 MiB server jar and
+while the player's balance moves by zero. It downloads a 53 MiB server jar and
 spends live balance, so it is not part of any suite.
 
 Against the live deployment on public testnet (no credentials needed for the

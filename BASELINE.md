@@ -86,7 +86,7 @@ new plugin does and what it still does not.
 - `minecraft/` — a Paper plugin that settles trades on NEAR from inside the
   game, as a client of the play service. New, and written from nothing: it
   shares no code with EthCraft's plugin, which is why it sits under a different
-  directory name. Six classes and no external dependency — the JSON reader and
+  directory name. Seven classes and no external dependency — the JSON reader and
   the yoctoNEAR formatter are written here rather than pulled in.
 - `tests/near/` — policy refusal, prompt-injection refusal, pricing. New.
 - `GAME_LOOP.md`, `RULES.md`, this file, `README.md`. New.

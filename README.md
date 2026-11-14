@@ -7,7 +7,7 @@ is what you play against. Players never see a wallet, a seed phrase or a gas
 prompt.
 
 Built for the **NEAR HACKATHON** (1–14 November 2026). Tracks entered:
-`games` (primary), `security`, `swarms`.
+`games` (primary), `security`.
 
 **Open it without cloning:** the market page is at
 <https://nearcraft.vercel.app> and reads the deployed contracts live over public
@@ -17,7 +17,7 @@ what the hosted service deliberately *cannot* do.
 
 ---
 
-## Status — 12 November 2026
+## Status — 14 November 2026
 
 This README describes what exists today, not what is planned. Read the status
 column before the description.
@@ -31,7 +31,7 @@ column before the description.
 | `contracts/market` — merchants, pricing, treasury | **Built and tested.** 103 unit tests (the pricing rule, the payout rollbacks, restocking, investment and the money invariant — including the three interleaved ones that caught `sell`, `buy` and `restock` each paying somebody before the goods had moved). |
 | `contracts/guard` — the shared blocklist, on-chain | **Built and tested.** 13 unit tests. Public, attributed by the runtime, not deletable by us. |
 | `backend/near/counterparty.mjs` — allow/warn/block | **Built and tested.** 23 tests. Pure scoring, no API key, no indexer. |
-| `backend/near` — signer, policy, warn→human approval | **Built and tested.** 59 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
+| `backend/near` — signer, policy, warn→human approval | **Built and tested.** 90 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
 | **Sandbox integration tests** | **Built and passing.** A real local NEAR node via `near-workspaces`. 18 tests: 4 prove a restricted key's limits *at the protocol level*, 9 cover the cross-contract buy/sell/rollback paths, the economy, the money invariant and solvency, 3 the state migration (including bricking a contract with a plain redeploy and rescuing it), 1 that every view is callable *as a view*, and 1 that the node starts. These counts are checked by `npm run check:docs` against the tests that actually exist — they had rotted to 74 and 12. |
 | **Deployed to NEAR testnet** | **Yes.** `items.nearcraftmc.testnet`, `market.nearcraftmc.testnet`, `guard.nearcraftmc.testnet` — 5 merchants, 2 agents, 4 players. `npm run reads` and `npm run keys` query it with no credentials. |
 | The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls — **135 real transactions in 26.4s** on a real nearcore node — 5.1 trades a second, measured over three runs — buyers running concurrently. `npm run sim` |
@@ -68,7 +68,7 @@ npm run verify:deployed   # the code on chain hashes to the wasm this repo build
 npm run web       # the market page, reading those same contracts live in a browser
 npm run play      # the same page, playable: sign in and trade (needs .local/ keys)
 npm run mc:test   # the Minecraft plugin's Java checks, offline (needs a JDK)
-npm run mc:server # Paper + the plugin, driven from its console (downloads 55 MiB)
+npm run mc:server # Paper + the plugin, driven from its console (downloads 53 MiB)
 npm run mc:up     # ONE command: brings everything up, proves it, tears it down
 npm run mc:bot    # a headless client joins and plays the loop for real
 npm run oidc:dev  # a local OIDC issuer, so the real login path can be driven
@@ -161,7 +161,7 @@ rather than failing obscurely:
   holding a function-call key cannot attach NEAR and so cannot fund itself.
   `npm run topup` uses it, signing with `worker-1` and keeping the gas headroom
   nearcore reserves; the budget now sits at 0.05 NEAR, about **62 round trips**
-  at the merchant's spread, and `npm run mc:up` tops it up on its own when a run
+  at the merchant's spread, and when a run cannot afford itself `npm run mc:up` prints the `npm run topup` command and stops — it does **not** top up on its own, and this sentence used to say it did when a run
   cannot afford itself. When it does run out a buy comes back
   `502 INNER_CALL_FAILED` carrying the contract's own words — *"insufficient
   credit for this purchase"* — and selling pays credit back in. That is the
@@ -692,18 +692,23 @@ point is that the number comes from the run rather than from this sentence,
 which is exactly why this sentence no longer carries one. `npm run reads` and `npm run keys` work with
 no credentials, `npm run check:nep245` without a build says
 `ABI not found — run npm run build:contracts first`, `npm run evidence` records
-6 pass and 6 **skipped** rather than pretending, and `npm run build:contracts`
-compiles from the cloned sources. The only things `.gitignore` excludes are
-credentials, `node_modules/` and build output, so a clone has every input.
+its **skips** rather than pretending — the wasm-dependent and JDK-dependent
+topics among its eighteen, and the run prints the split rather than this
+sentence, which carried `6 pass and 6 skipped` for a week after there were
+twelve — and `npm run build:contracts` compiles from the cloned sources.
+`.gitignore` excludes credentials, `node_modules/`, build output **and**
+`.tmp/` with `*.jar` — the whole Minecraft runtime, which is fetched and
+hash-verified from `config/minecraft-runtime.json` rather than vendored. So a
+clone has every input it does not download.
 
-### Runs today, no credentials, no network
+### Runs today, no credentials, and offline once installed
 
 ```sh
 npm install
 npm test
 ```
 
-Needs Rust and Node 22+, nothing else — not even the wasm target, because
+Needs Rust and Node 22.22.2+, nothing else — not even the wasm target, because
 near-sdk unit tests build for the host. All three checks pass right now:
 
 ```sh
@@ -735,8 +740,8 @@ npm run check:nep245          # NEP-245 conformance, read off the compiled ABI
 `check:nep245` is kept out of `npm test` on purpose: it reads the ABI that
 `cargo-near` emits, and a conformance check that quietly passed when it could
 not find an ABI would be worse than no check. It asserts the core 10 and
-Enumeration 2 are present, that Approval Management and Metadata are absent as
-documented, and that the modifiers carrying security meaning are right —
+Enumeration 2 are present, that Approval Management's 6 are present and
+payable, that Metadata is absent as documented, and that the modifiers carrying security meaning are right —
 including that `buy_with_credit` is **not** payable, since a function-call
 access key cannot attach NEAR and would otherwise be unable to call it.
 
@@ -889,8 +894,10 @@ Runs each check and retains what it actually printed, under
 `evidence/runs/<topic>/<timestamp>/`, with the command, exit code, duration and
 a SHA-256 of the output. A failing run is written out exactly like a passing one.
 `evidence/SUMMARY.json` also records what these runs do **not** establish: they
-are all local, there is no public-chain result among them, and no Minecraft
-gameplay is exercised by any of them.
+do not exercise any Minecraft gameplay. Two of them — the topics named
+`live-testnet-*` — **are** credential-free reads of the deployed contracts on
+public NEAR testnet, which this paragraph denied for a week while
+`SUMMARY.json` said so in the same breath.
 
 ### The economy, running
 

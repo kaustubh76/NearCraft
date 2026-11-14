@@ -20,18 +20,31 @@ const CLASSES = new URL('test-classes/', TMP)
 // `npm run mc:test` directly and a missing JDK is an error, because then you
 // asked for it specifically.
 const optional = process.argv.includes('--optional')
+
+// BOTH prerequisites inside the guard, not just the JDK.
+//
+// This used to wrap `javaHome()` alone, and the loop that fetches the eight
+// compile-classpath jars sat outside it. So `npm test` needed the NETWORK on
+// any machine that happened to have the pinned JDK — under a README heading
+// that said it did not, and against this file's own promise two paragraphs up
+// that "every other check in this repository needs neither Java nor a network".
+// CI never caught it because CI installs no JDK, so the lookup failed first and
+// the jars were never fetched.
+//
+// A skip says WHICH prerequisite was missing, because "no JDK" and "no network"
+// are different things to go and fix.
 let home
+let classpath
 try {
   home = await javaHome()
+  classpath = []
+  for (const name of runtime.compileClasspath) classpath.push((await fetchPinned(name)).pathname)
 } catch (e) {
   if (!optional) throw e
   console.log(`\n  skipping the Minecraft plugin checks: ${e.message.split('\n')[0]}`)
-  console.log('  everything else in `npm test` needs no JDK.\n')
+  console.log('  everything else in `npm test` needs neither a JDK nor a network.\n')
   process.exit(0)
 }
-
-const classpath = []
-for (const name of runtime.compileClasspath) classpath.push((await fetchPinned(name)).pathname)
 
 await rm(CLASSES, { recursive: true, force: true })
 await mkdir(CLASSES, { recursive: true })

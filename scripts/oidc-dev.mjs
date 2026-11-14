@@ -81,6 +81,21 @@ const server = createServer((req, res) => {
   res.writeHead(404).end('jwks is at /.well-known/jwks.json')
 })
 
+// An 'error' event with no listener is re-thrown by EventEmitter, so a taken
+// port was a raw stack — and `npm run mc:up -- --oidc` then waited its full
+// twenty seconds before reporting "the OIDC issuer never came up". The play
+// service got this handler; the issuer did not, and the two are started by the
+// same script.
+server.on('error', (e) => {
+  if (e?.code === 'EADDRINUSE') {
+    console.error(`\n  127.0.0.1:${PORT} is already taken by another process.`)
+    console.error('  Free it, or choose another port:  OIDC_DEV_PORT=8091 npm run oidc:dev')
+    console.error('  npm run mc:up takes --issuer-port <n> for the same reason.\n')
+    process.exit(1)
+  }
+  throw e
+})
+
 server.listen(PORT, '127.0.0.1', () => {
   const token = mintToken('dev-player')
   console.log(`\n  a local OIDC issuer, for driving the real login path\n`)

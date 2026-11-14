@@ -199,7 +199,7 @@ as carries EthCraft's package name, because that claim should be enforced rather
 than promised.
 
 What is here is new, small and deliberately boring: a client of the play
-service, in six classes.
+service, in seven classes.
 
 ## Design: the plugin holds no keys
 
@@ -208,7 +208,7 @@ Minecraft client ──► Paper + NearCraft plugin ──HTTP──► npm run 
                             no keys                     holds the scoped key
 ```
 
-Every write goes to `backend/near/play.mjs`, which already had 21 unit tests and
+Every write goes to `backend/near/play.mjs`, which already had 42 unit tests and
 an end-to-end test against a real node. There is no signer, no RPC client and no
 NEP-366 delegate construction in Java — a second implementation would be a
 second thing to get wrong, and a custodial key in the *least* trustworthy
@@ -225,7 +225,7 @@ process in the system, the one players connect to.
 | `Orders` | merchant name resolution and the count clamp; **no Bukkit types**, so it tests offline |
 
 The total is in `README.md` and is counted by `check:docs` rather than written
-by hand here — six line counts in a table is six numbers that would start
+by hand here — seven line counts in a table is seven numbers that would start
 rotting the next time a comment is added to one of these files.
 
 Seven in-game commands: `/nearcraft link|claim|status|selftest|inventory-selftest|world-selftest`,
@@ -309,7 +309,7 @@ double sale is neither.
 ## What the Java checks actually check
 
 `npm run mc:test` compiles main and test sources together — so a test cannot
-pass against a stale build — and runs 84 checks against a stub HTTP server. No
+pass against a stale build — and runs 211 checks against a stub HTTP server. No
 Minecraft, no network, about a second.
 
 The substance is the refusals:
@@ -425,7 +425,9 @@ were already using survives it.
 
 Two deliberate behaviours:
 
-- **It retries the client connection, twice, and nothing else.** That hop goes
+- **It retries the client connection, twice by default, and nothing else.**
+  `--attempts <n>` changes that, and `--attempts 1` makes the word "twice"
+  false, which is why the default is named rather than asserted. That hop goes
   through ViaVersion and is the one step outside this repository. A failed
   *check* is never retried, because that would be hiding a result, and the
   retry count is reported whenever it is used.
@@ -460,7 +462,7 @@ the whole thing.
 ```sh
 brew install openjdk@25     # Paper 26.3 refuses anything older
 npm run mc:build            # fetch the pinned API jar, compile, jar
-npm run mc:test             # 84 Java checks, offline
+npm run mc:test             # 211 Java checks, offline
 npm run play                # in another terminal
 npm run mc:server -- --token player-1 --trade
 npm run mc:server -- --token player-1 \
@@ -470,5 +472,5 @@ npm run mc:server -- --token player-1 \
 Every downloaded artifact is pinned by sha256 in
 [config/minecraft-runtime.json](../config/minecraft-runtime.json) and refused if
 the bytes do not match, so a tampered mirror is caught rather than compiled
-against. Nothing is vendored: a 55 MiB server jar in a clone is weight, not
+against. Nothing is vendored: a 53 MiB server jar in a clone is weight, not
 provenance.

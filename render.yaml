@@ -60,6 +60,21 @@ services:
     autoDeployTrigger: "off"
 
     envVars:
+      # THE ONE THAT MAKES THIS FILE DEPLOYABLE.
+      #
+      # serve-play.mjs binds 127.0.0.1 by default, because it is custodial and
+      # docs/MINECRAFT.md says it belongs on loopback. A PaaS routes to the
+      # container's public interface, so loopback there is unreachable: Render's
+      # port scan finds nothing and the deploy fails.
+      #
+      # This was MISSING while serve-play.mjs's own comment said "Render sets
+      # NEARCRAFT_BIND=0.0.0.0". The live service had it set through the API,
+      # out of band, so it worked — and anyone deploying from this file, which
+      # the header calls the readable source of truth, would have got a service
+      # that never answered. A comment asserting something the repository does
+      # not do is the defect this project keeps removing from its documents.
+      - key: NEARCRAFT_BIND
+        value: 0.0.0.0
       # Named explicitly. serve-play.mjs:1 warns that drifting onto the seed
       # verifier by accident is the failure mode; saying it makes it deliberate
       # and keeps /api/health honest about which verifier is live.

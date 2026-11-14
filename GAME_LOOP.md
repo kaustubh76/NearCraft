@@ -150,7 +150,7 @@ Nowhere the player can see, which is the whole bet.
 ## What a judge can watch in sixty seconds
 
 `npm run sim` runs the loop above with scripted strategies and no model calls:
-twenty buyers and five merchants, **135 real transactions in about 24 seconds**,
+twenty buyers and five merchants, **135 real transactions in about 26 seconds**,
 against a real nearcore node started by the test itself. Prices move, a merchant
 goes broke and closes in round 6, and the receipts print. No Minecraft, no
 credentials, no wallet.

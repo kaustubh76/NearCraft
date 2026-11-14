@@ -19,7 +19,8 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { resolveFile, TYPES } from './serve-web.mjs'
 import { createPlayService } from '../backend/near/play.mjs'
-import { createOnboarding, playerAccountId } from '../backend/near/onboarding.mjs'
+import { createOnboarding } from '../backend/near/onboarding.mjs'
+import { declaredAgents, signInHint } from '../backend/near/deployment.mjs'
 import { agentPolicy } from '../backend/near/policy.mjs'
 import { createAgentSigner, transactionHash } from '../backend/near/signer.mjs'
 import { buyWithCreditRequest } from '../backend/near/market.mjs'
@@ -51,8 +52,14 @@ const PORT = Number(process.env.PORT ?? 8080)
 /// Naming the address makes that collision an immediate EADDRINUSE instead.
 /// A host that needs every interface asks for it: Render sets
 /// NEARCRAFT_BIND=0.0.0.0, because a PaaS routes to the container's public
-/// interface and loopback would be unreachable there.
-const HOST = process.env.NEARCRAFT_BIND ?? '127.0.0.1'
+/// interface and loopback would be unreachable there — render.yaml declares it.
+///
+/// `||`, NOT `??`. A declared-but-empty variable is an ordinary PaaS state, and
+/// `??` only falls back on null and undefined: NEARCRAFT_BIND="" gave HOST="",
+/// which Node treats as falsy and routes to the host-less path. Measured:
+/// {"address":"::","family":"IPv6"} — the exact wildcard this whole comment
+/// exists to prevent, restored by an empty string.
+const HOST = process.env.NEARCRAFT_BIND || '127.0.0.1'
 
 /// The same two overrides scripts/deploy.mjs reads, so a sandbox deployment can
 /// be served without the committed testnet manifest being involved at all.
@@ -296,13 +303,11 @@ const MAX_AGENT_UNITS = 16
 
 /// Only accounts this deployment declares, and only the methods it declares for
 /// them. An agent id that came off the wire is never trusted as an account.
-const declaredAgents = (manifest.agents ?? []).filter(
-  (a) => typeof keys[`${a.account_id}#function-call`] === 'string',
-)
+const workers = declaredAgents({ manifest, keys })
 
-const agents = declaredAgents.length === 0 ? null : {
+const agents = workers.length === 0 ? null : {
   /// What a caller may ask for, so a client does not have to guess.
-  list: () => declaredAgents.map((a) => ({
+  list: () => workers.map((a) => ({
     accountId: a.account_id,
     // The short name the game uses: `worker-1`, not the whole account id.
     name: a.account_id.split('.')[0],
@@ -311,9 +316,9 @@ const agents = declaredAgents.length === 0 ? null : {
   })),
 
   async dispatch({ name, merchantId, item, count }) {
-    const agent = declaredAgents.find((a) => a.account_id.split('.')[0] === name || a.account_id === name)
+    const agent = workers.find((a) => a.account_id.split('.')[0] === name || a.account_id === name)
     if (!agent) {
-      const known = declaredAgents.map((a) => a.account_id.split('.')[0]).join(', ')
+      const known = workers.map((a) => a.account_id.split('.')[0]).join(', ')
       throw Object.assign(new Error(`no agent named "${name}" — this deployment has ${known}`),
         { code: 'UNKNOWN_AGENT' })
     }
@@ -423,37 +428,6 @@ const server = createServer(async (req, res) => {
   }
 })
 
-/// What to type at the sign-in prompt, VERIFIED rather than asserted.
-///
-/// This line used to read `sign in as "player-1" -> ${manifest.players[0]}`:
-/// a hard-coded token printed beside an account derived from something else
-/// entirely. They looked consistent and were not — the id is
-/// p-sha256("<provider>:<token>")[0..16] (onboarding.mjs:86), and "player-1"
-/// derives p-1d6a3c5d5b87ed0e, not the first player in the manifest. Anyone
-/// following the banner signed in as a different, usually non-existent account.
-///
-/// The hash cannot be inverted, so the only honest way to offer a token is to
-/// try candidates and check what each one derives. If none of them reaches an
-/// account this process can actually sign for, it says so instead of printing a
-/// token nobody verified.
-const DEMO_TOKENS = ['player-1', 'player-2', 'player-3', 'player-4', 'player-5']
-
-function signInHint() {
-  const signable = (manifest.players ?? [])
-    .map((p) => p.account_id)
-    .filter((id) => typeof keys[`${id}#scoped`] === 'string')
-  if (signable.length === 0) return null
-  // Only the seeded verifier derives an id from a string a person can type; a
-  // real OIDC token is issued by the provider and is not guessable from here.
-  if (verifierKind === 'seed') {
-    for (const token of DEMO_TOKENS) {
-      const id = playerAccountId('seed', token, manifest.root)
-      if (signable.includes(id)) return { token, id }
-    }
-  }
-  return { token: null, id: signable.join(', ') }
-}
-
 server.on('error', (e) => {
   // Say which address, and say what to do. EADDRINUSE on a bare port number is
   // how half an hour goes into discovering that another project's container
@@ -468,7 +442,7 @@ server.on('error', (e) => {
 })
 
 server.listen(PORT, HOST, () => {
-  const hint = signInHint()
+  const hint = signInHint({ manifest, keys, verifierKind })
   if (!rootKey) {
     console.log('  NOTE      this server cannot create NEW players: no key for the root')
     console.log('            account in .local/. Existing players sign in normally, and')
