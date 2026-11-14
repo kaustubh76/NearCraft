@@ -37,11 +37,20 @@ function build(overrides = {}) {
   const relayed = []
   const svc = createPlayService({
     deployment: DEPLOYMENT,
-    keys: KEYS,
-    verifierKind: 'seed',
+    // Overridable: pool mode holds a different set of scoped keys, and a test
+    // that passed `keys` and had it silently ignored is how the first run of
+    // the pool tests reported `undefined is not from the pool`.
+    keys: overrides.keys ?? KEYS,
+    verifierKind: overrides.verifierKind ?? 'seed',
+    ...(overrides.canOnboard === undefined ? {} : { canOnboard: overrides.canOnboard }),
     onboarding: {
       signIn: async () => ({ accountId: PLAYER, created: false }),
       keyLimits: async () => LIMITS,
+      // Pool mode verifies an identity without deriving an account for it, so
+      // the stub answers both halves: who this is, and the one-way hash the
+      // derived-account path would have used as its id.
+      identify: async (token) => ({ provider: 'seed', subject: String(token) }),
+      playerAccountId: (provider, subject) => `p-${provider}-${subject}.x.testnet`,
       ...(overrides.onboarding ?? {}),
     },
     relayer: {
@@ -65,6 +74,7 @@ function build(overrides = {}) {
     // Distinct ids, because the link code mints a SECOND session and a test
     // that cannot tell them apart cannot check that they are separate.
     agents: overrides.agents ?? null,
+    pool: overrides.pool ?? null,
     newSessionId: overrides.newSessionId ?? (() => `SESSION-${++minted}`),
     now: overrides.now,
     log: overrides.log,
@@ -644,4 +654,93 @@ test('an unknown agent names the ones that exist', async () => {
     { sessionId, agent: 'worker-9', merchantId: 'ironmonger.x.testnet', item: 'iron_ingot', count: 1 })
   refuses(res, 'UNKNOWN_AGENT', 400)
   assert.match(res.body.detail, /worker-1/)
+})
+
+// --------------------------------------------------- a pool, one per visitor
+//
+// The hosted deployment cannot create accounts: that needs the root key, and a
+// root key on a public host is a faucet, because the seeded verifier accepts
+// any string and each distinct one would cost root 0.11 NEAR. So it hands out
+// pre-funded players instead. The gate considered first — a per-IP limit plus a
+// cap — does not survive the topology: behind Vercel AND Render the caller's
+// address arrives in `x-forwarded-for`, whose leftmost entry the caller sets,
+// and the counter resets whenever a free instance wakes from its sleep.
+
+const POOL = ['pool-1.x.testnet', 'pool-2.x.testnet', 'pool-3.x.testnet']
+const poolKeys = Object.fromEntries(POOL.map((id) => [`${id}#scoped`, 'ed25519:k']))
+
+const sessionFor = async (svc, token) =>
+  (await svc.handle('POST', '/api/session', { token })).body
+
+test('each visitor gets their own account out of the pool', async () => {
+  const { svc } = build({ pool: POOL, keys: poolKeys })
+  const a = await sessionFor(svc, 'alice')
+  const b = await sessionFor(svc, 'bob')
+  assert.ok(POOL.includes(a.accountId), `${a.accountId} is not from the pool`)
+  assert.ok(POOL.includes(b.accountId))
+  assert.notEqual(a.accountId, b.accountId,
+    'two visitors were handed the SAME account — they would spend each other\'s credit')
+})
+
+test('a visitor who comes back gets the account they already had', async () => {
+  const { svc } = build({ pool: POOL, keys: poolKeys })
+  const first = await sessionFor(svc, 'alice')
+  await sessionFor(svc, 'bob')
+  const again = await sessionFor(svc, 'alice')
+  assert.equal(again.accountId, first.accountId, 'a returning identity was moved to a new account')
+  // And a new session id each time: the session is the credential, the account
+  // is the identity's.
+  assert.notEqual(again.sessionId, first.sessionId)
+})
+
+test('an exhausted pool refuses rather than sharing an account', async () => {
+  // The important half. Handing a fourth visitor somebody else's account would
+  // let them spend that player's credit, which is exactly what the pool exists
+  // to prevent.
+  const { svc } = build({ pool: POOL, keys: poolKeys })
+  for (const who of ['a', 'b', 'c']) assert.ok((await sessionFor(svc, who)).accountId)
+  const res = await svc.handle('POST', '/api/session', { token: 'd' })
+  refuses(res, 'POOL_EXHAUSTED', 503)
+  assert.match(res.body.detail, /3 demo players/)
+  assert.match(res.body.detail, /npm run play/, 'it must say how to get an account of your own')
+})
+
+test('health says how many pre-funded players are left', async () => {
+  const { svc } = build({ pool: POOL, keys: poolKeys })
+  let health = (await svc.handle('GET', '/api/health')).body
+  assert.deepEqual(health.pool, { size: 3, free: 3 })
+  await sessionFor(svc, 'alice')
+  health = (await svc.handle('GET', '/api/health')).body
+  assert.deepEqual(health.pool, { size: 3, free: 2 }, 'a client should be able to say "2 left"')
+
+  // And a deployment with no pool says so rather than reporting zero, which a
+  // client would read as "exhausted".
+  assert.equal((await build().svc.handle('GET', '/api/health')).body.pool, null)
+})
+
+test('a pool does not make the service able to create accounts', async () => {
+  // canOnboard is what check:hosted asserts is false, and the pool must not
+  // quietly flip it: the root key is still not here.
+  const { svc } = build({ pool: POOL, keys: poolKeys, canOnboard: false })
+  assert.equal((await svc.handle('GET', '/api/health')).body.canOnboard, false)
+})
+
+test('a refused identity is still an identity refusal, not a pool problem', async () => {
+  const { svc } = build({
+    pool: POOL,
+    keys: poolKeys,
+    onboarding: {
+      identify: async () => {
+        const e = Object.assign(new Error('token expired'), { code: 'IDENTITY_REJECTED' })
+        e.identityCode = 'TOKEN_EXPIRED'
+        throw e
+      },
+    },
+  })
+  const res = await svc.handle('POST', '/api/session', { token: 'stale' })
+  // Whatever code it carries, it must not be POOL_EXHAUSTED: telling a visitor
+  // the demo is full when their token was simply bad sends them away for the
+  // wrong reason.
+  assert.notEqual(res.body.error, 'POOL_EXHAUSTED')
+  assert.equal(res.status >= 400, true)
 })

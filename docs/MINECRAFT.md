@@ -14,7 +14,7 @@ This is what is there now.
 
 ```sh
 npm run play                                   # the service that holds the key
-npm run mc:server -- --token player-1 --trade  # Paper, the plugin, a real trade
+npm run mc:server -- --token player-3 --trade  # Paper, the plugin, a real trade
 ```
 
 That second command fetches a hash-pinned Paper 26.3 build 231, writes
@@ -29,7 +29,7 @@ console. The log it keeps is the claim:
     Ironmonger (ironmonger)  asks 0.004  bids 0.0032  stock 253  buying
       Ironmonger holds 253 (normally stocked); demand is quiet.
     Stonecutter (stonecutter)  asks 0.006  bids 0.0048  stock 64  buying
-> nearcraft link player-1
+> nearcraft link player-3
   signed in as p-1d6a3c5d.nearcraftmc.testnet
     verifier seed   key may call buy_with_credit, sell
     full-access keys on your account: 0 - nothing can transfer your NEAR or
@@ -464,8 +464,8 @@ brew install openjdk@25     # Paper 26.3 refuses anything older
 npm run mc:build            # fetch the pinned API jar, compile, jar
 npm run mc:test             # 211 Java checks, offline
 npm run play                # in another terminal
-npm run mc:server -- --token player-1 --trade
-npm run mc:server -- --token player-1 \
+npm run mc:server -- --token player-3 --trade
+npm run mc:server -- --token player-3 \
   --sell ironmonger:iron_ingot:1 --buy ironmonger:iron_ingot:1   # the round trip
 ```
 

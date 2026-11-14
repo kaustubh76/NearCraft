@@ -71,6 +71,9 @@ const STATUS = {
   // 400 would tell a caller to fix a request that was fine. The rest are the
   // agent's own wallet refusing, which is the policy working: 403, because the
   // request was understood and is not permitted.
+  // A demo that ran out of demo accounts is a deployment limit, not a bad
+  // request, and not something the caller can fix by changing their request.
+  POOL_EXHAUSTED: 503,
   NO_AGENT_KEYS: 503,
   UNKNOWN_AGENT: 400,
   NO_AGENT_KEY: 503,
@@ -151,6 +154,20 @@ export function createPlayService({
   onboarding,
   relayer,
   reader,
+  /// Pre-funded accounts to hand out, one per visitor, or null to derive an
+  /// account from the identity the way a local run does.
+  ///
+  /// WHY A POOL AND NOT ONBOARDING. Creating an account needs the root key, and
+  /// a root key on a public host is a faucet: the seeded verifier accepts any
+  /// string, so each distinct string would cost the root account 0.11 NEAR with
+  /// nothing to stop a loop. The gate that was considered instead — a per-IP
+  /// limit plus a cap — does not survive this topology: behind Vercel AND
+  /// Render the caller's address arrives in `x-forwarded-for`, whose leftmost
+  /// entry the caller sets, and the counter would reset every time a free
+  /// instance woke from its fifteen-minute sleep. A finite set of accounts
+  /// funded in advance needs no header to be trustworthy and cannot be drained
+  /// past its own size.
+  pool = null,
   /// Dispatch a declared agent to shop, or null when this deployment holds no
   /// agent keys.
   ///
@@ -207,6 +224,36 @@ export function createPlayService({
   /// self-heals is enough — a permanent lockout would be its own denial of
   /// service.
   const LINK_MAX_FAILURES = 10
+
+  /// identity hash -> the pool account it holds. In-process, like `sessions`:
+  /// persisting it would mean a store, and a restart reshuffling who gets which
+  /// demo account is cosmetic rather than a correctness problem.
+  const poolAssignments = new Map()
+
+  /// Give this identity its own account out of the pool, or the same one again.
+  async function assignFromPool(token) {
+    const identity = await onboarding.identify(token)
+    // The key is the account id this identity WOULD have derived — a one-way
+    // hash of provider and subject that onboarding already computes. So nothing
+    // here stores a raw subject, which is the same property the derived-account
+    // path has always had.
+    const key = onboarding.playerAccountId(identity.provider, identity.subject)
+    const held = poolAssignments.get(key)
+    if (held) return { accountId: held, created: false, pooled: true }
+
+    const taken = new Set(poolAssignments.values())
+    const free = pool.find((id) => !taken.has(id))
+    if (!free) {
+      throw new PlayRefusal(
+        'POOL_EXHAUSTED',
+        `all ${pool.length} demo players are in use. This deployment hands out pre-funded ` +
+        'accounts rather than creating them, because creating one needs a key that would ' +
+        'make this endpoint a faucet. Run it locally with `npm run play` to onboard your own.',
+      )
+    }
+    poolAssignments.set(key, free)
+    return { accountId: free, created: false, pooled: true }
+  }
 
   const linkCodes = new Map()
   let failures = { count: 0, since: now() }
@@ -313,6 +360,9 @@ export function createPlayService({
             network: deployment?.network ?? 'testnet',
             rpc: deployment?.rpc ?? reader.rpcUrl,
             relayer: deployment?.relayer?.account_id ?? null,
+            /// How many pre-funded players are left to hand out. A client can
+            /// say "7 of 8 left" instead of discovering the end by being refused.
+            pool: pool ? { size: pool.length, free: pool.length - poolAssignments.size } : null,
             /// Which agents this deployment can send shopping, so a client can
             /// show the command or not rather than offering one that refuses.
             agents: agents ? agents.list() : [],
@@ -325,8 +375,9 @@ export function createPlayService({
           if (!token) throw new PlayRefusal('NO_TOKEN', 'a login token is required')
 
           let result
+          if (pool) result = await assignFromPool(String(token))
           try {
-            result = await onboarding.signIn(String(token))
+            if (!result) result = await onboarding.signIn(String(token))
           } catch (e) {
             // Creating an account costs the root account a deposit plus gas
             // headroom, and nearcore reserves against a pessimistically

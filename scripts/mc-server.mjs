@@ -38,6 +38,15 @@ const BUY = value('--buy', null)
 const TRADE = SELL ?? BUY
 /// Which agent to dispatch from the console, or null to skip it.
 const AGENT = value('--agent', null)
+/// The address a player outside this machine actually types.
+///
+/// Render cannot host a Minecraft server — it exposes HTTP only on 80/443, UDP
+/// is not on its roadmap, and its TCP support reaches only its own private
+/// network. So a joinable server runs here behind a tunnel, and the banner has
+/// to print the tunnel's address rather than the loopback one it binds. Live
+/// while this machine is on, which is a demo window and not hosting;
+/// docs/MINECRAFT.md says so in those words.
+const PUBLIC = value('--public', null)
 const BOOT_TIMEOUT_MS = 10 * 60 * 1000
 
 console.log('\n=== NearCraft on Paper ===\n')
@@ -47,11 +56,16 @@ console.log('\n=== NearCraft on Paper ===\n')
 // The plugin is a client of the play service. Booting a server to watch every
 // command answer SERVICE_UNREACHABLE wastes five minutes, so say it up front.
 let servicePlayable = false
+/// Kept so the join banner can derive its login hint from what the service
+/// ANSWERED, instead of hard-coding one.
+let health = null
 try {
   const probe = await fetch(`${SERVICE}/api/health`, { signal: AbortSignal.timeout(3000) })
   servicePlayable = probe.ok
   const body = await probe.json()
+  health = body
   console.log(`  play service  ${SERVICE}  ${body.network ?? '?'}  verifier ${body.verifier ?? '?'}`)
+  if (body.pool) console.log(`                ${body.pool.free} of ${body.pool.size} pre-funded player(s) left`)
 } catch {
   console.log(`  play service  ${SERVICE}  NOT RUNNING`)
   console.log('                start it in another terminal with: npm run play')
@@ -212,9 +226,25 @@ try {
   // world".
   if (flag('--serve')) {
     console.log(`\n=== staying up ===`)
-    console.log(`  join at   127.0.0.1:${PORT}   (Minecraft Java ${runtime.client})`)
-    console.log(`  in chat   /nearcraft link player-1   then   /market iron_ingot`)
-    console.log(`  or a code from the web page: /nearcraft claim <code>`)
+    console.log(`  join at   ${PUBLIC ?? `127.0.0.1:${PORT}`}   (Minecraft Java ${runtime.client})`)
+    if (PUBLIC) console.log(`  bound to  127.0.0.1:${PORT} — ${PUBLIC} is a tunnel to it`)
+
+    // Derived from the service's own answer. This line read
+    // `/nearcraft link player-1` — the stale token replaced in web/market.html
+    // and in serve-play's banner and missed here, which on a live server would
+    // have sent every visitor to an account that does not exist.
+    if (health?.pool) {
+      console.log('  in chat   /nearcraft link <any name>   then   /market iron_ingot')
+      console.log(`            any name works and you get your OWN pre-funded player —`)
+      console.log(`            ${health.pool.free} of ${health.pool.size} left. A demo pool, not a faucet.`)
+    } else if (health?.verifier === 'oidc') {
+      console.log('  in chat   /nearcraft claim <code>   — the code comes from the web page')
+      console.log('            a real login token is about 977 characters and chat carries 256')
+    } else {
+      console.log('  in chat   /nearcraft claim <code>   from the web page, then /market iron_ingot')
+      console.log('            this service derives an account from the login, so only an')
+      console.log('            identity it has already onboarded can sign in')
+    }
     console.log(`\n  Ctrl-C to stop.\n`)
     await new Promise((resolve) => {
       process.on('SIGINT', resolve)

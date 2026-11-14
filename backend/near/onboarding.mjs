@@ -327,8 +327,19 @@ export function createOnboarding({
     ///
     /// The player never sees a key at any point, and after this there is no
     /// full-access key in existence for the account. `keyLimits()` proves it.
-    async signIn(token) {
-      let identity
+    /// Verify a login and say who it is, touching neither chain nor keys.
+    ///
+    /// Extracted out of `signIn` so a caller can establish an identity WITHOUT
+    /// deriving or creating an account for it. The hosted deployment needs
+    /// exactly that: it hands each visitor a pre-funded player from a pool
+    /// rather than creating one, because creating one needs the root key and a
+    /// root key on a public host is a faucet. Verification stays here, where the
+    /// verifier is injected, instead of leaking into the service.
+    ///
+    /// The refusals are the same objects `signIn` has always thrown, with the
+    /// verifier's own code riding on `identityCode`.
+    async identify(token) {
+let identity
       try {
         identity = await verifyIdentity(token)
       } catch (e) {
@@ -348,6 +359,11 @@ export function createOnboarding({
       if (!identity?.provider || !identity?.subject) {
         throw new OnboardingError('IDENTITY_INCOMPLETE', JSON.stringify(identity ?? null))
       }
+      return identity
+    },
+
+    async signIn(token) {
+      const identity = await this.identify(token)
 
       const accountId = playerAccountId(identity.provider, identity.subject, rootAccountId)
       const parked = bootstrapStore ? await bootstrapStore.get(accountId) : null

@@ -30,7 +30,18 @@ const manifest = JSON.parse(await readFile(new URL('deployment.json', ROOT), 'ut
 const all = JSON.parse(await readFile(new URL('.local/nearcraft-keys.json', ROOT), 'utf8'))
 
 /// Default: the player deployment.json records as the one `npm run mc:up` demos.
-const player = process.argv[2] ?? 'p-62b0b2438ca03ae4.nearcraftmc.testnet'
+/// Which players' keys to ship. SEVERAL, now.
+///
+/// The hosted instance hands out one pre-funded account per visitor instead of
+/// creating accounts, because creating one needs the root key and a root key on
+/// a public host is a faucet: the seeded verifier accepts any string, so each
+/// distinct one would cost root 0.11 NEAR with nothing to stop a loop.
+///
+/// An argument-less run still ships the single player deployment.json records
+/// as the one `npm run mc:up` demos, so nothing that called this before
+/// changes.
+const players = process.argv.slice(2).filter((a) => !a.startsWith('--'))
+if (players.length === 0) players.push('p-62b0b2438ca03ae4.nearcraftmc.testnet')
 const relayer = manifest.relayer.account_id
 
 /// Accounts whose keys must never leave this machine, checked against what was
@@ -46,23 +57,24 @@ const relayer = manifest.relayer.account_id
 const FORBIDDEN = [manifest.root, ...Object.values(manifest.contracts),
   ...manifest.merchants.map((m) => m.account_id), ...manifest.agents.map((a) => a.account_id)]
 
-if (FORBIDDEN.includes(player)) {
+for (const player of players) {
+  if (FORBIDDEN.includes(player)) {
   const role = player === manifest.root ? 'the root account: it funds and creates every player'
     : Object.values(manifest.contracts).includes(player) ? 'a CONTRACT account: its key can redeploy and migrate the live economy'
     : 'a merchant or agent account'
-  console.error(`\n  REFUSING. ${player} is ${role}.`)
-  console.error('  Its key must never leave this machine.\n')
-  process.exit(1)
+    console.error(`\n  REFUSING. ${player} is ${role}.`)
+    console.error('  Its key must never leave this machine.\n')
+    process.exit(1)
+  }
+
+  if (!manifest.players.some((entry) => entry.account_id === player)) {
+    console.error(`\n  ${player} is not a player in deployment.json. Refusing to ship a key`)
+    console.error('  for an account this deployment does not claim.\n')
+    process.exit(1)
+  }
 }
 
-const listed = manifest.players.find((p) => p.account_id === player)
-if (!listed) {
-  console.error(`\n  ${player} is not a player in deployment.json. Refusing to ship a key`)
-  console.error('  for an account this deployment does not claim.\n')
-  process.exit(1)
-}
-
-const wanted = [relayer, `${player}#scoped`]
+const wanted = [relayer, ...players.map((id) => `${id}#scoped`)]
 
 const out = {}
 for (const name of wanted) {
@@ -98,6 +110,10 @@ const body = JSON.stringify(out, null, 2) + '\n'
 await writeFile(file, body, { mode: 0o600 })
 
 console.log(`\n  wrote ${Object.keys(out).length} of ${Object.keys(all).length} key(s) to .tmp/render/nearcraft-keys.json (0600)\n`)
+if (players.length > 1) {
+  console.log('  Set this on the hosted service so it hands one out per visitor:')
+  console.log(`    NEARCRAFT_POOL=${players.join(',')}\n`)
+}
 for (const name of Object.keys(out)) {
   const role = name.endsWith('#scoped') ? 'function-call, one contract' : 'full-access (gas payer)'
   console.log(`    ${name}`)

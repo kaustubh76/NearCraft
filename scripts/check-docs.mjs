@@ -10,6 +10,7 @@
 // Deliberately offline and dependency-free.
 import { readFile, readdir, access } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
+import { playerAccountId } from '../backend/near/onboarding.mjs'
 
 const ROOT = new URL('../', import.meta.url)
 const DOCS = ['README.md', 'AGENTS.md', 'GAME_LOOP.md', 'RULES.md', 'BASELINE.md',
@@ -527,6 +528,51 @@ try {
   // No hosting config is a legitimate state: a fork that deploys nowhere has
   // nothing to be wrong about. A malformed one is not.
   if (!/ENOENT/.test(e?.message ?? '')) fail('config/hosting.json', `could not be read: ${e.message}`)
+}
+
+// 8h. A login the documents tell a reader to type must reach a real account.
+//
+// THE THIRD TIME this exact token has bitten. `player-1` derives
+// p-1d6a3c5d5b87ed0e under the current 8-byte account id, and nobody onboarded
+// that: it was the panel's default in web/market.html, it was serve-play's
+// startup banner, it was mc-server's join banner, and it is still in
+// docs/MINECRAFT.md and README.md as `--token player-1` and
+// `nearcraft link player-1`. Each one sends a reader to an account that does
+// not exist.
+//
+// Rule 8d checks that a COMMAND exists. This checks the ARGUMENT, which is
+// where it kept hiding. The id is a one-way hash of provider and subject
+// (onboarding.mjs), so a subject can be checked offline against the players
+// deployment.json records — the same relationship tests/near/web.mjs asserts for
+// the page's default, generalised to the documents.
+try {
+  const deployed = JSON.parse(await readFile(new URL('deployment.json', ROOT), 'utf8'))
+  const claimed = new Set((deployed.players ?? []).map((pl) => pl.account_id))
+  if (claimed.size > 0 && deployed.root) {
+    // `--token X`, `link X`, `--seed X`. A placeholder in angle brackets is a
+    // placeholder, and `any name` is the pool's answer rather than a subject.
+    const LOGINS = /(?:--token|--seed|nearcraft link)\s+([A-Za-z0-9][A-Za-z0-9:_-]*)/g
+    for (const [doc, text] of DOC_TEXT) {
+      for (const m of text.matchAll(LOGINS)) {
+        let subject = m[1]
+        if (subject.startsWith('<') || subject === 'any') continue
+        if (deniesExistence(text, m.index) || isQuotation(text, m.index)) continue
+        // `seed:player-1` names the provider explicitly; the subject is the rest.
+        const provider = subject.includes(':') ? subject.slice(0, subject.indexOf(':')) : 'seed'
+        if (subject.includes(':')) subject = subject.slice(subject.indexOf(':') + 1)
+        let derived
+        try { derived = playerAccountId(provider, subject, deployed.root) } catch { continue }
+        linksChecked++
+        if (!claimed.has(derived)) {
+          fail(doc, `tells a reader to sign in as \`${m[1]}\`, which derives ${derived} — `
+            + 'not a player deployment.json records, so following it refuses. The catalog\'s '
+            + '`players.demo_subject` is the one that resolves')
+        }
+      }
+    }
+  }
+} catch (e) {
+  if (!/ENOENT/.test(e?.message ?? '')) fail('deployment.json', `could not be read: ${e.message}`)
 }
 
 // 8d. A Minecraft command the documents describe must actually exist.

@@ -20,7 +20,7 @@ import { extname } from 'node:path'
 import { resolveFile, TYPES } from './serve-web.mjs'
 import { createPlayService } from '../backend/near/play.mjs'
 import { createOnboarding } from '../backend/near/onboarding.mjs'
-import { declaredAgents, signInHint } from '../backend/near/deployment.mjs'
+import { declaredAgents, signableAccounts, signInHint } from '../backend/near/deployment.mjs'
 import { agentPolicy } from '../backend/near/policy.mjs'
 import { createAgentSigner, transactionHash } from '../backend/near/signer.mjs'
 import { buyWithCreditRequest } from '../backend/near/market.mjs'
@@ -282,6 +282,48 @@ async function saveKey(accountId, secret) {
 }
 
 
+// --------------------------------------------------------- the visitor pool
+//
+// NEARCRAFT_POOL turns this instance into one that hands out a pre-funded
+// account per visitor instead of deriving one from their login and creating it.
+//
+// OPT-IN, and deliberately not inferred from the keys present. A local run
+// holds several players' scoped keys and must go on behaving as it always has —
+// derive the account from the identity, create it if the root key is here. An
+// instance that silently became a pool because of which keys it happened to
+// hold would be a surprise in the one direction that matters: two people
+// sharing an account.
+//
+// The hosted instance sets it because it cannot create accounts at all. That is
+// not a limitation to work around; it is the control. The seeded verifier
+// accepts ANY string, so a public endpoint that could onboard would cost the
+// root account 0.11 NEAR per distinct string with nothing to stop a loop. A
+// finite set of accounts funded in advance cannot be drained past its own size,
+// needs no `x-forwarded-for` to be trustworthy — the caller sets that header's
+// leftmost entry — and needs no counter that would reset every time a free
+// instance woke from its fifteen-minute sleep.
+const pool = (() => {
+  const asked = (process.env.NEARCRAFT_POOL ?? '').split(',').map((x) => x.trim()).filter(Boolean)
+  if (asked.length === 0) return null
+  const signable = signableAccounts({ manifest, keys })
+  const usable = asked.filter((id) => signable.includes(id))
+  const missing = asked.filter((id) => !signable.includes(id))
+  if (missing.length > 0) {
+    console.error(`\n  NEARCRAFT_POOL names ${missing.length} account(s) this server cannot sign for:`)
+    for (const id of missing) console.error(`    ${id}`)
+    console.error('  Either the manifest does not list them or their #scoped key is not in the key file.')
+    console.error('  Refusing to start: a pool with a hole in it hands somebody a session that cannot act.\n')
+    process.exit(1)
+  }
+  return usable
+})()
+
+if (pool) {
+  console.log(`\n  ${pool.length} pre-funded player(s) to hand out, one per visitor:`)
+  for (const id of pool) console.log(`    ${id}`)
+  console.log('  This server does NOT create accounts; it lends these. /api/health says how many are left.\n')
+}
+
 // ------------------------------------------------------------- agent dispatch
 //
 // GAME_LOOP.md has always described sending an agent shopping from inside the
@@ -366,7 +408,7 @@ if (agents) {
 }
 
 const play = createPlayService({
-  deployment: manifest, keys, verifierKind, onboarding, relayer, reader, saveKey, agents,
+  deployment: manifest, keys, verifierKind, onboarding, relayer, reader, saveKey, agents, pool,
   canOnboard: Boolean(rootKey),
   log: (e) => console.log(`  ${e.event.padEnd(10)} ${JSON.stringify({ ...e, event: undefined })}`),
 })
