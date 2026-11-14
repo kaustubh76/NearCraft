@@ -1,5 +1,5 @@
 {
-  "note": "Where the two HTTP surfaces are hosted. Public URLs only — no credentials. Read by scripts/check-hosted.mjs, which tests them, and by scripts/check-docs.mjs, which refuses to let the README claim an address nothing tests.",
+  "note": "Where the two HTTP surfaces are hosted. Public URLs only \u2014 no credentials. Read by scripts/check-hosted.mjs, which tests them, and by scripts/check-docs.mjs, which refuses to let the README claim an address nothing tests.",
   "web": {
     "url": "https://nearcraft.vercel.app",
     "host": "Vercel",
@@ -17,5 +17,11 @@
       "p-62b0b2438ca03ae4.nearcraftmc.testnet#scoped"
     ],
     "keys_withheld": "the root account, the items/market/guard contract accounts, every merchant and every agent"
+  },
+  "minecraft": {
+    "address": "",
+    "how": "Render cannot host a Minecraft server: it exposes HTTP only on 80/443, UDP is not on its roadmap, and its TCP support reaches only its own private network. So a joinable server runs on the maintainer's machine behind a tunnel (playit.gg or similar) and points the plugin at the hosted play service over https. Put the tunnel address here and `npm run check:hosted` will ping it with Minecraft's own Server List Ping and check the MOTD is this one. Empty means no server is advertised, and the check says so instead of passing.",
+    "expect_motd": "NearCraft",
+    "honest_limit": "Live while that machine is on. A demo window, not hosting."
   }
 }

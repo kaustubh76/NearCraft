@@ -402,6 +402,65 @@ claims in this repository five times.
 - **EthCraft's world, menus, escrow, item delivery, voice and property
   protection remain unported**, and this does not change that.
 
+## Making it joinable
+
+Render cannot host a Minecraft server. It exposes HTTP only on 80 and 443, UDP
+is not on its roadmap, and its TCP support reaches only its own private network.
+Minecraft Java needs inbound TCP 25565. So a joinable server runs on a machine
+you control, behind a tunnel, and points the plugin at the **hosted** play
+service.
+
+```sh
+# 1. a tunnel to TCP 25565 — playit.gg is free and needs no port forwarding
+#    (any TCP tunnel works; it gives you an address like xxxx.playit.gg:12345)
+
+# 2. the server, with the plugin aimed at the hosted service and the public
+#    address printed in the banner
+npm run mc:server -- \
+  --service https://nearcraft-play.onrender.com \
+  --public <your-tunnel-address> \
+  --serve
+
+# 3. put that address in config/hosting.json so the check can reach it
+npm run check:hosted
+```
+
+`PlayClient.normaliseBase` already allows a remote `https` service and refuses
+plain `http` to anything but loopback, so nothing in the plugin changes to reach
+Render — a session id is bearer authority over an account and it is not going
+across a network in clear text.
+
+**What a visitor does.** `/nearcraft link <any name you like>`. The hosted
+service lends them one of five pre-funded players, so they get their **own**
+account, their own credit and their own scoped key — not a shared one. The
+banner prints how many are left. Then `/market iron_ingot`, `/buy ironmonger
+iron_ingot 1`, `/wallet`.
+
+**Why a pool and not onboarding.** The service cannot create accounts: that
+needs the root key, and the seeded verifier accepts *any* string, so a public
+endpoint with a root key would cost the root account 0.11 NEAR per distinct
+string with nothing to stop a loop. The gate considered instead — a per-IP limit
+plus a cap — does not survive this topology: behind Vercel **and** Render the
+caller's address arrives in `x-forwarded-for`, whose leftmost entry the caller
+sets, and the counter would reset every time a free instance woke from its
+fifteen-minute sleep. Five accounts funded in advance need no header to be
+trustworthy and cannot be drained past their own number. `npm run check:hosted`
+proves it by signing in as a stranger and checking that **root's balance did not
+move**.
+
+**`npm run check:hosted` pings it with Minecraft's own Server List Ping** — a
+handshake packet, a status request, and the JSON the server answers with —
+rather than a bare TCP connect, because on a tunnel the thing listening on that
+port might be the tunnel's own error page. The MOTD in that JSON is set by
+`scripts/mc-server.mjs`, so a reply carrying it proves *this* server answered.
+With no address configured the check says so and does not pass.
+
+**The honest limit: it is live while that machine is on.** That is a demo
+window, not hosting, and no sentence here should be read as otherwise. What is
+hosted permanently is the browser game — <https://nearcraft.vercel.app> signs a
+visitor in and renders Buy and Sell per merchant against live testnet, with the
+relayer paying the gas.
+
 ## One command
 
 ```sh

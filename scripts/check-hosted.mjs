@@ -16,6 +16,7 @@
 // rather than a failure, so the timeouts here are generous and the wake is
 // reported.
 import { readFile } from 'node:fs/promises'
+import net from 'node:net'
 
 const ROOT = new URL('..', import.meta.url)
 const manifest = JSON.parse(await readFile(new URL('deployment.json', ROOT), 'utf8'))
@@ -161,9 +162,64 @@ if (health.status !== 200 || h === null) {
 /// the check twice would spend it twice. A check that damages what it is
 /// inspecting is worse than no check, so when the flag says the capability is
 /// there, this reports that and sends nothing.
+/// What root's balance is, straight from the chain. The un-fakeable control.
+///
+/// A faucet MOVES this. Whatever the service says about itself, if a stranger
+/// signing in leaves root untouched then nothing was created for them.
+async function rootBalance() {
+  const res = await hit(manifest.rpc, {
+    method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0', id: 1, method: 'query',
+      params: { request_type: 'view_account', finality: 'final', account_id: manifest.root },
+    }),
+  })
+  return res.json()?.result?.amount ?? null
+}
+
 if (h?.canOnboard !== false) {
-  bad('not probing the faucet: this instance says it CAN onboard',
-    'sending the probe would create an account and spend root balance — fix canOnboard first')
+  bad('not probing: this instance says it CAN onboard',
+    'the probe would create an account and spend root balance — fix canOnboard first')
+} else if (Array.isArray(h?.pool?.size ? [1] : null) || h?.pool) {
+  // POOL MODE. A stranger signing in SHOULD get an account — a pre-funded one,
+  // lent rather than created. The first version of this check expected
+  // ONBOARDING_MISCONFIGURED and reported the 200 as
+  // "A STRANGER WAS ONBOARDED — it created <id> and funded it from root",
+  // which was simply false: nothing was created and root never moved. A check
+  // that cries wolf is worse than none, because a real faucet would then hide
+  // behind a known-false alarm.
+  //
+  // A FIXED identity, not a random one. With a pool a random subject takes a
+  // fresh slot every run, so the check would eat the demo pool it is checking.
+  // A fixed one is idempotent and tests the stronger property as well: a
+  // returning visitor keeps the account they had.
+  const before = await rootBalance()
+  const subject = 'check-hosted-probe'
+  const first = await hit(`${PLAY_URL}/api/session`, {
+    method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: subject }),
+  })
+  const got = first.json()
+  if (first.status !== 200 || !got?.accountId) {
+    bad('a visitor could not be lent a player', `HTTP ${first.status} ${got?.error ?? first.text.slice(0, 70)}`)
+  } else {
+    ok('a visitor is lent their own pre-funded player', `${got.accountId}  (${h.pool.free} of ${h.pool.size} free)`)
+
+    const again = await hit(`${PLAY_URL}/api/session`, {
+      method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: subject }),
+    })
+    const second = again.json()
+    if (second?.accountId === got.accountId) ok('and keeps it when they come back', got.accountId)
+    else bad('a returning visitor was moved to a different account', `${got.accountId} -> ${second?.accountId}`)
+
+    const after = await rootBalance()
+    if (before && after && before === after) {
+      ok('and root paid nothing for it', `${(Number(BigInt(after) / 10n ** 20n) / 10_000).toFixed(4)} NEAR, unmoved`)
+    } else {
+      bad('ROOT BALANCE MOVED while lending a player', `${before} -> ${after}`)
+    }
+  }
 } else {
   const subject = `check-hosted-${Math.random().toString(36).slice(2)}`
   const session = await hit(`${PLAY_URL}/api/session`, {
@@ -190,10 +246,21 @@ const proxied = await hit(`${WEB_URL}/api/health`, { redirect: 'follow' })
 const p = proxied.json()
 if (proxied.status !== 200 || p === null) {
   bad('/api/health is not reachable through the web origin', `HTTP ${proxied.status}`)
-} else if (JSON.stringify(p) === JSON.stringify(h)) {
-  ok('the web origin proxies the play service', 'identical body')
 } else {
-  bad('the proxy answers something different from the origin', JSON.stringify(p).slice(0, 120))
+  // The STABLE fields, not the whole body. `pool.free` is live state and moves
+  // between two reads — which is correct, and which broke a byte-for-byte
+  // comparison the moment a pool existed. What this check is for is "the proxy
+  // reaches the same service", not "the body is frozen".
+  const stable = (b) => JSON.stringify({
+    contracts: b?.contracts, network: b?.network, verifier: b?.verifier,
+    canOnboard: b?.canOnboard, custodial: b?.custodial, relayer: b?.relayer,
+    poolSize: b?.pool?.size ?? null,
+  })
+  if (stable(p) === stable(h)) {
+    ok('the web origin proxies the play service', 'same service, same contracts')
+  } else {
+    bad('the proxy answers a different service', stable(p).slice(0, 110))
+  }
 }
 
 /// A cached /api/me would serve one player's balance to another. Vercel now
@@ -211,6 +278,91 @@ const mine = me.json()
 if (mine?.error === 'SESSION_UNKNOWN') ok('the Authorization header survives the proxy', 'SESSION_UNKNOWN: it arrived and was looked up')
 else if (mine?.error === 'NO_SESSION') bad('the proxy is dropping the Authorization header', 'NO_SESSION: it never arrived')
 else bad('/api/me answered unexpectedly', `HTTP ${me.status} ${mine?.error ?? me.text.slice(0, 80)}`)
+
+// ------------------------------------------------------- the Minecraft server
+//
+// A TCP connect proves SOMETHING is listening on that port. It does not prove a
+// Minecraft server is, and on a tunnel the thing listening might be the
+// tunnel's own error page. Minecraft has a documented handshake for exactly
+// this — Server List Ping — so this speaks it: a handshake packet with
+// next-state 1, a status request, then the JSON the server answers with. The
+// MOTD in that JSON is set by scripts/mc-server.mjs, so a reply carrying it
+// proves OUR server answered rather than something else on the port.
+const mc = hosting.minecraft ?? null
+const mcAddress = process.env.NEARCRAFT_MC ?? mc?.address ?? ''
+
+if (!mcAddress) {
+  // Not a pass. An unadvertised server is a fact to report, and reporting it as
+  // "ok" is how a check stops meaning anything.
+  console.log('\n  no Minecraft address advertised (config/hosting.json minecraft.address is empty),')
+  console.log('  so nothing was pinged. Render cannot host one; see that file for why.\n')
+} else {
+  const [mcHost, mcPortRaw] = mcAddress.split(':')
+  const mcPort = Number(mcPortRaw ?? 25565)
+
+  /// Minecraft's varint: seven bits a byte, high bit means "more follows".
+  const varint = (n) => {
+    const out = []
+    let v = n >>> 0
+    do {
+      let b = v & 0x7f
+      v >>>= 7
+      if (v !== 0) b |= 0x80
+      out.push(b)
+    } while (v !== 0)
+    return Buffer.from(out)
+  }
+  const framed = (payload) => Buffer.concat([varint(payload.length), payload])
+  const mcString = (str) => {
+    const b = Buffer.from(str, 'utf8')
+    return Buffer.concat([varint(b.length), b])
+  }
+
+  const ping = await new Promise((resolve) => {
+    const socket = net.connect({ host: mcHost, port: mcPort })
+    const chunks = []
+    let settled = false
+    const done = (value) => { if (!settled) { settled = true; socket.destroy(); resolve(value) } }
+    socket.setTimeout(20_000)
+    socket.on('timeout', () => done({ error: 'timed out' }))
+    socket.on('error', (e) => done({ error: e?.code ?? e?.message ?? String(e) }))
+    socket.on('connect', () => {
+      const port = Buffer.alloc(2)
+      port.writeUInt16BE(mcPort)
+      // protocol 0 is "I do not care"; every server answers a status request.
+      const handshake = framed(Buffer.concat([
+        varint(0x00), varint(0), mcString(mcHost), port, varint(1),
+      ]))
+      socket.write(Buffer.concat([handshake, framed(varint(0x00))]))
+    })
+    socket.on('data', (chunk) => {
+      chunks.push(chunk)
+      const all = Buffer.concat(chunks)
+      // The JSON is the only brace-delimited run in the reply; find it rather
+      // than re-implementing packet framing for a one-shot check.
+      const start = all.indexOf(0x7b)
+      const end = all.lastIndexOf(0x7d)
+      if (start === -1 || end <= start) return
+      try { done({ status: JSON.parse(all.slice(start, end + 1).toString('utf8')) }) } catch { /* keep reading */ }
+    })
+    socket.on('close', () => done({ error: 'closed before answering' }))
+  })
+
+  if (ping.error) {
+    bad(`the Minecraft server at ${mcAddress} did not answer`, ping.error)
+  } else {
+    const motd = typeof ping.status?.description === 'string'
+      ? ping.status.description
+      : ping.status?.description?.text ?? JSON.stringify(ping.status?.description ?? '')
+    const want = mc?.expect_motd ?? 'NearCraft'
+    if (String(motd).includes(want)) {
+      ok(`a Minecraft server answered at ${mcAddress}`,
+        `"${String(motd).slice(0, 48)}"  ${ping.status?.version?.name ?? '?'}`)
+    } else {
+      bad(`something answered at ${mcAddress} but it is not this server`, String(motd).slice(0, 64))
+    }
+  }
+}
 
 // ------------------------------------------------------------------- verdict
 

@@ -9,11 +9,17 @@ prompt.
 Built for the **NEAR HACKATHON** (1–14 November 2026). Tracks entered:
 `games` (primary), `security`.
 
-**Open it without cloning:** the market page is at
-<https://nearcraft.vercel.app> and reads the deployed contracts live over public
-RPC. The play API behind it is at <https://nearcraft-play.onrender.com>. Both are
-described in [Open it without cloning](#open-it-without-cloning) — including
-what the hosted service deliberately *cannot* do.
+**Play it without cloning.** <https://nearcraft.vercel.app> — type any name,
+get **your own** pre-funded NEAR account, and trade with AI merchants on public
+testnet. You pay no gas and you never see a key. A visitor arriving just now
+typed `judge-0et27q`, was lent `p-19ff5e8c…`, bought an iron ingot
+([`EQsvL2rz…`](https://testnet.nearblocks.io/txns/EQsvL2rzGwNqTEANck4wfzGRnzf5zfmkvzd5GsRqcT9p)),
+and their NEAR balance moved by **0**. Five accounts are lent out, one per
+visitor; the page says how many are left. The play API behind it is at
+<https://nearcraft-play.onrender.com>. Both are described in
+[Open it without cloning](#open-it-without-cloning) — including what the hosted
+service deliberately *cannot* do, and why that is the security control rather
+than a limitation.
 
 ---
 
@@ -660,10 +666,14 @@ and `check:hosted` proves it by sending a random identity and checking that
 nothing was created. **Absent beats guarded:** there is no key to spend, so
 there is nothing to get past.
 
-It holds exactly two keys, built by `npm run secret:render`: the relayer's
+It holds exactly six keys, built by `npm run secret:render`: the relayer's
 (full-access, because a `SignedDelegate` is not a function call, so it pays gas
-for everyone) and **one** player's scoped key — one contract, three methods, no
-transfer, no `AddKey`. No agent keys either, so `/api/agent` refuses there and
+for everyone) and **five** pre-funded players' scoped keys — one contract, three
+methods, no transfer, no `AddKey` each. It lends one per visitor rather than
+creating accounts, so each person gets their own credit and holdings instead of
+sharing. `NEARCRAFT_POOL` is opt-in and never inferred from which keys happen to
+be present, because an instance that silently became a pool would surprise in
+the one direction that matters. No agent keys either, so `/api/agent` refuses there and
 `/api/health` reports `agents: []` rather than offering a command that cannot
 work; `npm run check:hosted` asserts that no worker's key ever reached the host. Withheld: the root account, the `items`/`market`/`guard`
 contract accounts, every merchant and every agent. The local key file has
