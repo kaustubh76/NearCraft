@@ -1,0 +1,12 @@
+{
+  "topic": "minecraft-plugin",
+  "status": "pass",
+  "exit_code": 0,
+  "duration_ms": 2551,
+  "command": "node scripts/mc-test.mjs",
+  "cwd": ".",
+  "proves": "The Minecraft plugin compiles against the hash-pinned Paper 26.3 build 231 API on JDK 25, and its Java checks pass with no Minecraft and no network — the run prints the count, because this sentence said 84 when there were 198 and then 211, which is exactly the hand-written number this project keeps deleting. The substance is the refusals: a strict JSON reader that rejects every relaxation a lenient parser would offer (trailing commas, unquoted keys, comments, NaN, trailing bytes, a raw control character that could smuggle an extra line into game chat) and bounds both nesting depth and input length, because it parses bytes off a socket; a client that REFUSES to send a session id over plain http to anything but loopback, since a session id is bearer authority over a player account; a bounded body read so a game server cannot be made to exhaust its heap by whatever answered on that port; and amounts rendered by string arithmetic rather than through a double, which would silently round a 24-decimal yoctoNEAR balance. Three of those were deliberately broken to confirm they fail — plain http allowed everywhere, the size bound removed, and any answer counted as success — and each went red before being restored. What this does NOT prove is that the plugin loads on a server, that the world can be gathered in, or that an agent can be dispatched: npm run mc:server does all three, and has — 7 of 8 materials gatherable from a pinned seed, and worker-1 buying on its own key.",
+  "output_sha256": "7d14065b8dbc5db6b5bf3c54a82f0f48ec6b2b814ca41795e0f2f297d45026a5",
+  "output_bytes": 208,
+  "recorded_at": "2026-11-14T07:16:41.287Z"
+}

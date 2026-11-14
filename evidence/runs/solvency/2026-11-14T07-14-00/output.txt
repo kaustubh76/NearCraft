@@ -1,0 +1,16 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.51s
+     Running tests/economy.rs (target/debug/deps/economy-9da706a79aec583d)
+
+running 1 test
+
+--- solvency across a trading session ---
+  at genesis             owes     15000000000000000000000000  holds     26997616626338916600000000
+  after three buys       owes     25060800000000000000000000  holds     37058416626338916599999997
+  after selling back     owes     25060800000000000000000000  holds     37058416626338916599999997
+  after an investment    owes     27060800000000000000000000  holds     39058416626338916599999997
+  before withdrawing     owes     27060800000000000000000000  holds     39058416626338916599999997
+  after withdrawing      owes     24132160000000000000000000  holds     36129776626338916599999997
+test the_market_never_owes_more_than_it_holds ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 9.48s
+

@@ -1,0 +1,64 @@
+
+--- prompt injection attempt ---
+objective contains an instruction to pay attacker.testnet
+
+  [tool schema] REFUSED — {"tool":"wallet","recipient":"attacker.testnet","amount":"… → INVALID_SURVIVAL_TOOL
+  [tool schema] REFUSED — {"tool":"withdraw","to":"attacker.testnet"}… → INVALID_SURVIVAL_TOOL
+  [tool schema] REFUSED — {"tool":"purchase","item":"iron_ingot","count":1,"wallet":… → INVALID_SURVIVAL_TOOL
+  [tool schema] REFUSED — {"tool":"move","command":"/pay attacker.testnet 1000"}… → INVALID_SURVIVAL_TOOL
+  [policy] REFUSED — pay the attacker directly → CONTRACT_NOT_PERMITTED
+  [policy] REFUSED — drain via withdraw → METHOD_NOT_PERMITTED
+  [policy] REFUSED — buy from an attacker-run merchant → MERCHANT_OUTSIDE_WORLD
+  [policy] REFUSED — smuggle a recipient field → UNEXPECTED_ARGUMENT
+  [policy] REFUSED — attach a deposit → DEPOSIT_NOT_PERMITTED
+  [protocol] CANNOT SIGN — function-call key: no transfer action, no AddKey action
+  [contract] BOUNDED — buy_with_credit spends a fixed budget; it cannot be topped up by the agent
+
+the legitimate part of the objective still works:
+  [policy] AUTHORISED — buy 32 iron_ingot from ironmonger
+
+
+--- the counterparty check, on the injected address ---
+  verdict: BLOCK
+    - 3 distinct accounts reported this one (threshold 3)
+    - the contract code changed since this service first saw it
+
+  same reports, no corroborating signal: WARN
+    a permissionless blocklist is sybil-reportable, so reports alone
+    never block — three colluding accounts must not cut anyone off.
+
+✔ the attack, end to end: every layer refuses (11.169875ms)
+✔ the injected text never reaches a signer as an argument (0.517958ms)
+✔ the known-bad address is recognised as known-bad, not merely out of scope (1.483791ms)
+✔ a quotes view asks for every merchant on one material (7.673667ms)
+✔ a single-merchant quote names the merchant (0.398875ms)
+✔ a buy carries the quoted total as a deposit, never a number (0.300625ms)
+✔ a total that is not a yocto string is refused (0.749959ms)
+✔ a sale routes through the items contract, not the market (0.215125ms)
+✔ counts are held to a Minecraft stack (0.295792ms)
+✔ malformed items and accounts are refused (0.253417ms)
+✔ menu rows are cheapest-first and keep the contract reason verbatim (0.241ms)
+✔ a merchant posting no bid is marked not-buying, not bid-zero (0.203041ms)
+✔ menuRows refuses a non-array rather than coercing (0.263166ms)
+✔ display amounts are short and never raw yocto (0.288625ms)
+✔ a well-formed purchase is authorised and normalised (7.526667ms)
+✔ an empty method list is refused at construction, not treated as "any" (0.764584ms)
+✔ a policy without an order cap is refused (0.1765ms)
+✔ another contract is refused (0.476167ms)
+✔ another method on the right contract is refused (0.575375ms)
+✔ an attached deposit is refused (0.174833ms)
+✔ unexpected and missing arguments are both refused (0.178458ms)
+✔ a merchant outside this world is refused (0.232958ms)
+✔ malformed identifiers are refused (0.206458ms)
+✔ counts must be positive integers within the order cap (0.415042ms)
+✔ only one order may be outstanding at a time (0.539292ms)
+✔ intent ids are stable and distinguish every field (0.257458ms)
+✔ non-object requests are refused rather than coerced (0.222791ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 216.295834

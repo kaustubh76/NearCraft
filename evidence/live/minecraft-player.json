@@ -1,6 +1,6 @@
 {
   "note": "A headless Minecraft client — a bot, not a person — joined a Paper server, signed in with a seeded demo identity (any string; the OIDC verifier was not the one running). It bought iron and received the ingot in a real PlayerInventory, then sold it back. Every write was relayed, so the player paid no gas. The server ran online-mode=false because a headless client has no Mojang account; npm run mc:server, which is the documented way to run this, keeps online-mode=true.",
-  "recorded_at": "2026-11-14T07:09:39.677Z",
+  "recorded_at": "2026-11-14T07:13:47.525Z",
   "network": "testnet",
   "paper": "26.3 build 231",
   "client": "mineflayer 4.39.0 speaking 1.21.11 through ViaVersion 5.12.2",
@@ -23,7 +23,7 @@
     {
       "what": "the purchase settled on NEAR",
       "ok": true,
-      "detail": "settled on NEAR with Ironmonger (ironmonger)  tx FbrG7W67H7CuerFde3f8tq4dmkUxE8WFsieN2X1zG355"
+      "detail": "settled on NEAR with Ironmonger (ironmonger)  tx 2etiLybRgsLsfJkYbmuXWmLx8WhEtcxejWuuAoB8rb3d"
     },
     {
       "what": "the player paid no gas for it",
@@ -43,7 +43,7 @@
     {
       "what": "the sale settled on NEAR",
       "ok": true,
-      "detail": "settled on NEAR with Ironmonger (ironmonger)  tx 2Hp5WqoUovQQvWcQKaXSXj9Gsh368ZnEkBVj9LBQ2dK3"
+      "detail": "settled on NEAR with Ironmonger (ironmonger)  tx 26mttBgtS2rtGD9pPaVwGDD2KYqg3nVmCJw1Ti7jzsQK"
     },
     {
       "what": "the iron_ingot left the inventory when sold",
