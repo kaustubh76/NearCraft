@@ -19,7 +19,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { resolveFile, TYPES } from './serve-web.mjs'
 import { createPlayService } from '../backend/near/play.mjs'
-import { createOnboarding } from '../backend/near/onboarding.mjs'
+import { createOnboarding, playerAccountId } from '../backend/near/onboarding.mjs'
 import { createRelayer } from '../backend/near/relayer.mjs'
 import { createMarketReader } from '../backend/near/market.mjs'
 import { createOidcVerifier } from '../backend/near/oidc.mjs'
@@ -311,8 +311,39 @@ const server = createServer(async (req, res) => {
   }
 })
 
+/// What to type at the sign-in prompt, VERIFIED rather than asserted.
+///
+/// This line used to read `sign in as "player-1" -> ${manifest.players[0]}`:
+/// a hard-coded token printed beside an account derived from something else
+/// entirely. They looked consistent and were not — the id is
+/// p-sha256("<provider>:<token>")[0..16] (onboarding.mjs:86), and "player-1"
+/// derives p-1d6a3c5d5b87ed0e, not the first player in the manifest. Anyone
+/// following the banner signed in as a different, usually non-existent account.
+///
+/// The hash cannot be inverted, so the only honest way to offer a token is to
+/// try candidates and check what each one derives. If none of them reaches an
+/// account this process can actually sign for, it says so instead of printing a
+/// token nobody verified.
+const DEMO_TOKENS = ['player-1', 'player-2', 'player-3', 'player-4', 'player-5']
+
+function signInHint() {
+  const signable = (manifest.players ?? [])
+    .map((p) => p.account_id)
+    .filter((id) => typeof keys[`${id}#scoped`] === 'string')
+  if (signable.length === 0) return null
+  // Only the seeded verifier derives an id from a string a person can type; a
+  // real OIDC token is issued by the provider and is not guessable from here.
+  if (verifierKind === 'seed') {
+    for (const token of DEMO_TOKENS) {
+      const id = playerAccountId('seed', token, manifest.root)
+      if (signable.includes(id)) return { token, id }
+    }
+  }
+  return { token: null, id: signable.join(', ') }
+}
+
 server.listen(PORT, () => {
-  const player = manifest.players?.[0]?.account_id
+  const hint = signInHint()
   if (!rootKey) {
     console.log('  NOTE      this server cannot create NEW players: no key for the root')
     console.log('            account in .local/. Existing players sign in normally, and')
@@ -324,7 +355,8 @@ server.listen(PORT, () => {
     ? `real OIDC against ${oidc.issuer} (audience ...${String(oidc.audience).slice(-24)})`
     : 'SEEDED demo identity — any string is accepted. No OIDC provider is configured.'}`)
   console.log(`  relayer   ${manifest.relayer.account_id} pays the gas; players pay nothing`)
-  if (player) console.log(`  try       sign in as "player-1" -> ${player}`)
+  if (hint?.token) console.log(`  try       sign in as "${hint.token}" -> ${hint.id}`)
+  else if (hint) console.log(`  signs for ${hint.id} — the login that derives them is not guessable from here`)
   console.log('\n  This server is CUSTODIAL: it holds players\' scoped signing keys from')
   console.log('  .local/ and submits calls for them. Those keys cannot transfer NEAR,')
   console.log('  cannot add keys, and can call only their named methods on one')

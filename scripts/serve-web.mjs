@@ -31,7 +31,11 @@ export const TYPES = {
 /// key. Confining the server to the root is not enough: `.local/` is *inside*
 /// the root, so a prefix check would happily serve a judge's signing key to
 /// anything that can reach this port. A test asserts that it does not.
-const SERVABLE = ['web/', 'backend/', 'deployment.json']
+/// Exported so scripts/build-vercel.mjs stages exactly this tree for a static
+/// host rather than keeping a second allowlist that can drift — the same reason
+/// TYPES above is exported. A deny list would be correct only until someone adds
+/// a path it does not mention; this one is the whole published surface.
+export const SERVABLE = ['web/', 'backend/', 'deployment.json']
 
 /// Map a request URL to a servable file, or null if it is not one.
 ///

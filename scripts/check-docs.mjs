@@ -406,6 +406,64 @@ try {
   if (!/ENOENT/.test(e?.message ?? '')) fail('deployment.json', `could not be read: ${e.message}`)
 }
 
+// 8c. The hosted URLs, which are otherwise the one claim here nothing can see.
+//
+// Rule 2 skips `https?:` links on purpose — it cannot tell a real address from a
+// dead one. So a URL in these documents was, until this rule, unpoliced: it
+// could rot through three redeployments exactly the way the `git checkout`
+// commit in 8a did, and the failure mode is the worst kind. BASELINE.md:120
+// states it: "a provenance link a judge cannot open is worse than no link."
+//
+// This does not test whether the URLs answer — `npm run check:hosted` does that,
+// over the network, which is why it is not in `npm test`. This checks the
+// cheaper and more easily broken thing: that every address these documents
+// advertise is one that check:hosted actually tests, and that the README still
+// advertises both. Same anti-vacuity trap as the rules above — deleting the row
+// fails rather than quietly disabling the rule.
+try {
+  const hosting = JSON.parse(await readFile(new URL('config/hosting.json', ROOT), 'utf8'))
+  const tested = new Set([hosting.web.url, hosting.play.url])
+
+  // Any address on a host we deploy to, anywhere in the documents.
+  const HOSTED = /https:\/\/[A-Za-z0-9._-]+\.(?:vercel\.app|onrender\.com)/g
+
+  for (const doc of DOCS) {
+    const text = await readFile(new URL(doc, ROOT), 'utf8')
+    for (const m of text.matchAll(HOSTED)) {
+      if (!tested.has(m[0])) {
+        fail(doc, `advertises ${m[0]}, which is not the address config/hosting.json records `
+          + `and check:hosted tests (${[...tested].join(', ')}) — a stale link`)
+      } else { commandsChecked++ }
+    }
+  }
+
+  for (const [which, url] of [['web', hosting.web.url], ['play', hosting.play.url]]) {
+    if (!readmeText.includes(url)) {
+      fail('README.md', `config/hosting.json records the ${which} deployment at ${url}, but the `
+        + 'README never names it — a reader is told to clone when there is a URL they could open')
+    } else { commandsChecked++ }
+  }
+
+  // vercel.json cannot read a config file, so the proxy destination is the one
+  // place the play URL is necessarily written twice. If the two drift, the page
+  // calls /api/* and reaches a host that is no longer the service — and every
+  // other check here would still pass, because each half is internally
+  // consistent. So compare them.
+  const vercel = JSON.parse(await readFile(new URL('vercel.json', ROOT), 'utf8'))
+  const proxy = (vercel.rewrites ?? []).find((r) => String(r.source).startsWith('/api/'))
+  if (!proxy) {
+    fail('vercel.json', 'has no /api/ rewrite, so the hosted page cannot reach the play service '
+      + '— and the page calls /api/* relative, expecting same origin')
+  } else if (!String(proxy.destination).startsWith(hosting.play.url)) {
+    fail('vercel.json', `proxies /api/ to ${proxy.destination}, but config/hosting.json records the `
+      + `play service at ${hosting.play.url} — the page would call a host that is not the service`)
+  } else { commandsChecked++ }
+} catch (e) {
+  // No hosting config is a legitimate state: a fork that deploys nowhere has
+  // nothing to be wrong about. A malformed one is not.
+  if (!/ENOENT/.test(e?.message ?? '')) fail('config/hosting.json', `could not be read: ${e.message}`)
+}
+
 for (const { what, dir, pattern, claim, only, ext, all, denominator } of COUNTED_CLAIMS) {
   const actual = await countInFiles(dir, pattern, only ?? null, ext ?? '.rs')
   // `all` checks EVERY place the number is written, not just the first. The

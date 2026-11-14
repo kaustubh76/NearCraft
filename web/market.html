@@ -186,6 +186,36 @@ function renderPlay(msg) {
   if (!PLAY.health) { el.hidden = true; return; }
   el.hidden = false;
 
+  // DO NOT "tidy" this back to player-1.
+  //
+  // The account id is p-sha256("<provider>:<token>")[0..16] (onboarding.mjs:86),
+  // so the token alone decides which account this button lands on:
+  //
+  //   player-1 -> p-1d6a3c5d5b87ed0e   nothing there
+  //   player-2 -> p-6928989ea1393602   nothing there
+  //   player-3 -> p-62b0b2438ca03ae4   on chain, and the account deployment.json
+  //                                    records as "the player npm run mc:up demos"
+  //
+  // player-1 was the default and reached an account that does not exist. Locally
+  // that is invisible, because a local run has the root key and simply creates
+  // it. On the hosted deployment there is deliberately no root key, so the old
+  // default sent every visitor straight into ONBOARDING_MISCONFIGURED on their
+  // first click.
+  const DEFAULT_TOKEN = 'player-3';
+
+  // Say so before the button is pressed rather than after. /api/health reports
+  // canOnboard, and a refusal a visitor could have been warned about reads like
+  // a broken demo instead of a deployment that is holding fewer keys on purpose.
+  const onboarding = PLAY.health.canOnboard === false
+    ? '<p class="note"><strong>This deployment cannot create accounts.</strong> It holds no key for the ' +
+      'root account, so it signs only for players already on chain &mdash; <code>' + esc(DEFAULT_TOKEN) +
+      '</code> is one of them. Any other login is refused with <code>ONBOARDING_MISCONFIGURED</code>: ' +
+      'that is the server being accurate, not broken. Seeded login accepts any string and funds a new ' +
+      'account from the root account, so a public instance that could onboard would be a faucet &mdash; ' +
+      'withholding the key is what shuts it. Run <code>npm run play</code> locally with a root key to ' +
+      'onboard a fresh identity.</p>'
+    : '';
+
   const login = PLAY.health.verifier === 'oidc'
     ? 'Signed in through a real OIDC provider.'
     : 'No OIDC provider is configured, so this demo accepts <strong>any string</strong> as a seeded identity. ' +
@@ -195,12 +225,13 @@ function renderPlay(msg) {
   if (!PLAY.sessionId) {
     el.innerHTML = '<h2>Play</h2>' +
       '<div class="row">' +
-      '<input id="tok" value="player-1" aria-label="login token">' +
+      '<input id="tok" value="' + esc(DEFAULT_TOKEN) + '" aria-label="login token">' +
       '<button id="signin">Sign in</button>' +
       (msg ? '<span class="reason">' + esc(msg) + '</span>' : '') +
       '</div>' +
       '<p class="note">' + login + ' Your account id is derived from the login, so the same identity ' +
-      'always lands on the same account. You are never shown a key, because you never have one.</p>';
+      'always lands on the same account. You are never shown a key, because you never have one.</p>' +
+      onboarding;
     $('#signin').addEventListener('click', signIn);
     return;
   }

@@ -11,6 +11,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { resolveFile } from '../../scripts/serve-web.mjs'
+import { playerAccountId } from '../../backend/near/onboarding.mjs'
 
 const ROOT = new URL('../../', import.meta.url).pathname
 const MODULE_URL = new URL('../../backend/near/market.mjs', import.meta.url).href
@@ -268,6 +269,48 @@ test('a real OIDC provider is described as one', async () => {
   const { play } = await renderPage(playableFetch({ playable: true, verifier: 'oidc', custodial: true }))
   assert.match(play.innerHTML, /real OIDC provider/i)
   assert.ok(!/any string/i.test(play.innerHTML), 'must not call a real provider a seeded one')
+})
+
+test('the sign-in default reaches an account that actually exists', async () => {
+  // The bug this exists to catch: the panel shipped value="player-1", and the
+  // account id is derived from the token by a one-way hash — so the default
+  // silently pointed at p-1d6a3c5d5b87ed0e, which nobody ever onboarded. A
+  // local run hides it (the root key just creates the account); the hosted
+  // deployment holds no root key on purpose, so the first click of the demo
+  // refused.
+  //
+  // Asserted as a RELATIONSHIP, not a literal. Hard-coding 'player-3' would
+  // pass for a token that had stopped deriving anything, which is the same
+  // mistake in a new place. This re-derives the id and insists the real
+  // deployment claims it.
+  const { play } = await renderPage(playableFetch())
+  const token = play.innerHTML.match(/id="tok" value="([^"]+)"/)?.[1]
+  assert.ok(token, 'the panel no longer offers a login token input')
+
+  const manifest = JSON.parse(await readFile(new URL('../../deployment.json', import.meta.url), 'utf8'))
+  const derived = playerAccountId('seed', token, manifest.root)
+  const claimed = manifest.players.map((pl) => pl.account_id)
+
+  assert.ok(claimed.includes(derived),
+    `the panel offers "${token}", which derives ${derived} — not a player in deployment.json. ` +
+    `Claimed: ${claimed.join(', ')}`)
+})
+
+test('a deployment that cannot onboard says so before the button is pressed', async () => {
+  const { play } = await renderPage(playableFetch(
+    { playable: true, verifier: 'seed', custodial: true, canOnboard: false }))
+  assert.match(play.innerHTML, /cannot create accounts/i)
+  assert.match(play.innerHTML, /ONBOARDING_MISCONFIGURED/)
+  assert.match(play.innerHTML, /Sign in/, 'the button still has to be there for the one player it can sign for')
+})
+
+test('a deployment that can onboard does not warn about something that is not true', async () => {
+  // Without this, the warning above could be unconditional and the test above
+  // would still pass — a check that cannot fail.
+  const { play } = await renderPage(playableFetch(
+    { playable: true, verifier: 'seed', custodial: true, canOnboard: true }))
+  assert.ok(!/cannot create accounts/i.test(play.innerHTML),
+    'a server that CAN onboard must not claim it cannot')
 })
 
 test('trade buttons need a session, not merely an API', async () => {

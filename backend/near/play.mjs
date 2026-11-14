@@ -299,6 +299,13 @@ export function createPlayService({
             // signer" — telling a player their login was refused when their
             // login was fine and the server was misconfigured. Identity
             // refusals carry a code from the verifier; chain failures do not.
+            // Carried as a code, not inferred from a message. onboarding.mjs
+            // now refuses before it touches disk or chain when there is no root
+            // key, so the specific error arrives intact and does not have to be
+            // recognised by its prose.
+            if (e?.code === 'ONBOARDING_MISCONFIGURED') {
+              throw new PlayRefusal('ONBOARDING_MISCONFIGURED', e.detail ?? e.message)
+            }
             if (/Please set a signer|no signer|NoSigner/i.test(e?.message ?? '')) {
               throw new PlayRefusal('ONBOARDING_MISCONFIGURED',
                 'this server cannot create accounts: it holds no key for the root account. ' +

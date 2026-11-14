@@ -1,0 +1,79 @@
+# The hosted play service, written down rather than only clicked.
+#
+# The running service was created through the Render API, not from this file;
+# this is the readable form of that service, so anyone can see what is deployed
+# without needing an account. Two things a Blueprint CANNOT express, both
+# load-bearing:
+#
+#  1. THE SECRET FILE. Blueprints have no field for one, so
+#     /etc/secrets/nearcraft-keys.json is uploaded separately (the API, or one
+#     dashboard paste). It holds exactly two keys, built by
+#     `node scripts/build-render-secret.mjs`:
+#
+#       relayer.nearcraftmc.testnet                    pays gas; full-access by
+#                                                      necessity, since a
+#                                                      SignedDelegate is not a
+#                                                      function call
+#       p-62b0b2438ca03ae4...#scoped                   one player; one contract,
+#                                                      three methods, no
+#                                                      transfer, no AddKey
+#
+#     NOT the root key, NOT the items/market/guard contract keys, NOT the
+#     merchants or agents. .local/nearcraft-keys.json has sixteen entries and
+#     three of them can redeploy the live economy; they do not leave the
+#     deploying machine.
+#
+#  2. WHY THERE IS NO ROOT KEY. Seeded login accepts any string as an identity
+#     and funds a new account from root (onboarding.mjs:104), with no rate limit
+#     on /api/session. A public instance that could onboard would therefore be a
+#     faucet anyone could drain in a shell loop. Withholding the key is the
+#     control: serve-play.mjs:151 leaves rootKey null, /api/health reports
+#     canOnboard:false, and a new identity gets the ONBOARDING_MISCONFIGURED
+#     refusal play.mjs:305 already defines. Absent beats guarded.
+services:
+  - type: web
+    name: nearcraft-play
+    runtime: node
+    region: singapore
+    plan: free
+    branch: main
+
+    # NOT thrift. relayer.mjs:107 serialises sign-and-submit per player in an
+    # in-process Map, because createSignedMetaTransaction reads the player's
+    # access-key nonce and signs nonce+1; two instances reintroduce the measured
+    # `Invalid delegate nonce` failure. Sessions (play.mjs:152) and link codes
+    # (play.mjs:173) are in-process too. One instance is a correctness
+    # requirement, so do not scale this up.
+    numInstances: 1
+
+    # near-api-js is the only runtime dependency; mineflayer and near-sandbox are
+    # devDependencies and have no business on a web host.
+    buildCommand: npm ci --omit=dev
+    startCommand: node scripts/serve-play.mjs
+
+    # play.mjs:261 — reports playable, canOnboard, verifier, custodial and the
+    # contract ids. A health check that reads the real configuration.
+    healthCheckPath: /api/health
+
+    # Deploys are triggered deliberately. A push that redeployed mid-demo would
+    # drop every in-process session and link code.
+    autoDeployTrigger: "off"
+
+    envVars:
+      # Named explicitly. serve-play.mjs:1 warns that drifting onto the seed
+      # verifier by accident is the failure mode; saying it makes it deliberate
+      # and keeps /api/health honest about which verifier is live.
+      - key: NEARCRAFT_LOGIN
+        value: seed
+      # serve-play.mjs:35 interpolates this into `file://${...}`, so it must be
+      # absolute.
+      - key: NEARCRAFT_KEYS
+        value: /etc/secrets/nearcraft-keys.json
+      # package.json pins engines.node to ">=26.3.1", which is unbounded —
+      # Render resolves that to whatever `latest` happens to be, and its own
+      # docs say "always include an upper bound". NODE_VERSION has the highest
+      # precedence of the four mechanisms, so the version is pinned here rather
+      # than left to drift. Nothing on the play path needs 26: near-api-js asks
+      # >=22.22.2 and CI runs the suite on Node 22.
+      - key: NODE_VERSION
+        value: 26.4.0

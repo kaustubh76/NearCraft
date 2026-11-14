@@ -328,6 +328,21 @@ claims in this repository five times.
   over plain http to a non-loopback host narrows how one could leak; it does not
   put a door on the service. Running the service on a shared host without one is
   a deployment mistake, and nothing here stops you making it.
+
+  **There is now a shared host, and this warning still applies to it.**
+  <https://nearcraft-play.onrender.com> runs the service publicly, so what the
+  paragraph above describes is live: anyone who finds it can sign in as the one
+  player it can sign for and trade with that player's testnet credit, spending
+  the relayer's gas. What was done instead of writing the door was to take away
+  everything the door would have been protecting. That instance holds two keys —
+  the relayer's and one player's scoped key — and **not** the root account, the
+  `items`/`market`/`guard` contract accounts, the merchants or the agents. With
+  no root key it cannot create an account at all, which matters because the
+  seeded login accepts any string and funds a new account from root: a public
+  instance that *could* onboard would be a faucet. `/api/health` reports
+  `canOnboard: false`, and `npm run check:hosted` proves it by sending a random
+  identity and checking that nothing was created. Narrower, not closed. The gate
+  — a per-IP limit on `/api/session` and a shared secret — is still not built.
 - **EthCraft's world, menus, escrow, item delivery, voice and property
   protection remain unported**, and this does not change that.
 

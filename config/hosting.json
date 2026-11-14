@@ -1,0 +1,21 @@
+{
+  "note": "Where the two HTTP surfaces are hosted. Public URLs only — no credentials. Read by scripts/check-hosted.mjs, which tests them, and by scripts/check-docs.mjs, which refuses to let the README claim an address nothing tests.",
+  "web": {
+    "url": "https://nearcraft.vercel.app",
+    "host": "Vercel",
+    "serves": "the read-only market page, staged by scripts/build-vercel.mjs from the same allowlist scripts/serve-web.mjs serves",
+    "holds_no_keys": true
+  },
+  "play": {
+    "url": "https://nearcraft-play.onrender.com",
+    "host": "Render",
+    "serves": "the play API the market page and the Minecraft plugin call",
+    "custodial": true,
+    "can_onboard": false,
+    "keys_held": [
+      "relayer.nearcraftmc.testnet",
+      "p-62b0b2438ca03ae4.nearcraftmc.testnet#scoped"
+    ],
+    "keys_withheld": "the root account, the items/market/guard contract accounts, every merchant and every agent"
+  }
+}

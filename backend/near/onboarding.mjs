@@ -368,6 +368,25 @@ export function createOnboarding({
         return await finishSignIn(accountId, KeyPair.fromString(parked), identity, null)
       }
 
+      // Refuse here, where it is knowable, rather than at the first side effect.
+      //
+      // Reaching this line means the account does not exist and must be created,
+      // which needs the root account's key. Without it the old order failed two
+      // statements later instead — at `bootstrapStore.set`, writing into a
+      // `.local/` the host does not have — and that failure matches none of the
+      // patterns play.mjs special-cases, so it arrived as
+      // `401 IDENTITY_REJECTED: ENOENT ... .local/nearcraft-bootstrap.json`.
+      // A visitor was told their login was rejected when their login was fine
+      // and the deployment simply cannot onboard, which is the exact
+      // mislabelling play.mjs:289 was written to undo. Found on the hosted
+      // deployment, which runs with no root key deliberately, so for that
+      // instance this is the normal path and not an edge case.
+      if (!rootKey) {
+        throw new OnboardingError('ONBOARDING_MISCONFIGURED',
+          'this deployment holds no key for the root account, so it cannot create accounts. '
+          + 'Players already onboarded can still sign in.')
+      }
+
       const bootstrap = KeyPair.fromRandom('ed25519')
 
       // Parked BEFORE the account is created, not after. The key is only worth

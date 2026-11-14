@@ -150,3 +150,67 @@ test('playerAccountId on the instance agrees with the bare function', () => {
   })
   assert.equal(onboarding.playerAccountId('g', 's'), playerAccountId('g', 's', ROOT))
 })
+
+test('with no root key, a new identity is refused BEFORE anything is written', async () => {
+  // The hosted deployment runs with no root key on purpose: seeded login accepts
+  // any string and funds a new account from root, so an instance that could
+  // onboard would be a faucet. That makes this the NORMAL path there, not an
+  // edge case — and it was wrong. `signIn` parked the bootstrap key first, so
+  // the first thing to fail was a write into a `.local/` the host does not
+  // have, and ENOENT matches none of the patterns play.mjs special-cases. The
+  // visitor got `401 IDENTITY_REJECTED: ENOENT ... nearcraft-bootstrap.json`:
+  // told their login was rejected when their login was fine.
+  //
+  // So this asserts the ORDER, not just the code. A refusal that still touched
+  // the store first would satisfy a test that only checked the error.
+  const writes = []
+  const realFetch = globalThis.fetch
+  // Any failure makes exists() answer false, which is the branch under test, and
+  // keeps the suite offline.
+  globalThis.fetch = async () => { throw new Error('no network in this test') }
+  try {
+    const onboarding = createOnboarding({
+      rootAccountId: ROOT, rootKey: null, marketContract: `market.${ROOT}`,
+      playerMethods: ['buy_with_credit'],
+      verifyIdentity: async (t) => ({ provider: 'seed', subject: String(t) }),
+      bootstrapStore: {
+        get: async () => null,
+        set: async (accountId, secret) => { writes.push([accountId, secret]) },
+        delete: async () => {},
+      },
+    })
+    await assert.rejects(() => onboarding.signIn('a-stranger'), (e) => {
+      assert.equal(e.code, 'ONBOARDING_MISCONFIGURED')
+      assert.match(e.detail, /no key for the root account/)
+      return true
+    })
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  assert.deepEqual(writes, [],
+    'refused, but only after parking a full-access key — the write must not happen at all')
+})
+
+test('an already-onboarded player still signs in with no root key', async () => {
+  // The other half: withholding the root key must cost onboarding and nothing
+  // else. If this failed, the hosted deployment would sign for nobody and the
+  // posture would be useless rather than narrow.
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async () => ({
+    ok: true, status: 200,
+    json: async () => ({ jsonrpc: '2.0', id: 1, result: { amount: '1', locked: '0', code_hash: '11111111111111111111111111111111', storage_usage: 1 } }),
+  })
+  try {
+    const onboarding = createOnboarding({
+      rootAccountId: ROOT, rootKey: null, marketContract: `market.${ROOT}`,
+      playerMethods: ['buy_with_credit'],
+      verifyIdentity: async (t) => ({ provider: 'seed', subject: String(t) }),
+      bootstrapStore: { get: async () => null, set: async () => {}, delete: async () => {} },
+    })
+    const out = await onboarding.signIn('someone-who-exists')
+    assert.equal(out.created, false)
+    assert.deepEqual([...out.permittedMethods], ['buy_with_credit'])
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})

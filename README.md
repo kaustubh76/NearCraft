@@ -10,6 +10,12 @@ prompt.
 Built for the **NEAR HACKATHON** (1–14 November 2026). Tracks entered:
 `games` (primary), `security`, `swarms`.
 
+**Open it without cloning:** the market page is at
+<https://nearcraft.vercel.app> and reads the deployed contracts live over public
+RPC. The play API behind it is at <https://nearcraft-play.onrender.com>. Both are
+described in [Open it without cloning](#open-it-without-cloning) — including
+what the hosted service deliberately *cannot* do.
+
 ---
 
 ## Status — 12 November 2026
@@ -30,7 +36,7 @@ column before the description.
 | **Sandbox integration tests** | **Built and passing.** A real local NEAR node via `near-workspaces`. 18 tests: 4 prove a restricted key's limits *at the protocol level*, 9 cover the cross-contract buy/sell/rollback paths, the economy, the money invariant and solvency, 3 the state migration (including bricking a contract with a plain redeploy and rescuing it), 1 that every view is callable *as a view*, and 1 that the node starts. These counts are checked by `npm run check:docs` against the tests that actually exist — they had rotted to 74 and 12. |
 | **Deployed to NEAR testnet** | **Yes.** `items.nearcraftmc.testnet`, `market.nearcraftmc.testnet`, `guard.nearcraftmc.testnet` — 5 merchants, 2 agents, 4 players. `npm run reads` and `npm run keys` query it with no credentials. |
 | The economy simulation | **Built and passing.** 20 buyers, 6 strategies, 5 merchants, 8 rounds, no model calls — **135 real transactions in 26.4s** on a real nearcore node — 5.1 trades a second, measured over three runs — buyers running concurrently. `npm run sim` |
-| `web/market.html` | **Built, reads the live chain, and is playable.** Every merchant's ask, bid, stock band and the contract's own reason string, read from the deployed contract over public RPC with no API key. Falls back to the retained simulation snapshot when offline, and says which it is showing. With `npm run play` behind it the page also signs players in and trades: buy and sell on each row, and a strip showing your NEAR balance before and after every call. 16 tests. `npm run web` / `npm run play` |
+| `web/market.html` | **Built, reads the live chain, and is playable.** Every merchant's ask, bid, stock band and the contract's own reason string, read from the deployed contract over public RPC with no API key. Falls back to the retained simulation snapshot when offline, and says which it is showing. With `npm run play` behind it the page also signs players in and trades: buy and sell on each row, and a strip showing your NEAR balance before and after every call. 19 tests. `npm run web` / `npm run play` |
 | **A real stake in a merchant on public testnet** | **Done.** [`CwWMeG5t…`](https://testnet.nearblocks.io/txns/CwWMeG5txLAobS7dozomcBqKBZturJ7iKiY21e3FDEUG) — 0.05 NEAR staked in the Ironmonger and recorded by the contract, then [`8s6e5vqw…`](https://testnet.nearblocks.io/txns/8s6e5vqwysZj8pMRubF8TkngzZ5erfr7EMdvUyr1pJYA), a gasless purchase whose margin repaid 0.005924 NEAR of it. `ledger_total` rose by exactly the stake and the purchase moved it by nothing. `npm run live:stake`, retained in `evidence/live/`. |
 | **A real agent transaction on public testnet** | **Done.** [`CJXc3vK8Yom…`](https://testnet.nearblocks.io/txns/CJXc3vK8YomMVAZn6j6R6FHKqtSF9t4Ev4Tbcq4eqnhZ) — an agent signing with a `buy_with_credit`-scoped key, after being parked for human approval. `npm run live:agent`, retained in `evidence/live/`. |
 | `npm run agent` — an agent shopping end to end | **Built and runnable.** An agent with a scoped key on a real node: an unknown merchant parked for a human, the same merchant clearing itself once trust accrued, and a prompt-injected objective **blocked** by the on-chain guard. |
@@ -599,6 +605,68 @@ and a line; none of them is claimed to be harmless.
 - **An audit is not a proof of correctness.** The second round found three
   things the first one missed, including a money bug in a function the first
   round had read. There is no reason to believe a third would find nothing.
+
+## Open it without cloning
+
+| | | |
+|---|---|---|
+| the market page | <https://nearcraft.vercel.app> | Vercel. No keys, no API, nothing to sign with. |
+| the play API | <https://nearcraft-play.onrender.com/api/health> | Render. Custodial, and holds two keys. |
+
+`npm run check:hosted` checks both from outside, over the network. It is **not**
+part of `npm test`, for the same reason `npm run verify:deployed` is not: the
+suite has to pass offline from a clean clone.
+
+**The page is the read-only one.** It is staged by `npm run deploy:vercel`, which
+copies the allowlist `scripts/serve-web.mjs` serves — `web/`, `backend/`,
+`deployment.json` — into an empty directory and uploads that. Not an ignore
+file: `.local/` holds the deploying account's key *and* the three contract
+accounts' keys, and a deny list is correct only until someone adds a path it
+does not mention. Nothing outside the allowlist is on disk at upload time, and
+`check:hosted` then tries eight paths that must not be reachable and fails if
+any of them answers.
+
+**The hosted play service cannot create accounts, and that is the point.** The
+seeded login accepts *any string* as an identity and funds a new account from
+the root account, with no rate limit on `/api/session`. A public instance that
+could onboard would therefore be a faucet anyone could empty in a shell loop —
+taking the funded merchants and the live demo with it. So the root key is simply
+not there:
+
+```sh
+curl -s https://nearcraft-play.onrender.com/api/health
+# ... "canOnboard": false, "custodial": true ...
+```
+
+`/api/health` reporting `canOnboard: false` is that absence, visible. An unknown
+identity gets `ONBOARDING_MISCONFIGURED` — a refusal the service already had,
+and `check:hosted` proves it by sending a random identity and checking that
+nothing was created. **Absent beats guarded:** there is no key to spend, so
+there is nothing to get past.
+
+It holds exactly two keys, built by `npm run secret:render`: the relayer's
+(full-access, because a `SignedDelegate` is not a function call, so it pays gas
+for everyone) and **one** player's scoped key — one contract, three methods, no
+transfer, no `AddKey`. Withheld: the root account, the `items`/`market`/`guard`
+contract accounts, every merchant and every agent. The local key file has
+sixteen entries and three of them can redeploy this economy; those do not leave
+the deploying machine. `npm run secret:render` refuses to put them in the file.
+
+**Still open, and not dressed up.** The hosted service is *unauthenticated for
+the one player it can sign for*: anyone who opens the page can sign in as that
+player and trade with its testnet credit, and each call spends the relayer's
+gas. The protocol bounds it — the key reaches one contract and three methods and
+is re-read from the chain on every `/api/me` — but it is not a gate, and
+[docs/MINECRAFT.md](docs/MINECRAFT.md) keeps saying so. Closing it properly is a
+per-IP limit plus a shared secret, which is not built.
+
+Two operational facts worth knowing before you click. The service runs on
+Render's free tier, which spins down after fifteen idle minutes and takes about
+a minute to wake — **a slow first request is the free tier, not a hang.** And it
+runs as a single instance deliberately: `backend/near/relayer.mjs` serialises
+sign-and-submit per player in an in-process map, because a delegate nonce is
+read from the chain and signed as nonce+1, so a second instance reintroduces a
+failure this project has already measured.
 
 ## Verify it yourself
 
