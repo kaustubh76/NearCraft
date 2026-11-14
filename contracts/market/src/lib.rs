@@ -27,6 +27,7 @@ use near_sdk::{
     PromiseError,
 };
 
+pub mod events;
 pub mod pricing;
 use pricing::{buy_price, restock_plan, scarcity_band, unit_price, BPS};
 
@@ -355,18 +356,18 @@ impl Market {
         self.add_to_treasury(merchant_id.clone(), amount - bought_out);
         let reopened = was_closed && !self.is_closed(merchant_id.clone());
 
-        env::log_str(&format!(
-            "{} invested {} NEAR in {merchant_id}{}",
-            env::predecessor_account_id(),
-            near_str(amount),
-            if reopened {
-                ", which reopened its shop"
-            } else if was_closed {
-                ", which is not yet enough to reopen its shop"
-            } else {
-                ""
-            }
-        ));
+        events::emit_investment(events::InvestmentLog {
+            backer_id: &env::predecessor_account_id(),
+            merchant_id: &merchant_id,
+            amount: events::amount(amount),
+            reopened,
+            // Investing cannot close a shop, so: open unless it was closed and
+            // this stake did not reopen it. Computed from what is already in
+            // scope rather than asking the chain again, which would be gas for
+            // a fact we hold.
+            merchant_open: !was_closed || reopened,
+            source: "deposit",
+        });
         reopened
     }
 
@@ -390,11 +391,18 @@ impl Market {
         self.add_to_treasury(merchant_id.clone(), amount.0 - bought_out);
         let reopened = was_closed && !self.is_closed(merchant_id.clone());
 
-        env::log_str(&format!(
-            "{who} invested {} NEAR of credit in {merchant_id}{}",
-            near_str(amount.0),
-            if reopened { ", which reopened its shop" } else { "" }
-        ));
+        events::emit_investment(events::InvestmentLog {
+            backer_id: &who,
+            merchant_id: &merchant_id,
+            amount: events::amount(amount.0),
+            reopened,
+            // Investing cannot close a shop, so: open unless it was closed and
+            // this stake did not reopen it. Computed from what is already in
+            // scope rather than asking the chain again, which would be gas for
+            // a fact we hold.
+            merchant_open: !was_closed || reopened,
+            source: "credit",
+        });
         reopened
     }
 
@@ -464,11 +472,11 @@ impl Market {
                 );
                 self.credit(&b.account_id, owed);
                 bought_out = owed;
-                env::log_str(&format!(
-                    "{who} bought out {}, repaying the {} NEAR it was owed",
-                    b.account_id,
-                    near_str(owed)
-                ));
+                events::emit_backer_bought_out(events::BackerBoughtOutLog {
+                    backer_id: &b.account_id,
+                    merchant_id: &merchant_id,
+                    repaid: events::amount(owed),
+                });
                 (amount - owed, 0)
             }
             // Free slot, or the last backer was repaid in full.
@@ -531,12 +539,12 @@ impl Market {
             merchant_id.clone(),
             Backer { repaid: U128(backer.repaid.0 + payout), ..backer.clone() },
         );
-        env::log_str(&format!(
-            "{} earned {} NEAR of margin from {merchant_id}; {} NEAR of its stake outstanding",
-            backer.account_id,
-            near_str(payout),
-            near_str(still_owed)
-        ));
+        events::emit_margin_paid(events::MarginPaidLog {
+            backer_id: &backer.account_id,
+            merchant_id,
+            payout: events::amount(payout),
+            outstanding: events::amount(still_owed),
+        });
     }
 
     /// The one place a treasury grows from outside. Shared so the owner's
@@ -738,8 +746,23 @@ impl Market {
             // shrink every repayment.
             self.add_to_treasury(merchant_id.clone(), paid.0);
             self.attribute_margin(&merchant_id, &item, count.0, paid.0);
+            // Emitted HERE and not in `buy`: `buy` only starts the cross-contract
+            // call, and whether the goods moved is known one receipt later.
+            // Announcing it at the request would announce purchases that then
+            // rolled back. This method, and `sell`'s twin below, are the two
+            // central events of this economy and emitted nothing at all before.
+            events::emit_purchase(events::PurchaseLog {
+                buyer_id: &buyer_id,
+                merchant_id: &merchant_id,
+                item: &item,
+                units: events::amount(count.0),
+                paid: events::amount(paid.0),
+            });
             return true;
         }
+        // Kept before `item` is moved into the key, so the rollback event can
+        // still name the material.
+        let rolled_back_item = item.clone();
         let key = ListingKey { merchant_id: merchant_id.clone(), item };
         if let Some(listing) = self.listings.get(&key).cloned() {
             self.listings.insert(
@@ -767,10 +790,13 @@ impl Market {
         // reserved. No new field, no migration — the same shape as the fix the
         // sell side got.
         self.credit(&buyer_id, paid.0);
-        env::log_str(&format!(
-            "delivery failed; purchase rolled back and {} yoctoNEAR credited to {}",
-            paid.0, buyer_id
-        ));
+        events::emit_purchase_rolled_back(events::PurchaseRolledBackLog {
+            buyer_id: &buyer_id,
+            merchant_id: &merchant_id,
+            item: &rolled_back_item,
+            units: events::amount(count.0),
+            credited: events::amount(paid.0),
+        });
         false
     }
 
@@ -899,8 +925,16 @@ impl Market {
             // reserved proceeds into the seller's credit and the ledger total
             // is whole again.
             self.credit(&seller_id, proceeds.0);
+            events::emit_sale(events::SaleLog {
+                seller_id: &seller_id,
+                merchant_id: &merchant_id,
+                item: &item,
+                units: events::amount(count.0),
+                proceeds: events::amount(proceeds.0),
+            });
             return true;
         }
+        let unwound_item = item.clone();
         let key = ListingKey { merchant_id: merchant_id.clone(), item };
         // The units never arrived, so neither did their cost.
         self.remove_basis(&key, proceeds.0);
@@ -917,7 +951,7 @@ impl Market {
         }
         if let Some(mut merchant) = self.merchants.get(&merchant_id).cloned() {
             merchant.treasury = U128(merchant.treasury.0 + proceeds.0);
-            self.merchants.insert(merchant_id, merchant);
+            self.merchants.insert(merchant_id.clone(), merchant);
         }
         // Nothing to take back. The seller was never credited — that happens
         // in the Ok branch above, once the materials have actually arrived.
@@ -929,9 +963,13 @@ impl Market {
         // difference was money this contract had invented. A clamp that
         // silently absorbs a shortfall is a check that cannot fail, pointed at
         // a balance.
-        env::log_str(&format!(
-            "could not pull materials from {seller_id}; sale unwound (approval missing, stale or exhausted?)"
-        ));
+        events::emit_sale_unwound(events::SaleUnwoundLog {
+            seller_id: &seller_id,
+            merchant_id: &merchant_id,
+            item: &unwound_item,
+            units: events::amount(count.0),
+            reason: "the market could not pull the materials — approval missing, stale or exhausted",
+        });
         false
     }
 
@@ -1114,11 +1152,13 @@ impl Market {
         // In flight, the cost is owed to nobody and the ledger under-states
         // what the contract holds. Under, never over.
 
-        env::log_str(&format!(
-            "{merchant_id} restocked {units} {item} at {} NEAR each, paying {} NEAR",
-            near_str(cost_per_unit),
-            near_str(cost)
-        ));
+        events::emit_restock(events::RestockLog {
+            merchant_id: &merchant_id,
+            item: &item,
+            units: events::amount(units as u128),
+            cost: events::amount(cost),
+            unit_cost: Some(events::amount(cost_per_unit)),
+        });
 
         // Minting is what makes the shelf real. Raising `stock` without it would
         // attribute goods this contract does not hold, and the next purchase
@@ -1172,10 +1212,12 @@ impl Market {
         // The treasury restore above is now unconditional AND correct: the house
         // was never paid, so there is nothing to take back and no clamp to hide
         // a shortfall behind.
-        env::log_str(&format!(
-            "{merchant_id} could not mint {} {item}; the restock was unwound",
-            units.0
-        ));
+        events::emit_restock_unwound(events::RestockUnwoundLog {
+            merchant_id: &merchant_id,
+            item: &item,
+            units: events::amount(units.0),
+            reason: "the items contract would not mint the units; the restock was unwound",
+        });
         false
     }
 
@@ -1214,10 +1256,11 @@ impl Market {
             return true;
         }
         self.credit(&who, amount.0);
-        env::log_str(&format!(
-            "payout of {} NEAR to {who} failed; the credit has been restored",
-            near_str(amount.0)
-        ));
+        events::emit_payout_failed(events::PayoutFailedLog {
+            account_id: &who,
+            amount: events::amount(amount.0),
+            restored_to: "credit",
+        });
         false
     }
 
@@ -1268,10 +1311,11 @@ impl Market {
                 Merchant { treasury: U128(merchant.treasury.0 + amount.0), ..merchant },
             );
         }
-        env::log_str(&format!(
-            "treasury payout of {} NEAR to {merchant_id} failed; the treasury has been restored",
-            near_str(amount.0)
-        ));
+        events::emit_payout_failed(events::PayoutFailedLog {
+            account_id: &merchant_id,
+            amount: events::amount(amount.0),
+            restored_to: "treasury",
+        });
         false
     }
 
@@ -1850,7 +1894,11 @@ mod tests {
             m.quote(ironmonger(), IRON.to_string(), 1).merchant_bid.is_some(),
             "a reopened merchant posts a bid again, which is what a seller cares about"
         );
-        assert!(get_logs().iter().any(|l| l.contains("which reopened its shop")));
+        let log = get_logs().into_iter().find(|l| l.contains("investment")).expect("no investment event");
+        assert!(log.starts_with("EVENT_JSON:"));
+        assert!(log.contains(r#""event":"investment""#));
+        assert!(log.contains(r#""reopened":true"#));
+        assert!(log.contains(r#""merchant_open":true"#));
     }
 
     #[test]
@@ -1860,7 +1908,13 @@ mod tests {
         let reopened = m.invest(ironmonger());
         assert!(!reopened, "it did not reopen, and must not pretend otherwise");
         assert!(m.is_closed(ironmonger()));
-        assert!(get_logs().iter().any(|l| l.contains("not yet enough to reopen")));
+        // The three-state case the prose carried and one boolean could not:
+        // a rescue that fell short is `reopened: false` AND `merchant_open:
+        // false`, which an ordinary top-up of an open merchant is not.
+        let log = get_logs().into_iter().find(|l| l.contains("investment")).expect("no investment event");
+        assert!(log.contains(r#""reopened":false"#));
+        assert!(log.contains(r#""merchant_open":false"#),
+            "a stake too small to reopen must be distinguishable from a top-up of an open shop");
     }
 
     #[test]
@@ -2441,7 +2495,10 @@ mod tests {
 
         assert!(!ok);
         assert_eq!(m.credit_of(player()), U128(owed), "credit restored in full");
-        assert!(get_logs().iter().any(|l| l.contains("credit has been restored")));
+        let log = get_logs().into_iter().find(|l| l.contains("payout_failed")).expect("no payout event");
+        assert!(log.starts_with("EVENT_JSON:"));
+        assert!(log.contains(r#""standard":"nearcraft_market""#));
+        assert!(log.contains(r#""restored_to":"credit""#), "it must say WHICH ledger took the money back");
     }
 
     #[test]
@@ -2484,7 +2541,9 @@ mod tests {
         // reporting closed, with its money somewhere else. The floor is
         // measured against the treasury, so the two are not interchangeable.
         assert_eq!(m.credit_of(ironmonger()), U128(0), "not paid back as credit");
-        assert!(get_logs().iter().any(|l| l.contains("treasury has been restored")));
+        let log = get_logs().into_iter().find(|l| l.contains("payout_failed")).expect("no payout event");
+        assert!(log.contains(r#""restored_to":"treasury""#),
+            "a treasury payout must restore the TREASURY, not a credit — the two are different ledgers");
     }
 
     #[test]
@@ -2507,7 +2566,19 @@ mod tests {
         assert_eq!(m.quote(ironmonger(), IRON.to_string(), 1).stock, U128(256), "stock restored");
         assert_eq!(m.merchant(ironmonger()).unwrap().treasury.0, treasury_before, "treasury restored");
         assert_eq!(m.credit_of(player()), U128(total), "player made whole");
-        assert!(get_logs().iter().any(|l| l.contains("rolled back")));
+        // The NEP-297 envelope, not the prose. This asserted
+        // `contains("rolled back")` against a plain log line; a rollback is now
+        // an event, and asserting the standard, the version, the event name and
+        // the fields is strictly more than the sentence was worth.
+        let log = get_logs().into_iter().find(|l| l.contains("purchase_rolled_back")).expect("no rollback event");
+        assert!(log.starts_with("EVENT_JSON:"), "must use the NEP-297 prefix");
+        assert!(log.contains(r#""standard":"nearcraft_market""#));
+        assert!(log.contains(r#""version":"1.0.0""#));
+        assert!(log.contains(r#""event":"purchase_rolled_back""#));
+        assert!(log.contains(r#""item":"iron_ingot""#), "the rollback must still name the material");
+        // Credited back as a base-10 string, because a yoctoNEAR u128 cannot
+        // survive a JSON number.
+        assert!(log.contains(&format!(r#""credited":"{total}""#)));
     }
 
     #[test]
@@ -2520,6 +2591,100 @@ mod tests {
         assert!(m.on_items_delivered(player(), ironmonger(), IRON.to_string(), U128(5), U128(total), Ok(())));
         assert_eq!(m.quote(ironmonger(), IRON.to_string(), 1).stock, U128(251));
         assert_eq!(m.credit_of(player()), U128(0));
+    }
+
+    // --------------------------------------------- the events that were silent
+
+    /// `buy` and `sell` emitted NOTHING. Not a plain log line — nothing — and
+    /// neither did `settle_purchase`, `on_items_delivered` or
+    /// `on_materials_pulled`. The twelve plain log lines this contract had were
+    /// two migration notes and ten mostly-rollback paths, so the two
+    /// central events of the economy were invisible. The TOKEN leg of a trade
+    /// was visible, because the market calls `mt_transfer` on the items
+    /// contract and that emits a proper NEP-245 event; the money leg was not.
+    /// Nothing named the merchant, the price or the credit spent.
+    #[test]
+    fn a_settled_purchase_emits_a_nep297_event() {
+        let mut m = market();
+        let total = m.quote(ironmonger(), IRON.to_string(), 5).total.0;
+        ctx(player(), total);
+        let _ = m.buy(ironmonger(), IRON.to_string(), 5);
+        ctx("market.test.near".parse().unwrap(), 0);
+        assert!(m.on_items_delivered(player(), ironmonger(), IRON.to_string(), U128(5), U128(total), Ok(())));
+
+        let log = get_logs().into_iter().find(|l| l.contains(r#""event":"purchase""#))
+            .expect("a settled purchase emitted no event");
+        assert!(log.starts_with("EVENT_JSON:"), "NEP-297 requires the prefix");
+        // Its OWN standard, not nep245: this contract has no mt_ methods and
+        // claims no NEP-245 conformance, so borrowing that name would tell an
+        // indexer to expect token_ids and amounts arrays that do not exist.
+        assert!(log.contains(r#""standard":"nearcraft_market""#));
+        assert!(log.contains(r#""version":"1.0.0""#));
+        assert!(log.contains(&format!(r#""buyer_id":"{}""#, player())));
+        assert!(log.contains(&format!(r#""merchant_id":"{}""#, ironmonger())));
+        assert!(log.contains(r#""item":"iron_ingot""#));
+        assert!(log.contains(r#""units":"5""#));
+        // Base-10 string: a yoctoNEAR u128 has up to 39 digits and a JSON
+        // number carries about 15.
+        assert!(log.contains(&format!(r#""paid":"{total}""#)));
+    }
+
+    /// A purchase is announced where it SETTLES, not where it is requested.
+    /// `buy` only starts a cross-contract call; whether the goods moved is known
+    /// one receipt later. Emitting at the request would announce purchases that
+    /// then rolled back.
+    #[test]
+    fn a_requested_purchase_is_not_announced_as_settled() {
+        let mut m = market();
+        let total = m.quote(ironmonger(), IRON.to_string(), 5).total.0;
+        ctx(player(), total);
+        let _ = m.buy(ironmonger(), IRON.to_string(), 5);
+        assert!(
+            !get_logs().iter().any(|l| l.contains(r#""event":"purchase""#)),
+            "buy announced a purchase before delivery was known",
+        );
+    }
+
+    #[test]
+    fn a_settled_sale_emits_a_nep297_event() {
+        let mut m = market();
+        let bid = m.quote(ironmonger(), IRON.to_string(), 1).merchant_bid.unwrap().0;
+        let proceeds = bid * 4;
+        ctx("market.test.near".parse().unwrap(), 0);
+        assert!(m.on_materials_pulled(
+            seller(), ironmonger(), IRON.to_string(), U128(4), U128(proceeds), Ok(()),
+        ));
+
+        let log = get_logs().into_iter().find(|l| l.contains(r#""event":"sale""#))
+            .expect("a settled sale emitted no event");
+        assert!(log.starts_with("EVENT_JSON:"));
+        assert!(log.contains(r#""standard":"nearcraft_market""#));
+        assert!(log.contains(&format!(r#""seller_id":"{}""#, seller())));
+        assert!(log.contains(r#""units":"4""#));
+        assert!(log.contains(&format!(r#""proceeds":"{proceeds}""#)));
+    }
+
+    /// Every event this contract emits must carry the envelope, not just the
+    /// ones a test happened to name. A new emitter that forgot `standard` or
+    /// `version` would be invisible to an indexer and pass every assertion
+    /// above.
+    #[test]
+    fn every_event_this_contract_emits_carries_the_envelope() {
+        let mut m = market();
+        let total = m.quote(ironmonger(), IRON.to_string(), 2).total.0;
+        ctx(player(), total);
+        let _ = m.buy(ironmonger(), IRON.to_string(), 2);
+        ctx("market.test.near".parse().unwrap(), 0);
+        assert!(m.on_items_delivered(player(), ironmonger(), IRON.to_string(), U128(2), U128(total), Ok(())));
+
+        let events: Vec<String> = get_logs().into_iter().filter(|l| l.starts_with("EVENT_JSON:")).collect();
+        assert!(!events.is_empty(), "no events at all — this test would pass vacuously");
+        for log in &events {
+            assert!(log.contains(r#""standard":"nearcraft_market""#), "no standard: {log}");
+            assert!(log.contains(r#""version":"1.0.0""#), "no version: {log}");
+            assert!(log.contains(r#""event":""#), "no event name: {log}");
+            assert!(log.contains(r#""data":[{"#), "data must be an array of records: {log}");
+        }
     }
 
     // ------------------------------------------------------------ selling
@@ -3022,7 +3187,12 @@ mod tests {
         assert_eq!(m.credit_of(seller()), U128(0), "and still owed nothing");
         assert_eq!(m.quote(ironmonger(), IRON.to_string(), 1).stock, U128(256), "shelf restored");
         assert_eq!(m.merchant_treasury_for(ironmonger()), treasury_before, "treasury restored");
-        assert!(get_logs().iter().any(|l| l.contains("sale unwound")));
+        let log = get_logs().into_iter().find(|l| l.contains("sale_unwound")).expect("no unwind event");
+        assert!(log.starts_with("EVENT_JSON:"), "must use the NEP-297 prefix");
+        assert!(log.contains(r#""standard":"nearcraft_market""#));
+        assert!(log.contains(r#""event":"sale_unwound""#));
+        assert!(log.contains(r#""item":"iron_ingot""#));
+        assert!(log.contains("approval"), "the reason must still say what went wrong");
     }
 
     /// A failed pull must not restore a treasury it cannot pay for.

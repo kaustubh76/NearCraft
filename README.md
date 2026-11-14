@@ -28,7 +28,7 @@ column before the description.
 | `RULES.md` — round rules + sequence diagram | **Done.** Required by the `swarms` prompt before any code. |
 | `BASELINE.md` + hash-verified baseline import | **Done, machine-checked.** `npm run verify:baseline` |
 | `contracts/items` — NEP-245 materials | **Built and tested.** 33 unit tests. NEP-245 core 10/10 + Enumeration 2/2 + Approval Management **6/6**, verified against the compiled ABI. Three spec ambiguities are decided and disclosed in the module header, including that `mt_is_approved` takes an explicit `owner_id` — the spec's signature names none, which a multi-token cannot answer. |
-| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 103 unit tests (the pricing rule, the payout rollbacks, restocking, investment and the money invariant — including the three interleaved ones that caught `sell`, `buy` and `restock` each paying somebody before the goods had moved). |
+| `contracts/market` — merchants, pricing, treasury | **Built and tested.** 107 unit tests (the pricing rule, the payout rollbacks, restocking, investment and the money invariant — including the three interleaved ones that caught `sell`, `buy` and `restock` each paying somebody before the goods had moved). |
 | `contracts/guard` — the shared blocklist, on-chain | **Built and tested.** 13 unit tests. Public, attributed by the runtime, not deletable by us. |
 | `backend/near/counterparty.mjs` — allow/warn/block | **Built and tested.** 23 tests. Pure scoring, no API key, no indexer. |
 | `backend/near` — signer, policy, warn→human approval | **Built and tested.** 90 tests across policy, counterparty, human approval, the plugin contract and the injection demo. |
@@ -608,9 +608,11 @@ and a line; none of them is claimed to be harmless.
   type. What it cannot see is whether the number coming back is the right
   number. `mt_balance_of` returning a correctly-typed lie passes it. Semantics
   rest on the unit tests, and that is a real limit, not a formality.
-- **`market` emits 12 plain `env::log_str` lines**, none of them NEP-297
-  events and none shape-asserted. `items` is the contract with a real event
-  envelope.
+- **`market`'s events do not make it NEP-245 conformant**, and are not meant
+  to. It is not a multi-token contract, has no `mt_` methods and claims none;
+  its events are its own standard under NEP-297, `nearcraft_market` version
+  `1.0.0`, across 10 kinds of NEP-297 event. An indexer has to be told that
+  name — nothing would tell it.
 - **An audit is not a proof of correctness.** The second round found three
   things the first one missed, including a money bug in a function the first
   round had read. There is no reason to believe a third would find nothing.
@@ -681,13 +683,26 @@ failure this project has already measured.
 
 ## Verify it yourself
 
-**Rehearsed the way you will meet it.** On 12 November 2026 this repository was
-cloned fresh from GitHub into an empty directory — no `.local/`, no
-`node_modules`, no build cache — and every command below was run against that
-clone. It found a real failure on the first one: `npm test` exited 1, because a
-documentation check added hours earlier flagged the gitignored `.local/`
-directory as missing. Fixed, re-cloned, re-run. `npm install && npm test` now
-passes from clean — 183 checks on the day of the rehearsal, more now, and the
+**Rehearsed the way you will meet it, twice, and it failed both times.**
+
+On 12 November 2026 this repository was cloned fresh from GitHub into an empty
+directory — no `.local/`, no `node_modules`, no build cache — and every command
+below was run against that clone. It found a real failure on the first one:
+`npm test` exited 1, because a documentation check added hours earlier flagged
+the gitignored `.local/` directory as missing. Fixed, re-cloned, re-run.
+
+**On 14 November it was done again, because twenty-five files had changed since,
+and `npm test` exited 1 again — five times over, on `.local/oidc.json`.** The
+same defect one level deeper: the fix in November had taught the *directory*
+rule to skip gitignored paths, and the *file* rule never consulted it, so a
+gitignored file named in three documents still had to exist. It passed on the
+machine that wrote the documents only because that untracked file was sitting
+there. Green because of something not in the repository is the trap this whole
+section exists to catch, and it caught it. `npm run sim` failed on the same
+clone too: it is documented under *"what a judge can watch in sixty seconds"*
+with no mention of the build it needs. Both fixed, both now policed by
+`npm run check:docs`, and re-cloned from the fix to confirm — `npm install`
+with no engine warning, then `npm install && npm test` — 183 checks on the day of the rehearsal, more now, and the
 point is that the number comes from the run rather than from this sentence,
 which is exactly why this sentence no longer carries one. `npm run reads` and `npm run keys` work with
 no credentials, `npm run check:nep245` without a build says

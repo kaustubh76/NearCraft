@@ -316,9 +316,15 @@ const COUNTED_CLAIMS = [
   // Counted the moment a number for it was written down. The README said
   // "twelve" while the source had thirteen, which is the same hand-written
   // count rotting for the same reason as every one above it.
-  { what: 'market env::log_str lines', dir: 'contracts/market/src/',
-    pattern: /env::log_str\(/g,
-    claim: /\b(\d+) plain `env::log_str` lines\b/ },
+  //
+  // It counted plain log lines, which was the right thing to count while they
+  // were the gap. They are events now, so the number worth policing is the
+  // number of event KINDS — and the old row's rewording tripped the
+  // anti-vacuity guard, which is how this entry came to be replaced rather
+  // than quietly left matching nothing.
+  { what: 'market NEP-297 event kinds', dir: 'contracts/market/src/',
+    pattern: /^pub fn emit_/gm,
+    claim: /\b(\d+) kinds of NEP-297 event\b/ },
 ]
 
 // 7. The Minecraft plugin must stay NEW code.
